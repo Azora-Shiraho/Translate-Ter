@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useTranslation } from 'react-i18next';
 import {
@@ -64,32 +64,43 @@ function App(): JSX.Element {
   const [checkingRuntime, setCheckingRuntime] = useState(false);
   const [checkingProvider, setCheckingProvider] = useState<string>();
 
+  const translateStage = useCallback((stage: JobStage) => i18n.t(stageLabel(stage)), [i18n]);
+
   useEffect(() => {
-    void bootstrap();
+    let mounted = true;
+
+    void (async () => {
+      const [nextSettings, nextModels, nextHealth] = await Promise.all([
+        window.translateTer.getSettings(),
+        window.translateTer.assets.listWhisperModels(),
+        window.translateTer.native.health().catch(() => undefined)
+      ]);
+      if (!mounted) return;
+      setSettings(nextSettings);
+      setModels(nextModels);
+      setNativeHealth(nextHealth);
+      await i18n.changeLanguage(nextSettings.uiLanguage);
+      if (mounted) setMessage(i18n.t('ready'));
+    })();
+
     const unsubscribe = window.translateTer.jobs.onEvent((event) => {
       if (event.type === 'snapshot') setJob(event.job);
-      if (event.type === 'progress') setMessage(event.message ?? t(stageLabel(event.stage)));
+      if (event.type === 'progress') setMessage(event.message ?? translateStage(event.stage));
       if (event.type === 'error') setMessage(event.message);
     });
-    return unsubscribe;
-  }, [t]);
-
-  async function bootstrap(): Promise<void> {
-    const [nextSettings, nextModels, nextHealth] = await Promise.all([
-      window.translateTer.getSettings(),
-      window.translateTer.assets.listWhisperModels(),
-      window.translateTer.native.health().catch(() => undefined)
-    ]);
-    setSettings(nextSettings);
-    setModels(nextModels);
-    setNativeHealth(nextHealth);
-    void i18n.changeLanguage(nextSettings.uiLanguage);
-  }
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, [i18n, translateStage]);
 
   async function updateSettings(patch: Partial<AppSettingsPublic>): Promise<void> {
     const next = await window.translateTer.saveSettings(patch);
     setSettings(next);
-    if (patch.uiLanguage) void i18n.changeLanguage(patch.uiLanguage);
+    if (patch.uiLanguage) {
+      await i18n.changeLanguage(patch.uiLanguage);
+      setMessage(i18n.t('ready'));
+    }
   }
 
   async function refreshModels(): Promise<void> {
