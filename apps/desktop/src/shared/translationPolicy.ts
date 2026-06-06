@@ -53,6 +53,7 @@ export type RetryPolicy = {
   initialBackoffMs: number;
   maxBackoffMs: number;
   jitterRatio: number;
+  backoffStrategy?: 'exponential' | 'linear' | 'fixed';
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   random?: () => number;
 };
@@ -237,19 +238,39 @@ export async function retryWithExponentialBackoff<T>(
 
 export function computeBackoffMs(
   attemptZeroBased: number,
-  policy: Pick<RetryPolicy, 'initialBackoffMs' | 'maxBackoffMs' | 'jitterRatio' | 'random'>
+  policy: Pick<RetryPolicy, 'initialBackoffMs' | 'maxBackoffMs' | 'jitterRatio' | 'random' | 'backoffStrategy'>
 ): number {
-  const base = Math.min(policy.maxBackoffMs, policy.initialBackoffMs * 2 ** attemptZeroBased);
+  const base = Math.min(policy.maxBackoffMs, computeBaseDelayMs(attemptZeroBased, policy.initialBackoffMs, policy.backoffStrategy));
   const jitter = base * policy.jitterRatio;
   const random = policy.random ?? Math.random;
   return Math.round(base - jitter + random() * jitter * 2);
+}
+
+function computeBaseDelayMs(
+  attemptZeroBased: number,
+  initialBackoffMs: number,
+  strategy: RetryPolicy['backoffStrategy'] = 'exponential'
+): number {
+  switch (strategy) {
+    case 'fixed':
+      return initialBackoffMs;
+    case 'linear':
+      return initialBackoffMs * (attemptZeroBased + 1);
+    case 'exponential':
+    default:
+      return initialBackoffMs * 2 ** attemptZeroBased;
+  }
 }
 
 export async function translateWithPolicy(
   provider: TranslationProvider,
   request: TranslationRequest,
   options: {
-    rateLimiter: TokenBucket;
+    rateLimiter?: TokenBucket;
+    rateLimiters?: {
+      requests: TokenBucket;
+      tokens: TokenBucket;
+    };
     circuitBreaker: CircuitBreaker;
     policy: RetryPolicy;
     checkpointStore?: BatchCheckpointStore;
@@ -267,9 +288,17 @@ export async function translateWithPolicy(
   await options.checkpointStore?.save(checkpoint);
 
   const estimatedTokens = estimateRequestTokens(request);
+  const rateLimiters = options.rateLimiters ?? {
+    requests: options.rateLimiter,
+    tokens: options.rateLimiter
+  };
+  if (!rateLimiters.requests || !rateLimiters.tokens) {
+    throw new Error('Translation rate limiters are required.');
+  }
+
   try {
-    await options.rateLimiter.take(1, { signal: request.signal, sleep: options.policy.sleep });
-    await options.rateLimiter.take(estimatedTokens, { signal: request.signal, sleep: options.policy.sleep });
+    await rateLimiters.requests.take(1, { signal: request.signal, sleep: options.policy.sleep });
+    await rateLimiters.tokens.take(estimatedTokens, { signal: request.signal, sleep: options.policy.sleep });
 
     const result = await retryWithExponentialBackoff(async (attempt) => {
       const startedAt = new Date().toISOString();

@@ -33,7 +33,12 @@ export class JobManager extends EventEmitter {
       targetLanguage: request.targetLanguage,
       asrProviderId: request.asrProviderId,
       whisperModelId: request.whisperModelId,
+      allowWhisperAssetDownload: request.allowWhisperAssetDownload ?? true,
+      allowCloudAsrUpload: request.allowCloudAsrUpload ?? false,
       translationProviderPriority: request.translationProviderPriority,
+      translationConcurrency: request.translationConcurrency ?? 2,
+      translationRequestsPerMinute: request.translationRequestsPerMinute ?? 60,
+      translationTokenBudgetPerMinute: request.translationTokenBudgetPerMinute ?? 60_000,
       warnings: [],
       createdAt: now,
       updatedAt: now
@@ -50,12 +55,7 @@ export class JobManager extends EventEmitter {
 
   async start(jobId: string): Promise<void> {
     const job = this.get(jobId);
-    if (job.asrProviderId === 'mock.asr') {
-      await this.startMockAsr(job);
-      return;
-    }
-
-    await this.setProgress(job, 'checking-runtime', 8, 'Checking local whisper.cpp runtime.');
+    await this.setProgress(job, 'checking-runtime', 8, 'Checking ASR runtime.');
     const nativeHealth = await this.nativeBackend.health();
     if (!nativeHealth.capabilities.includes('asr.transcribe')) {
       job.warnings.push({
@@ -64,12 +64,15 @@ export class JobManager extends EventEmitter {
       });
     }
 
-    const runtime = await this.whisperAssets.ensureRuntime({
-      modelId: job.whisperModelId,
-      allowDownload: false
-    });
+    const isLocalWhisper = job.asrProviderId === 'local.whisper.cpp';
+    const runtime = isLocalWhisper
+      ? await this.whisperAssets.ensureRuntime({
+          modelId: job.whisperModelId,
+          allowDownload: job.allowWhisperAssetDownload
+        })
+      : undefined;
 
-    if (runtime.actionRequired && runtime.actionRequired !== 'none') {
+    if (runtime?.actionRequired && runtime.actionRequired !== 'none') {
       job.warnings.push({
         code: runtime.actionRequired,
         message: runtime.message ?? 'Local runtime needs setup before real transcription.'
@@ -77,22 +80,51 @@ export class JobManager extends EventEmitter {
     }
 
     await this.setProgress(job, 'probing', 18, 'Probing media.');
-    await delay(100);
+    const probe = await this.nativeBackend.probeMedia({ mediaPath: job.mediaPath });
+    if (!probe.ok && job.asrProviderId !== 'mock.asr') {
+      this.fail(job, probe.error?.code ?? 'ProbeFailed', probe.error?.message ?? 'Native backend failed to probe media.', true);
+      return;
+    }
+
     await this.setProgress(job, 'extracting-audio', 38, 'Extracting audio.');
-    await delay(100);
+    const extraction = await this.nativeBackend.extractAudio({
+      mediaPath: job.mediaPath,
+      segmentDurationSec: 60
+    });
+    if (!extraction.ok && job.asrProviderId !== 'mock.asr') {
+      this.fail(job, extraction.error?.code ?? 'AudioExtractFailed', extraction.error?.message ?? 'Native backend failed to extract audio.', true);
+      return;
+    }
+
     await this.setProgress(job, 'transcribing', 72, 'Transcribing through native backend.');
 
     const response = await this.nativeBackend.transcribe({
+      jobId: job.id,
       mediaPath: job.mediaPath,
+      audioPath: extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path,
       modelId: job.whisperModelId,
       sourceLanguage: job.sourceLanguage,
-      runtime: {
+      targetLanguage: job.targetLanguage,
+      asrProviderId: job.asrProviderId,
+      runtime: runtime
+        ? {
         binaryPath: runtime.binary.expectedPath,
         modelPath: runtime.model.expectedPath
-      }
+          }
+        : undefined
     });
 
     if (!response.ok) {
+      if (job.asrProviderId === 'mock.asr') {
+        job.subtitleDocument = mockDocument(job);
+        job.step = 'subtitles';
+        job.warnings.push({
+          code: response.error?.code ?? 'MockFallback',
+          message: response.error?.message ?? 'Native backend unavailable; generated mock subtitles.'
+        });
+        await this.setProgress(job, 'completed', 100, 'Mock transcription complete.');
+        return;
+      }
       this.fail(job, response.error?.code ?? 'NativeBackendError', response.error?.message ?? 'Native backend failed.', Boolean(response.error?.retryable));
       return;
     }
@@ -113,16 +145,23 @@ export class JobManager extends EventEmitter {
     if (!job.subtitleDocument) throw new Error('No subtitle document is available to translate.');
     await this.setProgress(job, 'translating', 35, 'Translating subtitle batches.');
     const secret = this.settings.getSecret('openai.compatible');
-    const scheduler = new TranslationScheduler([
-      new MockTranslationProvider(),
-      new OpenAICompatibleTranslationProvider({
-        id: 'openai.compatible',
-        baseUrl: secret?.baseUrl ?? 'https://api.openai.com/v1',
-        apiKey: secret?.apiKey,
-        model: 'gpt-4o-mini',
-        priority: 10
-      })
-    ]);
+    const scheduler = new TranslationScheduler(
+      [
+        new MockTranslationProvider(),
+        new OpenAICompatibleTranslationProvider({
+          id: 'openai.compatible',
+          baseUrl: secret?.baseUrl ?? 'https://api.openai.com/v1',
+          apiKey: secret?.apiKey,
+          model: secret?.model ?? 'gpt-4o-mini',
+          priority: 10
+        })
+      ],
+      {
+        concurrency: job.translationConcurrency,
+        rpm: job.translationRequestsPerMinute,
+        tokenBudgetPerMinute: job.translationTokenBudgetPerMinute
+      }
+    );
     const result = await scheduler.translateDocument(job.subtitleDocument, {
       sourceLanguage: job.sourceLanguage === 'auto' ? 'en' : job.sourceLanguage,
       targetLanguage: job.targetLanguage,
@@ -172,19 +211,6 @@ export class JobManager extends EventEmitter {
     await delay(100);
   }
 
-  private async startMockAsr(job: JobSnapshot): Promise<void> {
-    await this.setProgress(job, 'checking-runtime', 8, 'Using explicit mock ASR provider.');
-    await this.setProgress(job, 'probing', 18, 'Probing media.');
-    await delay(100);
-    await this.setProgress(job, 'extracting-audio', 38, 'Extracting audio.');
-    await delay(100);
-    await this.setProgress(job, 'transcribing', 72, 'Generating mock subtitle segments.');
-    await delay(100);
-    job.subtitleDocument = createMockDocument(job);
-    job.step = 'subtitles';
-    await this.setProgress(job, 'completed', 100, 'Mock transcription complete.');
-  }
-
   private fail(job: JobSnapshot, code: string, message: string, retryable: boolean): void {
     job.stage = 'failed';
     job.error = { code, message, retryable };
@@ -222,7 +248,7 @@ function nativePayloadToDocument(payload: unknown, job: JobSnapshot): SubtitleDo
   return undefined;
 }
 
-function createMockDocument(job: JobSnapshot): SubtitleDocument {
+function mockDocument(job: JobSnapshot): SubtitleDocument {
   const now = new Date().toISOString();
   return {
     id: `doc-${job.id}`,
@@ -230,9 +256,24 @@ function createMockDocument(job: JobSnapshot): SubtitleDocument {
     sourceLanguage: job.sourceLanguage,
     targetLanguage: job.targetLanguage,
     segments: [
-      segment('seg-0001', 1, 900, 3100, 'Welcome to Translate-Ter.'),
-      segment('seg-0002', 2, 3600, 6200, 'This first build keeps every subtitle timestamp stable.'),
-      segment('seg-0003', 3, 6900, 9800, 'You can edit text, translate batches, and export SRT.')
+      {
+        id: `${job.id}-seg-1`,
+        index: 1,
+        startMs: 0,
+        endMs: 3200,
+        sourceText: 'This is a local mock subtitle generated for workflow testing.',
+        status: 'transcribed',
+        confidence: 0.99
+      },
+      {
+        id: `${job.id}-seg-2`,
+        index: 2,
+        startMs: 3600,
+        endMs: 7200,
+        sourceText: 'Configure whisper.cpp or a cloud ASR provider for real transcription.',
+        status: 'transcribed',
+        confidence: 0.99
+      }
     ],
     metadata: {
       inputMediaPath: job.mediaPath,
@@ -240,18 +281,6 @@ function createMockDocument(job: JobSnapshot): SubtitleDocument {
       asrProvider: job.asrProviderId,
       warnings: [...job.warnings]
     }
-  };
-}
-
-function segment(id: string, index: number, startMs: number, endMs: number, sourceText: string): SubtitleSegment {
-  return {
-    id,
-    index,
-    startMs,
-    endMs,
-    sourceText,
-    confidence: 0.92,
-    status: 'transcribed'
   };
 }
 

@@ -5,8 +5,11 @@ import {
   ProviderError,
   TokenBucket,
   createMockTranslationProvider,
+  computeBackoffMs,
+  createProviderBuckets,
   retryWithExponentialBackoff,
-  translateWithPolicy
+  translateWithPolicy,
+  estimateRequestTokens
 } from './translationPolicy';
 
 describe('translation policy', () => {
@@ -61,6 +64,19 @@ describe('translation policy', () => {
     expect(breaker.snapshot()).toMatchObject({ state: 'closed', failures: 0 });
   });
 
+  it('computes multiple backoff strategies deterministically', () => {
+    const base = {
+      initialBackoffMs: 100,
+      maxBackoffMs: 1000,
+      jitterRatio: 0,
+      random: () => 0.5
+    };
+
+    expect(computeBackoffMs(2, { ...base, backoffStrategy: 'exponential' })).toBe(400);
+    expect(computeBackoffMs(2, { ...base, backoffStrategy: 'linear' })).toBe(300);
+    expect(computeBackoffMs(2, { ...base, backoffStrategy: 'fixed' })).toBe(100);
+  });
+
   it('records checkpoint attempts while translating through policy', async () => {
     const provider = createMockTranslationProvider({ failTimes: 1 });
     const checkpointStore = new InMemoryBatchCheckpointStore();
@@ -91,5 +107,43 @@ describe('translation policy', () => {
     expect(result.translations[0].translatedText).toBe('[zh-CN] Hello');
     expect(checkpoint?.status).toBe('completed');
     expect(checkpoint?.providerAttempts).toHaveLength(2);
+  });
+
+  it('uses independent request and token buckets for policy translation', async () => {
+    const provider = createMockTranslationProvider();
+    const request = {
+      batchId: 'batch-2',
+      sourceLanguage: 'en',
+      targetLanguage: 'zh-CN',
+      segments: [{ id: 'seg-1', sourceText: 'Hello world' }]
+    };
+    const requestBucket = new TokenBucket(1, 1);
+    const tokenBucket = new TokenBucket(100, 100);
+
+    await translateWithPolicy(provider, request, {
+      rateLimiters: {
+        requests: requestBucket,
+        tokens: tokenBucket
+      },
+      circuitBreaker: new CircuitBreaker({ failureThreshold: 2, cooldownMs: 1000, now: () => 0 }),
+      policy: {
+        maxRetries: 0,
+        initialBackoffMs: 1,
+        maxBackoffMs: 1,
+        jitterRatio: 0,
+        sleep: async () => {}
+      }
+    });
+
+    expect(requestBucket.available(0)).toBe(0);
+    expect(tokenBucket.available(0)).toBe(100 - estimateRequestTokens(request));
+  });
+
+  it('creates provider request and token buckets from provider config', () => {
+    const provider = createMockTranslationProvider();
+    const buckets = createProviderBuckets(provider.config, 0);
+
+    expect(buckets.requests.capacity).toBe(provider.config.rpm);
+    expect(buckets.tokens.capacity).toBe(provider.config.tokenBudgetPerMinute);
   });
 });

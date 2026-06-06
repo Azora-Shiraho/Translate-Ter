@@ -10,9 +10,13 @@ import type {
 } from '@shared/models';
 
 export type NativeTranscribePayload = {
+  jobId?: string;
   mediaPath: string;
+  audioPath?: string;
   modelId: string;
   sourceLanguage: string;
+  targetLanguage?: string;
+  asrProviderId?: string;
   runtime?: {
     binaryPath?: string;
     modelPath?: string;
@@ -26,6 +30,17 @@ const MISSING_EXECUTABLE_ERROR: NativeProtocolError = {
 };
 
 export class NativeBackendClient {
+  private processPromise: Promise<import('node:child_process').ChildProcessWithoutNullStreams | undefined> | undefined;
+  private readonly pending = new Map<
+    string,
+    {
+      type: NativeProtocolType;
+      resolve: (value: NativeProtocolResponse<any>) => void;
+      timeout: NodeJS.Timeout;
+    }
+  >();
+  private stdoutBuffer = '';
+
   async health(): Promise<NativeHealth> {
     const response = await this.request<NativeHealth>('runtime.health', {});
     if (response.ok && response.payload) {
@@ -44,6 +59,34 @@ export class NativeBackendClient {
 
   async transcribe(payload: NativeTranscribePayload): Promise<NativeProtocolResponse> {
     return this.request('asr.transcribe', payload);
+  }
+
+  async probeMedia(payload: { mediaPath: string }): Promise<NativeProtocolResponse<{ durationMs?: number; streams?: unknown[] }>> {
+    return this.request('media.probe', payload);
+  }
+
+  async extractAudio(payload: {
+    mediaPath: string;
+    outputDirectory?: string;
+    segmentDurationSec?: number;
+  }): Promise<NativeProtocolResponse<{ audioPath?: string; files?: Array<{ path: string; startMs: number; endMs?: number }> }>> {
+    return this.request('audio.extract', payload);
+  }
+
+  async parseSrt(payload: {
+    srt: string;
+    sourceLanguage?: string;
+    inputMediaPath?: string;
+  }): Promise<NativeProtocolResponse<{ document: unknown }>> {
+    return this.request('srt.parse', payload);
+  }
+
+  async serializeSrt(payload: {
+    segments: unknown[];
+    variant?: 'source' | 'translated' | 'bilingual';
+    bilingualOrder?: 'source-first' | 'target-first';
+  }): Promise<NativeProtocolResponse<{ srt: string }>> {
+    return this.request('srt.serialize', payload);
   }
 
   async request<TPayload = unknown>(
@@ -69,59 +112,47 @@ export class NativeBackendClient {
       payload
     };
 
-    return new Promise((resolveResponse) => {
-      const child = spawn(executable, ['--stdio-json'], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true
+    const child = await this.getOrCreateProcess(executable);
+    if (!child) {
+      return this.errorResponse(type, requestId, {
+        code: 'MissingRuntime',
+        message: 'Failed to spawn native backend executable.',
+        retryable: false
       });
-      let stdout = '';
-      let settled = false;
+    }
+
+    return new Promise((resolveResponse) => {
       const timeout = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        child.kill();
-        resolveResponse(this.errorResponse(type, requestId, {
-          code: 'InternalError',
-          message: 'Native backend protocol request timed out.',
-          retryable: true
-        }));
+        this.pending.delete(requestId);
+        resolveResponse(
+          this.errorResponse(type, requestId, {
+            code: 'InternalError',
+            message: 'Native backend protocol request timed out.',
+            retryable: true
+          })
+        );
       }, 10_000);
 
-      child.stdout.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString('utf8');
-      });
-      child.on('error', () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        resolveResponse(this.errorResponse(type, requestId, {
-          code: 'MissingRuntime',
-          message: 'Failed to spawn native backend executable.',
-          retryable: false
-        }));
-      });
-      child.on('close', () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        try {
-          const line = stdout
-            .split(/\r?\n/)
-            .map((item) => item.trim())
-            .filter(Boolean)
-            .find((item) => item.startsWith('{'));
-          if (!line) throw new Error('empty native protocol response');
-          resolveResponse(JSON.parse(line) as NativeProtocolResponse<TPayload>);
-        } catch {
-          resolveResponse(this.errorResponse(type, requestId, {
-            code: 'MalformedRequest',
-            message: 'Native backend returned unreadable protocol output.',
-            retryable: true
-          }));
-        }
+      this.pending.set(requestId, {
+        type,
+        resolve: (value) => resolveResponse(value as NativeProtocolResponse<TPayload>),
+        timeout
       });
 
-      child.stdin.end(`${JSON.stringify(message)}\n`, 'utf8');
+      child.stdin.write(`${JSON.stringify(message)}\n`, 'utf8', (error) => {
+        if (!error) return;
+        const pending = this.pending.get(requestId);
+        if (!pending) return;
+        clearTimeout(pending.timeout);
+        this.pending.delete(requestId);
+        resolveResponse(
+          this.errorResponse(type, requestId, {
+            code: 'MissingRuntime',
+            message: 'Failed to write request to native backend.',
+            retryable: false
+          })
+        );
+      });
     });
   }
 
@@ -131,7 +162,7 @@ export class NativeBackendClient {
     error: NativeProtocolError
   ): NativeProtocolResponse<TPayload> {
     return {
-          protocolVersion: 1,
+      protocolVersion: 1,
       requestId,
       type,
       ok: false,
@@ -145,12 +176,18 @@ export class NativeBackendClient {
     const roots = [
       ...(resourcesPath
         ? [
+            join(resourcesPath, 'app.asar.unpacked', 'build', 'native', 'bin'),
             join(resourcesPath, 'app.asar.unpacked', 'backend', 'cpp', 'build', 'Release'),
             join(resourcesPath, 'app.asar.unpacked', 'backend', 'cpp', 'build'),
+            join(resourcesPath, 'app.asar.unpacked', 'backend', 'cpp', 'build', 'bin'),
+            join(resourcesPath, 'build', 'native', 'bin'),
             join(resourcesPath, 'backend', 'cpp', 'build', 'Release'),
-            join(resourcesPath, 'backend', 'cpp', 'build')
+            join(resourcesPath, 'backend', 'cpp', 'build'),
+            join(resourcesPath, 'backend', 'cpp', 'build', 'bin')
           ]
         : []),
+      resolve('build/native/bin'),
+      resolve('backend/cpp/build/bin'),
       resolve('backend/cpp/build/Release'),
       resolve('backend/cpp/build/Debug'),
       resolve('backend/cpp/build')
@@ -168,5 +205,80 @@ export class NativeBackendClient {
       }
     }
     return undefined;
+  }
+
+  private async getOrCreateProcess(executable: string) {
+    if (!this.processPromise) {
+      this.processPromise = this.spawnProcess(executable);
+    }
+    const child = await this.processPromise;
+    if (!child) {
+      this.processPromise = undefined;
+    }
+    return child;
+  }
+
+  private async spawnProcess(executable: string) {
+    return new Promise<import('node:child_process').ChildProcessWithoutNullStreams | undefined>((resolveChild) => {
+      const child = spawn(executable, ['--stdio-json'], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true
+      });
+
+      let resolved = false;
+      const finalize = (value: import('node:child_process').ChildProcessWithoutNullStreams | undefined) => {
+        if (resolved) return;
+        resolved = true;
+        resolveChild(value);
+      };
+
+      child.stdout.on('data', (chunk: Buffer) => {
+        this.stdoutBuffer += chunk.toString('utf8');
+        this.flushStdoutBuffer();
+      });
+
+      child.stderr.on('data', () => {
+        // Protocol is stdout-only for now.
+      });
+
+      child.once('spawn', () => finalize(child));
+      child.once('error', () => finalize(undefined));
+      child.once('close', () => {
+        if (this.processPromise) {
+          this.processPromise = undefined;
+        }
+        this.stdoutBuffer = '';
+        for (const [requestId, pending] of this.pending) {
+          clearTimeout(pending.timeout);
+          pending.resolve(
+            this.errorResponse(pending.type, requestId, {
+              code: 'MissingRuntime',
+              message: 'Native backend process exited unexpectedly.',
+              retryable: true
+            })
+          );
+        }
+        this.pending.clear();
+      });
+    });
+  }
+
+  private flushStdoutBuffer(): void {
+    const lines = this.stdoutBuffer.split(/\r?\n/);
+    this.stdoutBuffer = lines.pop() ?? '';
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line || !line.startsWith('{')) continue;
+      try {
+        const response = JSON.parse(line) as NativeProtocolResponse;
+        const pending = this.pending.get(response.requestId);
+        if (!pending) continue;
+        clearTimeout(pending.timeout);
+        this.pending.delete(response.requestId);
+        pending.resolve(response);
+      } catch {
+        // Ignore malformed lines; caller timeout will surface the failure.
+      }
+    }
   }
 }

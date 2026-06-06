@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { access, mkdir, readFile, rename, rm } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { access, copyFile, mkdir, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import type { WhisperModelInfo, WhisperRuntimeRequest, WhisperRuntimeStatus } from '@shared/models';
 
@@ -80,8 +80,8 @@ export class WhisperAssetManager {
     }
 
     if (request.allowDownload && (!binaryVerified || !modelVerified)) {
-      await this.downloadAndInstallPlaceholder(runtime.url, binaryPath, runtime.sha256);
-      await this.downloadAndInstallPlaceholder(model.url, modelPath, model.sha256);
+      if (!binaryVerified) await this.downloadAndInstall(runtime.url, binaryPath, runtime.sha256);
+      if (!modelVerified) await this.downloadAndInstall(model.url, modelPath, model.sha256);
     }
 
     return this.status(
@@ -111,21 +111,65 @@ export class WhisperAssetManager {
     return join(app.getPath('userData'), 'runtime', 'whisper');
   }
 
-  private async downloadAndInstallPlaceholder(url: string | null, destination: string, sha256: string): Promise<void> {
-    if (!url) return;
+  private async downloadAndInstall(url: string | null, destination: string, sha256: string): Promise<void> {
+    if (!url || url.startsWith('disabled://')) return;
+    if (!isPinnedSha256(sha256)) {
+      throw new Error('Refusing to download whisper asset without a pinned SHA-256 hash.');
+    }
+
+    const tmpPath = `${destination}.tmp`;
+    await mkdir(dirname(destination), { recursive: true });
+    await rm(tmpPath, { force: true });
+
     if (url.startsWith('file://')) {
       const sourcePath = url.slice('file://'.length);
-      const tmpPath = `${destination}.tmp`;
-      await mkdir(dirname(destination), { recursive: true });
-      await rm(tmpPath, { force: true });
-      await rename(sourcePath, tmpPath);
-      const verified = await this.verifySha256(tmpPath, sha256);
-      if (!verified) {
-        await rm(tmpPath, { force: true });
-        throw new Error('Downloaded asset failed SHA-256 verification.');
-      }
-      await rename(tmpPath, destination);
+      await copyFile(sourcePath, tmpPath);
+    } else if (url.startsWith('https://')) {
+      await this.downloadHttp(url, tmpPath);
+    } else {
+      throw new Error(`Unsupported whisper asset URL scheme: ${url}`);
     }
+
+    const verified = await this.verifySha256(tmpPath, sha256);
+    if (!verified) {
+      await rm(tmpPath, { force: true });
+      throw new Error('Downloaded asset failed SHA-256 verification.');
+    }
+    await rename(tmpPath, destination);
+  }
+
+  private async downloadHttp(url: string, destination: string): Promise<void> {
+    const response = await fetch(url);
+    if (!response.ok || !response.body) {
+      throw new Error(`Failed to download whisper asset: HTTP ${response.status}`);
+    }
+
+    await new Promise<void>((resolveDownload, reject) => {
+      const stream = createWriteStream(destination, { flags: 'wx' });
+      stream.on('error', reject);
+      stream.on('finish', resolveDownload);
+
+      const reader = response.body!.getReader();
+      const pump = (): void => {
+        reader
+          .read()
+          .then(({ done, value }) => {
+            if (done) {
+              stream.end();
+              return;
+            }
+            stream.write(Buffer.from(value), (error) => {
+              if (error) {
+                reject(error);
+                return;
+              }
+              pump();
+            });
+          })
+          .catch(reject);
+      };
+      pump();
+    });
   }
 
   private status(

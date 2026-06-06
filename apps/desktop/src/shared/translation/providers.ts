@@ -44,6 +44,10 @@ export type OpenAICompatibleProviderConfig = {
   apiKey?: string;
   model: string;
   priority: number;
+  rpm?: number;
+  tokenBudgetPerMinute?: number;
+  maxSegmentsPerBatch?: number;
+  maxCharactersPerBatch?: number;
 };
 
 export class OpenAICompatibleTranslationProvider implements TranslationProvider {
@@ -57,7 +61,18 @@ export class OpenAICompatibleTranslationProvider implements TranslationProvider 
   }
 
   capabilities(): ProviderCapabilities {
-    return DEFAULT_CAPABILITIES;
+    return {
+      ...DEFAULT_CAPABILITIES,
+      maxSegmentsPerBatch: this.config.maxSegmentsPerBatch ?? DEFAULT_CAPABILITIES.maxSegmentsPerBatch,
+      maxCharactersPerBatch: this.config.maxCharactersPerBatch ?? DEFAULT_CAPABILITIES.maxCharactersPerBatch
+    };
+  }
+
+  rateLimits(): { rpm?: number; tokenBudgetPerMinute?: number } {
+    return {
+      rpm: this.config.rpm,
+      tokenBudgetPerMinute: this.config.tokenBudgetPerMinute
+    };
   }
 
   async health(): Promise<{ ok: boolean; message?: string }> {

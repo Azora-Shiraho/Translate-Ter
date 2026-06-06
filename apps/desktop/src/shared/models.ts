@@ -49,8 +49,12 @@ export type AppSettingsPublic = {
   targetLanguage: string;
   asrProviderId: string;
   whisperModelId: string;
+  allowWhisperAssetDownload: boolean;
+  allowCloudAsrUpload: boolean;
   translationProviderPriority: string[];
   translationConcurrency: number;
+  translationRequestsPerMinute: number;
+  translationTokenBudgetPerMinute: number;
 };
 
 export type AppSettingsPatch = Partial<AppSettingsPublic>;
@@ -66,6 +70,7 @@ export type ProviderSecretInput = {
   apiKey?: string;
   baseUrl?: string;
   organization?: string;
+  model?: string;
 };
 
 export type WhisperModelInfo = {
@@ -118,7 +123,12 @@ export type CreateJobRequest = {
   targetLanguage: string;
   asrProviderId: string;
   whisperModelId: string;
+  allowWhisperAssetDownload?: boolean;
+  allowCloudAsrUpload?: boolean;
   translationProviderPriority: string[];
+  translationConcurrency?: number;
+  translationRequestsPerMinute?: number;
+  translationTokenBudgetPerMinute?: number;
 };
 
 export type JobStage =
@@ -145,7 +155,12 @@ export type JobSnapshot = {
   targetLanguage: string;
   asrProviderId: string;
   whisperModelId: string;
+  allowWhisperAssetDownload: boolean;
+  allowCloudAsrUpload: boolean;
   translationProviderPriority: string[];
+  translationConcurrency: number;
+  translationRequestsPerMinute: number;
+  translationTokenBudgetPerMinute: number;
   subtitleDocument?: SubtitleDocument;
   error?: {
     code: string;

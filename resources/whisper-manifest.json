@@ -1,11 +1,63 @@
 {
   "manifestVersion": 1,
   "enabled": false,
-  "note": "Disabled sample manifest. Replace this file with a trusted remote/user manifest containing real URLs, sizes, and pinned SHA-256 values before enabling downloads or execution.",
+  "note": "Disabled sample manifest. Replace this file with a trusted local or remote manifest containing real URLs, sizes, and pinned non-zero SHA-256 values before enabling downloads or execution.",
+  "downloadPolicy": {
+    "requiresUserConsent": true,
+    "verifyBeforeInstall": true,
+    "installRoot": "userData/runtime/whisper",
+    "atomicInstall": true,
+    "backendDownloadsAllowed": false
+  },
+  "mediaTools": {
+    "provider": "ffmpeg",
+    "requiredFor": [
+      "media.probe",
+      "audio.extract",
+      "non-wav whisper input"
+    ],
+    "resolutionOrder": [
+      "request.ffmpegPath/request.ffprobePath",
+      "PATH"
+    ],
+    "sample": {
+      "platforms": {
+        "win32-x64": {
+          "ffmpeg": "tools/ffmpeg/bin/ffmpeg.exe",
+          "ffprobe": "tools/ffmpeg/bin/ffprobe.exe",
+          "sha256": {
+            "ffmpeg": "0000000000000000000000000000000000000000000000000000000000000000",
+            "ffprobe": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "url": "disabled://sample-ffmpeg"
+        }
+      }
+    }
+  },
   "runtime": {
     "provider": "whisper.cpp",
     "version": "sample-disabled",
-    "platforms": {}
+    "cliKind": "whisper-cli",
+    "platforms": {
+      "win32-x64": {
+        "binary": "bin/whisper-cli.exe",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "url": "disabled://sample-whisper-cli-win32-x64",
+        "acceleration": "cpu"
+      },
+      "linux-x64": {
+        "binary": "bin/whisper-cli",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "url": "disabled://sample-whisper-cli-linux-x64",
+        "acceleration": "cpu"
+      },
+      "darwin-arm64": {
+        "binary": "bin/whisper-cli",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "url": "disabled://sample-whisper-cli-darwin-arm64",
+        "acceleration": "metal"
+      }
+    }
   },
   "models": [
     {
@@ -16,6 +68,15 @@
       "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "path": "models/ggml-base.bin",
       "url": "disabled://sample-model"
+    },
+    {
+      "id": "ggml-small",
+      "displayName": "Whisper small (sample, not configured)",
+      "languageScope": "multilingual",
+      "sizeBytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "path": "models/ggml-small.bin",
+      "url": "disabled://sample-model-small"
     }
   ]
 }
