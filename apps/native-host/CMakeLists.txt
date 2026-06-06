@@ -37,5 +37,4 @@ target_link_libraries(TranslateTer PRIVATE
   user32
   gdi32
   shell32
-  shlwapi
 )
