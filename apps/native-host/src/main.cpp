@@ -279,7 +279,7 @@ std::wstring frontend_host_script() {
   return LR"JS(
 (() => {
   const now = () => new Date().toISOString();
-  const settings = {
+  let settings = {
     schemaVersion: 1,
     uiLanguage: 'en-US',
     sourceLanguage: 'auto',
@@ -333,7 +333,7 @@ std::wstring frontend_host_script() {
     },
     exportSrt: async () => undefined,
     getSettings: async () => settings,
-    saveSettings: async (patch) => Object.assign(settings, patch),
+    saveSettings: async (patch) => (settings = { ...settings, ...patch }),
     desktop: { selectMedia: async () => undefined },
     jobs: {
       create: async (input) => (lastJob = makeJob(input)),
@@ -354,7 +354,7 @@ std::wstring frontend_host_script() {
     },
     settings: {
       get: async () => settings,
-      update: async (patch) => Object.assign(settings, patch),
+      update: async (patch) => (settings = { ...settings, ...patch }),
       setSecret: async () => undefined,
       testProvider: async (providerId) => ({ providerId, ok: true, status: 'healthy' })
     },
