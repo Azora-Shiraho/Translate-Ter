@@ -1,5 +1,4 @@
 #include <windows.h>
-#include <shlwapi.h>
 
 #if defined(TRANSLATE_TER_WITH_WEBVIEW2)
 #include <WebView2.h>
@@ -15,7 +14,7 @@
 namespace {
 
 constexpr wchar_t kWindowClassName[] = L"TranslateTerNativeHostWindow";
-constexpr DWORD kFileUrlBufferLength = 4096;
+constexpr wchar_t kFrontendVirtualHost[] = L"translate-ter.local";
 
 struct BackendProcess {
   HANDLE process = nullptr;
@@ -133,15 +132,6 @@ std::wstring quote_arg(const std::filesystem::path& value) {
   }
   escaped += L"\"";
   return escaped;
-}
-
-std::wstring file_uri_from_path(const std::filesystem::path& value) {
-  std::array<wchar_t, kFileUrlBufferLength> buffer{};
-  DWORD size = static_cast<DWORD>(buffer.size());
-  if (SUCCEEDED(UrlCreateFromPathW(value.c_str(), buffer.data(), &size, 0))) {
-    return std::wstring(buffer.data(), size);
-  }
-  return L"file:///" + value.wstring();
 }
 
 bool start_backend() {
@@ -418,6 +408,17 @@ void resize_webview(HWND hwnd) {
   g_webview_controller->put_Bounds(bounds);
 }
 
+void navigate_error_page(const wchar_t* body) {
+  if (!g_webview) return;
+
+  std::wstring html =
+      L"<html><body style=\"font-family:Segoe UI,sans-serif;padding:32px;color:#1c1f24\">"
+      L"<h1>Translate-Ter</h1><p>";
+  html += body;
+  html += L"</p></body></html>";
+  g_webview->NavigateToString(html.c_str());
+}
+
 std::filesystem::path find_frontend_index() {
   for (const auto& candidate : frontend_candidates()) {
     if (std::filesystem::exists(candidate)) return candidate;
@@ -427,6 +428,7 @@ std::filesystem::path find_frontend_index() {
 
 void initialize_webview(HWND hwnd) {
   using Microsoft::WRL::Callback;
+  using Microsoft::WRL::ComPtr;
 
   const auto user_data = executable_dir() / L"app" / L"webview-data";
   const auto frontend_index = find_frontend_index();
@@ -464,8 +466,42 @@ void initialize_webview(HWND hwnd) {
                       resize_webview(hwnd);
 
                       if (g_webview) {
-                        g_webview->AddScriptToExecuteOnDocumentCreated(frontend_host_script().c_str(), nullptr);
-                        g_webview->Navigate(file_uri_from_path(frontend_index).c_str());
+                        ComPtr<ICoreWebView2_3> webview3;
+                        if (FAILED(g_webview->QueryInterface(IID_PPV_ARGS(&webview3))) || !webview3) {
+                          navigate_error_page(
+                              L"Your Microsoft Edge WebView2 Runtime is too old to load the packaged app. "
+                              L"Install the latest WebView2 Runtime and reopen Translate-Ter.");
+                          return S_OK;
+                        }
+
+                        const auto frontend_dir = frontend_index.parent_path();
+                        const HRESULT mapping_result = webview3->SetVirtualHostNameToFolderMapping(
+                            kFrontendVirtualHost,
+                            frontend_dir.c_str(),
+                            COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+                        if (FAILED(mapping_result)) {
+                          navigate_error_page(
+                              L"Failed to map packaged frontend assets into WebView2. "
+                              L"Please extract the full zip before running TranslateTer.exe.");
+                          return S_OK;
+                        }
+
+                        const HRESULT script_result = g_webview->AddScriptToExecuteOnDocumentCreated(
+                            frontend_host_script().c_str(),
+                            Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>(
+                                [](HRESULT script_error, LPCWSTR) -> HRESULT {
+                                  if (FAILED(script_error)) {
+                                    navigate_error_page(
+                                        L"Failed to prepare the packaged desktop bridge before loading the app.");
+                                    return S_OK;
+                                  }
+                                  g_webview->Navigate(L"https://translate-ter.local/index.html");
+                                  return S_OK;
+                                })
+                                .Get());
+                        if (FAILED(script_result)) {
+                          navigate_error_page(L"Failed to install the packaged desktop bridge into WebView2.");
+                        }
                       }
                       return S_OK;
                     })
