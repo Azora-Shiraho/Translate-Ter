@@ -1,0 +1,54 @@
+{
+  "name": "translate-ter",
+  "version": "0.1.0",
+  "description": "Local-first desktop workflow for transcription, subtitle editing, and translation.",
+  "main": "out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json && electron-vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "native:configure": "cmake -S backend/cpp -B backend/cpp/build",
+    "native:build": "cmake --build backend/cpp/build --config Release"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "i18next": "^25.2.1",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^15.5.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29",
+    "@types/react": "^18.3.23",
+    "@types/react-dom": "^18.3.7",
+    "electron": "^31.7.7",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.8.3",
+    "vite": "^5.4.19",
+    "vitest": "^2.1.9"
+  },
+  "build": {
+    "appId": "dev.translate-ter.app",
+    "productName": "Translate-Ter",
+    "files": [
+      "out/**",
+      "resources/whisper-manifest.json",
+      "backend/cpp/build/**"
+    ],
+    "asarUnpack": [
+      "backend/cpp/build/**"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/whisper-manifest.json",
+        "to": "whisper-manifest.json"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    }
+  }
+}

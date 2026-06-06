@@ -1,0 +1,21 @@
+{
+  "manifestVersion": 1,
+  "enabled": false,
+  "note": "Disabled sample manifest. Replace this file with a trusted remote/user manifest containing real URLs, sizes, and pinned SHA-256 values before enabling downloads or execution.",
+  "runtime": {
+    "provider": "whisper.cpp",
+    "version": "sample-disabled",
+    "platforms": {}
+  },
+  "models": [
+    {
+      "id": "ggml-base",
+      "displayName": "Whisper base (sample, not configured)",
+      "languageScope": "multilingual",
+      "sizeBytes": 0,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "path": "models/ggml-base.bin",
+      "url": "disabled://sample-model"
+    }
+  ]
+}
