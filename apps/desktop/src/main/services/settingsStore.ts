@@ -11,8 +11,12 @@ const DEFAULT_SETTINGS: AppSettingsPublic = {
   targetLanguage: 'zh-CN',
   asrProviderId: 'local.whisper.cpp',
   whisperModelId: 'ggml-base',
+  allowWhisperAssetDownload: true,
+  allowCloudAsrUpload: false,
   translationProviderPriority: ['mock.local', 'openai.compatible'],
-  translationConcurrency: 2
+  translationConcurrency: 2,
+  translationRequestsPerMinute: 60,
+  translationTokenBudgetPerMinute: 60_000
 };
 
 export class SettingsStore {
@@ -32,7 +36,19 @@ export class SettingsStore {
       ...current,
       ...patch,
       schemaVersion: 1,
-      translationConcurrency: clampConcurrency(patch.translationConcurrency ?? current.translationConcurrency)
+      translationConcurrency: clampConcurrency(patch.translationConcurrency ?? current.translationConcurrency),
+      translationRequestsPerMinute: clampPositiveInteger(
+        patch.translationRequestsPerMinute ?? current.translationRequestsPerMinute,
+        1,
+        600,
+        DEFAULT_SETTINGS.translationRequestsPerMinute
+      ),
+      translationTokenBudgetPerMinute: clampPositiveInteger(
+        patch.translationTokenBudgetPerMinute ?? current.translationTokenBudgetPerMinute,
+        1000,
+        1_000_000,
+        DEFAULT_SETTINGS.translationTokenBudgetPerMinute
+      )
     };
     await this.write(next);
     return next;
@@ -118,4 +134,9 @@ function hasSecretValue(secret: ProviderSecretInput): boolean {
 function clampConcurrency(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_SETTINGS.translationConcurrency;
   return Math.max(1, Math.min(6, Math.round(value)));
+}
+
+function clampPositiveInteger(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(value)));
 }

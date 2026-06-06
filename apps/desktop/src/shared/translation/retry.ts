@@ -1,10 +1,12 @@
 import { ProviderError } from './types';
+import type { BackoffStrategy } from './types';
 
 export type RetryOptions = {
   maxRetries: number;
   initialBackoffMs: number;
   maxBackoffMs: number;
   jitterRatio: number;
+  backoffStrategy?: BackoffStrategy;
   signal?: AbortSignal;
 };
 
@@ -34,12 +36,27 @@ export async function retryWithBackoff<T>(
   throw lastError;
 }
 
-export function computeBackoffMs(attemptZeroBased: number, options: Pick<RetryOptions, 'initialBackoffMs' | 'maxBackoffMs' | 'jitterRatio'>): number {
-  const base = Math.min(options.maxBackoffMs, options.initialBackoffMs * 2 ** attemptZeroBased);
+export function computeBackoffMs(
+  attemptZeroBased: number,
+  options: Pick<RetryOptions, 'initialBackoffMs' | 'maxBackoffMs' | 'jitterRatio' | 'backoffStrategy'>
+): number {
+  const strategy: BackoffStrategy | undefined = options.backoffStrategy;
+  const base = Math.min(options.maxBackoffMs, computeBaseDelayMs(attemptZeroBased, options.initialBackoffMs, strategy));
   const jitter = base * options.jitterRatio;
   const min = base - jitter;
   const max = base + jitter;
   return Math.round(min + Math.random() * (max - min));
+}
+
+function computeBaseDelayMs(attemptZeroBased: number, initialBackoffMs: number, strategy: BackoffStrategy = 'exponential'): number {
+  switch (strategy) {
+    case 'fixed':
+      return initialBackoffMs;
+    case 'linear':
+      return initialBackoffMs * (attemptZeroBased + 1);
+    case 'exponential':
+      return initialBackoffMs * 2 ** attemptZeroBased;
+  }
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

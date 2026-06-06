@@ -51,7 +51,7 @@ export function validateAsrRequest(request: CreateJobRequest): void {
   if (!provider) {
     throw new Error(`Unknown ASR provider: ${request.asrProviderId}`);
   }
-  if (provider.requiresConsentForUpload) {
+  if (provider.requiresConsentForUpload && !request.allowCloudAsrUpload) {
     throw new Error('Cloud ASR upload requires explicit user consent and provider configuration.');
   }
 }

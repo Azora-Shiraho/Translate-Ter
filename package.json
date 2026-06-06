@@ -9,8 +9,10 @@
     "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json && electron-vite build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "native:configure": "cmake -S backend/cpp -B backend/cpp/build",
-    "native:build": "cmake --build backend/cpp/build --config Release"
+    "native:deps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ensure-webview2.ps1",
+    "native:configure": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$cmake='C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe'; if (!(Test-Path $cmake)) { $cmake='cmake' }; & $cmake -S . -B build/native\"",
+    "native:build": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$cmake='C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe'; if (!(Test-Path $cmake)) { $cmake='cmake' }; & $cmake --build build/native --config Release\"",
+    "native:package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-native.ps1"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
@@ -36,10 +38,10 @@
     "files": [
       "out/**",
       "resources/whisper-manifest.json",
-      "backend/cpp/build/**"
+      "build/native/bin/**"
     ],
     "asarUnpack": [
-      "backend/cpp/build/**"
+      "build/native/bin/**"
     ],
     "extraResources": [
       {

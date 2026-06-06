@@ -38,15 +38,19 @@ export type TranslationProvider = {
   kind: TranslationProviderKind;
   priority: number;
   capabilities(): ProviderCapabilities;
+  rateLimits?(): Partial<Pick<TranslationSchedulerOptions, 'rpm' | 'tokenBudgetPerMinute'>>;
   health(): Promise<{ ok: boolean; message?: string }>;
   translateBatch(request: TranslationBatchRequest): Promise<TranslationBatchResult>;
 };
+
+export type BackoffStrategy = 'exponential' | 'linear' | 'fixed';
 
 export type TranslationSchedulerOptions = {
   maxRetries: number;
   initialBackoffMs: number;
   maxBackoffMs: number;
   jitterRatio: number;
+  backoffStrategy: BackoffStrategy;
   concurrency: number;
   rpm: number;
   tokenBudgetPerMinute: number;

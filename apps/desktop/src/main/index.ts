@@ -1,7 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { parseSrt, serializeSrt } from '@shared/srt';
 import type { CreateJobRequest, JobEvent, JobSnapshot, SubtitleDocument, SubtitleSegment } from '@shared/models';
 import { JobManager } from './services/jobManager';
 import { NativeBackendClient } from './services/nativeBackendClient';
@@ -81,11 +80,15 @@ function registerIpc(): void {
     variant: 'source' | 'translated' | 'bilingual';
     bilingualOrder: 'source-first' | 'target-first';
   }): Promise<void> {
-    const srt = serializeSrt(payload.document, {
+    const response = await nativeBackend.serializeSrt({
+      segments: payload.document.segments,
       variant: payload.variant,
       bilingualOrder: payload.bilingualOrder
     });
-    await writeFile(payload.path, srt, 'utf8');
+    if (!response.ok || !response.payload?.srt) {
+      throw new Error(response.error?.message ?? 'Native backend failed to serialize SRT.');
+    }
+    await writeFile(payload.path, response.payload.srt, 'utf8');
   }
 
   ipcMain.handle('selectVideo', async () => selectMedia());
@@ -107,7 +110,11 @@ function registerIpc(): void {
 
   ipcMain.handle('subtitles:import-srt', async (_event, path: string) => {
     const raw = await readFile(path, 'utf8');
-    return parseSrt(raw, { inputMediaPath: path });
+    const response = await nativeBackend.parseSrt({ srt: raw, inputMediaPath: path });
+    if (!response.ok || !response.payload?.document) {
+      throw new Error(response.error?.message ?? 'Native backend failed to parse SRT.');
+    }
+    return response.payload.document as SubtitleDocument;
   });
 
   ipcMain.handle(

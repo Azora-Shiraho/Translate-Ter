@@ -67,16 +67,61 @@ Error codes used by the MVP skeleton:
 
 - `MissingRuntime`
 - `DownloadRequired`
+- `RuntimeNotVerified`
 - `ManifestNotConfigured`
 - `UnsupportedCommand`
 - `MalformedRequest`
 - `InternalError`
 
-## Implemented Skeleton
+## Implemented Commands
 
 `runtime.health` returns native protocol version, backend version, capability
 names, acceleration status, and whether a verified whisper runtime is available.
-Current development builds report `whisperRuntimeAvailable: false`.
+Current development builds report `whisperRuntimeAvailable: false` because
+Electron main, not the backend, owns manifest download and SHA-256 verification.
+It also reports `ffmpegAvailable` and `ffprobeAvailable` from the native
+process PATH.
+
+`media.probe` accepts:
+
+```json
+{
+  "mediaPath": "D:/video/input.mp4",
+  "ffprobePath": "D:/tools/ffprobe.exe"
+}
+```
+
+`ffprobePath` is optional. If omitted, the backend searches PATH for `ffprobe`.
+The successful payload includes `tool`, `ffprobePath`, and `raw`, where `raw`
+is ffprobe JSON from `-show_format -show_streams`. If the input is missing or
+ffprobe cannot be found, the command returns a typed error instead of a mock
+probe result.
+
+`audio.extract` accepts:
+
+```json
+{
+  "jobId": "job-123",
+  "mediaPath": "D:/video/input.mp4",
+  "outputDir": "D:/tmp/translate-ter/job-123/audio",
+  "ffmpegPath": "D:/tools/ffmpeg.exe",
+  "sampleRate": 16000,
+  "channels": 1,
+  "format": "wav",
+  "audioCodec": "pcm_s16le",
+  "segmentSeconds": 600,
+  "startMs": 0,
+  "durationMs": 0
+}
+```
+
+`ffmpegPath`, `outputDir`, `sampleRate`, `channels`, `format`, `audioCodec`,
+`segmentSeconds`, `startMs`, and `durationMs` are optional. Defaults are mono
+16 kHz PCM WAV output in the OS temp directory. When `segmentSeconds` is
+positive, ffmpeg writes numbered segment files and the response returns a
+`files` array with `path`, `index`, `startMs`, optional `durationMs`, and
+`sizeBytes`. When `segmentSeconds` is zero or omitted, a single audio file is
+returned.
 
 `srt.parse` accepts:
 
@@ -89,7 +134,9 @@ Current development builds report `whisperRuntimeAvailable: false`.
 It returns a `document` payload with parsed segments.
 
 `srt.serialize` accepts segment-like objects in the request payload with
-`startMs`, `endMs`, and `sourceText`, then returns:
+`startMs`, `endMs`, and `sourceText`. Optional `variant` values are `source`,
+`translated`, and `bilingual`; optional `bilingualOrder` values are
+`source-first` and `target-first`. It then returns:
 
 ```json
 {
@@ -97,13 +144,59 @@ It returns a `document` payload with parsed segments.
 }
 ```
 
-`asr.transcribe` currently validates that runtime/model paths are supplied and
-then returns `DownloadRequired` until Electron main provides checksum-verified
-whisper.cpp runtime and model files. It must not return successful mock
-transcripts.
+`asr.transcribe` accepts:
 
-`media.probe` and `audio.extract` return `MissingRuntime` until ffmpeg or an
-equivalent local media tool is configured.
+```json
+{
+  "jobId": "job-123",
+  "mediaPath": "D:/video/input.wav",
+  "modelId": "ggml-base",
+  "sourceLanguage": "auto",
+  "targetLanguage": "zh-CN",
+  "asrProviderId": "local.whisper.cpp",
+  "runtime": {
+    "binaryPath": "D:/userData/runtime/whisper/bin/whisper-cli.exe",
+    "modelPath": "D:/userData/runtime/whisper/models/ggml-base.bin"
+  },
+  "ffmpegPath": "D:/tools/ffmpeg.exe",
+  "outputDir": "D:/tmp/translate-ter/job-123/asr"
+}
+```
+
+The backend accepts `binaryPath` and `modelPath` anywhere in the request object
+so current Electron payloads with nested `runtime` work. Electron main must
+only send these paths after manifest pinning, local file existence checks, and
+SHA-256 verification. The native backend checks existence but does not trust or
+download assets.
+
+For `local.whisper.cpp`, the backend invokes whisper.cpp CLI with `-osrt` and
+parses the generated SRT into the shared subtitle document shape. Non-WAV input
+is converted to mono 16 kHz WAV with ffmpeg before transcription. If ffmpeg is
+missing and the input is not WAV, the command returns `MissingRuntime`.
+
+`mock.asr` remains the only provider allowed to return mock subtitles. It is
+used for development UI fallback and is explicit in the request.
+
+## Runtime Download Strategy
+
+`resources/whisper-manifest.json` is a disabled sample. A production or local
+test manifest must set `enabled: true`, include per-platform runtime entries,
+and pin every executable/model with a non-zero SHA-256 digest before download or
+execution is allowed.
+
+Electron main is responsible for:
+
+- selecting the platform entry and requested model;
+- requiring user consent before network downloads;
+- downloading to a temporary file;
+- verifying SHA-256 against the manifest;
+- atomically moving verified files into `userData/runtime/whisper`;
+- passing verified `binaryPath`, `modelPath`, and optional `ffmpegPath` to the
+  backend.
+
+The backend returns `DownloadRequired` or `MissingRuntime` when verified paths
+are absent. It does not fetch URLs from the manifest and does not execute
+unverified paths.
 
 `job.cancel` acknowledges cancellation for protocol wiring; long-running native
 task cancellation will be attached when ASR/media commands become persistent.

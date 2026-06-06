@@ -7,6 +7,9 @@ export class TokenBucket {
     private readonly refillPerMs: number,
     now: number = Date.now()
   ) {
+    if (capacity <= 0 || refillPerMs <= 0) {
+      throw new Error('TokenBucket capacity and refill rate must be positive.');
+    }
     this.tokens = capacity;
     this.lastRefill = now;
   }
