@@ -355,6 +355,7 @@ function App(): JSX.Element {
   const selectedMediaFileName =
     job?.fileName ?? selectedMediaPath.split(/[\\/]/).filter(Boolean).at(-1) ?? t('chooseMedia');
   const jobTitle = selectedMediaFileName;
+  const exportDockVisible = job?.step === 'export';
 
   async function forceStop(): Promise<void> {
     if (!job) return;
@@ -445,7 +446,11 @@ function App(): JSX.Element {
             ))}
           </nav>
 
-          <main className={`workspaceLayout${statsCollapsed ? ' statsCollapsed' : ''}`}>
+          <main
+            className={`workspaceLayout${statsCollapsed ? ' statsCollapsed' : ''}${
+              exportDockVisible ? ' exportVisible' : ''
+            }`}
+          >
             <aside className={`statsRail${statsCollapsed ? ' collapsed' : ''}`}>
               <button
                 className="railToggle"
