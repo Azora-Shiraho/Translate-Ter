@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type { CreateJobRequest, JobEvent, JobSnapshot, JobStage, SubtitleDocument, SubtitleSegment } from '@shared/models';
 import { TranslationScheduler } from '@shared/translation/scheduler';
@@ -33,6 +34,7 @@ export class JobManager extends EventEmitter {
       targetLanguage: request.targetLanguage,
       asrProviderId: request.asrProviderId,
       whisperModelId: request.whisperModelId,
+      localWhisperUseCuda: request.localWhisperUseCuda ?? false,
       allowWhisperAssetDownload: request.allowWhisperAssetDownload ?? true,
       allowCloudAsrUpload: request.allowCloudAsrUpload ?? false,
       translationProviderPriority: request.translationProviderPriority,
@@ -68,7 +70,8 @@ export class JobManager extends EventEmitter {
     const runtime = isLocalWhisper
       ? await this.whisperAssets.ensureRuntime({
           modelId: job.whisperModelId,
-          allowDownload: job.allowWhisperAssetDownload
+          allowDownload: job.allowWhisperAssetDownload,
+          preferCuda: job.localWhisperUseCuda
         })
       : undefined;
 
@@ -98,6 +101,15 @@ export class JobManager extends EventEmitter {
 
     await this.setProgress(job, 'transcribing', 72, 'Transcribing through native backend.');
 
+    if (job.asrProviderId === 'cloud.openai') {
+      const cloudDocument = await this.transcribeWithCloudAsr(job, extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path);
+      if (!cloudDocument) return;
+      job.subtitleDocument = cloudDocument;
+      job.step = 'subtitles';
+      await this.setProgress(job, 'completed', 100, 'Cloud transcription complete.');
+      return;
+    }
+
     const response = await this.nativeBackend.transcribe({
       jobId: job.id,
       mediaPath: job.mediaPath,
@@ -106,10 +118,11 @@ export class JobManager extends EventEmitter {
       sourceLanguage: job.sourceLanguage,
       targetLanguage: job.targetLanguage,
       asrProviderId: job.asrProviderId,
+      preferCuda: job.localWhisperUseCuda,
       runtime: runtime
         ? {
-        binaryPath: runtime.binary.expectedPath,
-        modelPath: runtime.model.expectedPath
+            binaryPath: runtime.binary.expectedPath,
+            modelPath: runtime.model.expectedPath
           }
         : undefined
     });
@@ -222,6 +235,79 @@ export class JobManager extends EventEmitter {
   private save(job: JobSnapshot): void {
     this.jobs.set(job.id, structuredClone(job));
     this.emit('job-event', { type: 'snapshot', job: structuredClone(job) } satisfies JobEvent);
+  }
+
+  private async transcribeWithCloudAsr(job: JobSnapshot, audioPath?: string): Promise<SubtitleDocument | undefined> {
+    const secret = this.settings.getSecret('cloud.openai');
+    if (!secret?.apiKey) {
+      this.fail(job, 'ProviderUnconfigured', 'Cloud ASR API key is not configured.', false);
+      return undefined;
+    }
+
+    const uploadPath = audioPath ?? job.mediaPath;
+    const fileBuffer = await readFile(uploadPath);
+    const fileName = basename(uploadPath);
+    const form = new FormData();
+    form.append('file', new Blob([fileBuffer]), fileName);
+    form.append('model', secret.model ?? 'whisper-1');
+    form.append('response_format', 'verbose_json');
+    if (job.sourceLanguage !== 'auto') {
+      form.append('language', job.sourceLanguage);
+    }
+
+    const response = await fetch(`${(secret.baseUrl ?? 'https://api.openai.com/v1').replace(/\/$/, '')}/audio/transcriptions`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${secret.apiKey}`
+      },
+      body: form
+    });
+
+    if (!response.ok) {
+      this.fail(job, 'ProviderUnavailable', `Cloud ASR request failed with HTTP ${response.status}.`, response.status >= 500 || response.status === 429);
+      return undefined;
+    }
+
+    const payload = (await response.json()) as {
+      text?: string;
+      language?: string;
+      segments?: Array<{ id?: number | string; start?: number; end?: number; text?: string }>;
+    };
+    const segments = Array.isArray(payload.segments) && payload.segments.length > 0
+      ? payload.segments.map((segment, index) => ({
+          id: `${job.id}-seg-${index + 1}`,
+          index: index + 1,
+          startMs: Math.round((segment.start ?? index * 3) * 1000),
+          endMs: Math.round((segment.end ?? (index + 1) * 3) * 1000),
+          sourceText: segment.text?.trim() || '...',
+          status: 'transcribed' as const,
+          confidence: 0.9
+        }))
+      : [
+          {
+            id: `${job.id}-seg-1`,
+            index: 1,
+            startMs: 0,
+            endMs: 5000,
+            sourceText: payload.text?.trim() || '...',
+            status: 'transcribed' as const,
+            confidence: 0.9
+          }
+        ];
+
+    return {
+      id: `doc-${job.id}`,
+      format: 'srt',
+      sourceLanguage: payload.language || job.sourceLanguage,
+      targetLanguage: job.targetLanguage,
+      segments,
+      metadata: {
+        inputMediaPath: job.mediaPath,
+        createdAt: new Date().toISOString(),
+        asrProvider: job.asrProviderId,
+        warnings: [...job.warnings]
+      }
+    };
   }
 }
 

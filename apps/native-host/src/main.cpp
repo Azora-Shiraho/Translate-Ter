@@ -6,7 +6,9 @@
 #endif
 
 #include <array>
+#include <cstdio>
 #include <filesystem>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -132,6 +134,47 @@ std::wstring quote_arg(const std::filesystem::path& value) {
   }
   escaped += L"\"";
   return escaped;
+}
+
+bool path_exists(const std::filesystem::path& path) {
+  std::error_code error;
+  return std::filesystem::exists(path, error) && !std::filesystem::is_directory(path, error);
+}
+
+std::wstring run_command_capture(const std::wstring& command) {
+  std::wstring output;
+  FILE* pipe = _wpopen(command.c_str(), L"r");
+  if (!pipe) return output;
+
+  std::array<wchar_t, 1024> buffer{};
+  while (fgetws(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
+    output += buffer.data();
+  }
+  _pclose(pipe);
+  return output;
+}
+
+bool detect_cuda_support() {
+  if (GetEnvironmentVariableW(L"CUDA_PATH", nullptr, 0) > 0 || GetEnvironmentVariableW(L"CUDA_HOME", nullptr, 0) > 0) {
+    return true;
+  }
+
+  const std::array<std::filesystem::path, 2> known_paths = {
+      std::filesystem::path(L"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe"),
+      std::filesystem::path(L"C:\\Windows\\System32\\nvidia-smi.exe"),
+  };
+  for (const auto& candidate : known_paths) {
+    if (path_exists(candidate)) return true;
+  }
+
+  const auto nvidia_gpu_count = run_command_capture(
+      L"powershell.exe -NoProfile -Command \"(Get-CimInstance Win32_VideoController | "
+      L"Where-Object { $_.Name -match 'NVIDIA' } | Measure-Object).Count\"");
+  for (const wchar_t ch : nvidia_gpu_count) {
+    if (ch >= L'1' && ch <= L'9') return true;
+  }
+
+  return false;
 }
 
 bool start_backend() {
@@ -276,7 +319,9 @@ void draw_text_block(HDC dc, RECT rect, std::wstring_view title, std::wstring_vi
 
 #if defined(TRANSLATE_TER_WITH_WEBVIEW2)
 std::wstring frontend_host_script() {
-  return LR"JS(
+  const bool cuda_supported = detect_cuda_support();
+  std::wostringstream script;
+  script << LR"JS(
 (() => {
   const now = () => new Date().toISOString();
   let settings = {
@@ -284,10 +329,19 @@ std::wstring frontend_host_script() {
     uiLanguage: 'en-US',
     sourceLanguage: 'auto',
     targetLanguage: 'zh-CN',
-    asrProviderId: 'mock.asr',
+    asrProviderId: 'local.whisper.cpp',
     whisperModelId: 'ggml-base',
-    translationProviderPriority: ['mock.local'],
-    translationConcurrency: 2
+    localWhisperUseCuda: )JS" << (cuda_supported ? L"true" : L"false") << LR"JS(,
+    allowWhisperAssetDownload: true,
+    allowCloudAsrUpload: false,
+    translationProviderPriority: ['openai.compatible', 'mock.local'],
+    translationConcurrency: 2,
+    translationRequestsPerMinute: 60,
+    translationTokenBudgetPerMinute: 60000
+  };
+  let providerSecrets = {
+    'cloud.openai': {},
+    'openai.compatible': {}
   };
   const mockSegments = () => ([
     { id: 'seg-0001', index: 1, startMs: 900, endMs: 3100, sourceText: 'Welcome to Translate-Ter.', status: 'transcribed', confidence: 0.92 },
@@ -304,7 +358,13 @@ std::wstring frontend_host_script() {
     targetLanguage: input.targetLanguage || settings.targetLanguage,
     asrProviderId: input.asrProviderId || settings.asrProviderId,
     whisperModelId: input.whisperModelId || settings.whisperModelId,
+    localWhisperUseCuda: input.localWhisperUseCuda ?? settings.localWhisperUseCuda,
+    allowWhisperAssetDownload: input.allowWhisperAssetDownload ?? settings.allowWhisperAssetDownload,
+    allowCloudAsrUpload: input.allowCloudAsrUpload ?? settings.allowCloudAsrUpload,
     translationProviderPriority: input.translationProviderPriority || settings.translationProviderPriority,
+    translationConcurrency: input.translationConcurrency || settings.translationConcurrency,
+    translationRequestsPerMinute: input.translationRequestsPerMinute || settings.translationRequestsPerMinute,
+    translationTokenBudgetPerMinute: input.translationTokenBudgetPerMinute || settings.translationTokenBudgetPerMinute,
     subtitleDocument: {
       id: 'native-preview-document',
       format: 'srt',
@@ -355,8 +415,20 @@ std::wstring frontend_host_script() {
     settings: {
       get: async () => settings,
       update: async (patch) => (settings = { ...settings, ...patch }),
-      setSecret: async () => undefined,
-      testProvider: async (providerId) => ({ providerId, ok: true, status: 'healthy' })
+      getSecret: async (providerId) => providerSecrets[providerId] ? { ...providerSecrets[providerId] } : undefined,
+      setSecret: async (providerId, secret) => {
+        providerSecrets = { ...providerSecrets, [providerId]: { ...secret } };
+      },
+      testProvider: async (providerId) => {
+        if (providerId === 'mock.local' || providerId === 'mock.asr') {
+          return { providerId, ok: true, status: 'healthy', message: 'Mock provider is always available in native preview.' };
+        }
+        const secret = providerSecrets[providerId] || {};
+        if (!secret.apiKey) {
+          return { providerId, ok: false, status: 'unconfigured', message: 'API key is required for this provider.' };
+        }
+        return { providerId, ok: true, status: 'healthy', message: 'Provider configuration looks usable.' };
+      }
     },
     assets: {
       listWhisperModels: async () => [{ id: 'base', displayName: 'Whisper base', languageScope: 'multilingual', sizeBytes: 0, installed: false, sha256: '' }],
@@ -366,7 +438,13 @@ std::wstring frontend_host_script() {
         cacheDir: '',
         binary: { expectedPath: '', installed: false, verified: false },
         model: { id: request.modelId, expectedPath: '', installed: false, verified: false },
-        acceleration: { requested: 'auto', selected: 'cpu' },
+        acceleration: {
+          requested: request.preferCuda ? 'gpu' : 'cpu',
+          selected: 'cpu',
+          cudaSupported: )JS" << (cuda_supported ? L"true" : L"false") << LR"JS(,
+          runtimeVariant: 'cpu',
+          fallbackReason: request.preferCuda ? 'Native preview build does not bundle CUDA whisper runtime.' : undefined
+        },
         actionRequired: 'manifest-not-configured',
         message: 'The bundled whisper manifest is disabled until trusted URLs and pinned SHA-256 values are provided.'
       }),
@@ -381,12 +459,15 @@ std::wstring frontend_host_script() {
         whisperRuntimeAvailable: false,
         ffmpegAvailable: false,
         ffprobeAvailable: false,
-        hardwareAcceleration: 'cpu'
+        hardwareAcceleration: ')JS" << (cuda_supported ? L"gpu" : L"cpu") << LR"JS(',
+        cudaSupported: )JS" << (cuda_supported ? L"true" : L"false") << LR"JS(,
+        recommendedLocalAcceleration: ')JS" << (cuda_supported ? L"gpu" : L"cpu") << LR"JS('
       })
     }
   };
 })();
 )JS";
+  return script.str();
 }
 
 void release_webview() {

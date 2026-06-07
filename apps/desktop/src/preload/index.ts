@@ -59,6 +59,7 @@ const api = {
   settings: {
     get: () => ipcRenderer.invoke('settings:get') as Promise<AppSettingsPublic>,
     update: (patch: AppSettingsPatch) => ipcRenderer.invoke('settings:update', patch) as Promise<AppSettingsPublic>,
+    getSecret: (providerId: string) => ipcRenderer.invoke('settings:get-secret', providerId) as Promise<ProviderSecretInput | undefined>,
     setSecret: (providerId: string, secret: ProviderSecretInput) =>
       ipcRenderer.invoke('settings:set-secret', providerId, secret) as Promise<void>,
     testProvider: (providerId: string) => ipcRenderer.invoke('settings:test-provider', providerId) as Promise<ProviderHealth>

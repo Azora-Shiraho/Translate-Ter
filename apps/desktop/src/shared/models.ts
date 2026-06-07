@@ -49,6 +49,7 @@ export type AppSettingsPublic = {
   targetLanguage: string;
   asrProviderId: string;
   whisperModelId: string;
+  localWhisperUseCuda: boolean;
   allowWhisperAssetDownload: boolean;
   allowCloudAsrUpload: boolean;
   translationProviderPriority: string[];
@@ -85,6 +86,7 @@ export type WhisperModelInfo = {
 export type WhisperRuntimeRequest = {
   modelId: string;
   allowDownload: boolean;
+  preferCuda: boolean;
 };
 
 export type WhisperRuntimeStatus = {
@@ -105,6 +107,8 @@ export type WhisperRuntimeStatus = {
   acceleration: {
     requested: 'auto' | 'gpu' | 'cpu';
     selected: 'gpu' | 'cpu';
+    cudaSupported: boolean;
+    runtimeVariant: 'cpu' | 'cuda' | 'metal' | 'vulkan';
     fallbackReason?: string;
   };
   actionRequired?:
@@ -123,6 +127,7 @@ export type CreateJobRequest = {
   targetLanguage: string;
   asrProviderId: string;
   whisperModelId: string;
+  localWhisperUseCuda?: boolean;
   allowWhisperAssetDownload?: boolean;
   allowCloudAsrUpload?: boolean;
   translationProviderPriority: string[];
@@ -155,6 +160,7 @@ export type JobSnapshot = {
   targetLanguage: string;
   asrProviderId: string;
   whisperModelId: string;
+  localWhisperUseCuda: boolean;
   allowWhisperAssetDownload: boolean;
   allowCloudAsrUpload: boolean;
   translationProviderPriority: string[];
@@ -183,7 +189,11 @@ export type NativeHealth = {
   status: 'ok' | 'degraded';
   capabilities: string[];
   whisperRuntimeAvailable: boolean;
+  ffmpegAvailable?: boolean;
+  ffprobeAvailable?: boolean;
   hardwareAcceleration: 'cpu' | 'gpu' | 'unknown';
+  cudaSupported: boolean;
+  recommendedLocalAcceleration: 'gpu' | 'cpu';
 };
 
 export type NativeProtocolType =

@@ -17,6 +17,7 @@ export type NativeTranscribePayload = {
   sourceLanguage: string;
   targetLanguage?: string;
   asrProviderId?: string;
+  preferCuda?: boolean;
   runtime?: {
     binaryPath?: string;
     modelPath?: string;
@@ -53,7 +54,11 @@ export class NativeBackendClient {
       status: 'degraded',
       capabilities: ['runtime.health'],
       whisperRuntimeAvailable: false,
-      hardwareAcceleration: 'unknown'
+      ffmpegAvailable: false,
+      ffprobeAvailable: false,
+      hardwareAcceleration: 'unknown',
+      cudaSupported: false,
+      recommendedLocalAcceleration: 'cpu'
     };
   }
 

@@ -133,6 +133,13 @@ std::optional<double> extract_number(const std::string& json, const std::string&
   return std::stod(match[1].str());
 }
 
+std::optional<bool> extract_bool(const std::string& json, const std::string& key) {
+  const std::regex pattern("\\\"" + key + "\\\"\\s*:\\s*(true|false)");
+  std::smatch match;
+  if (!std::regex_search(json, match, pattern)) return std::nullopt;
+  return match[1].str() == "true";
+}
+
 bool starts_with(std::string_view value, std::string_view prefix) {
   return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
 }
@@ -302,6 +309,30 @@ std::string bool_json(bool value) {
   return value ? "true" : "false";
 }
 
+bool detect_cuda_support() {
+  if (std::getenv("CUDA_PATH") != nullptr || std::getenv("CUDA_HOME") != nullptr) {
+    return true;
+  }
+
+  if (find_tool("nvidia-smi").has_value()) {
+    return true;
+  }
+
+#if defined(_WIN32)
+  const auto gpu_probe = run_command_capture(
+      "powershell.exe -NoProfile -Command \"(Get-CimInstance Win32_VideoController | "
+      "Where-Object { $_.Name -match 'NVIDIA' } | Measure-Object).Count\"");
+  if (gpu_probe.exit_code == 0) {
+    const auto count = without_line_breaks(gpu_probe.output);
+    if (!count.empty() && count != "0") {
+      return true;
+    }
+  }
+#endif
+
+  return false;
+}
+
 std::filesystem::path requested_output_dir(const std::string& request, const std::string& job_id, std::string_view phase) {
   if (const auto output_dir = extract_string(request, "outputDir")) {
     return std::filesystem::path(*output_dir);
@@ -312,13 +343,16 @@ std::filesystem::path requested_output_dir(const std::string& request, const std
 std::string health_payload() {
   const bool ffmpeg_available = find_tool("ffmpeg").has_value();
   const bool ffprobe_available = find_tool("ffprobe").has_value();
+  const bool cuda_supported = detect_cuda_support();
   std::ostringstream payload;
   payload << "{\"protocolVersion\":1,\"backendVersion\":\"0.4.0\",\"status\":\""
           << (ffmpeg_available && ffprobe_available ? "degraded" : "degraded")
           << "\",\"capabilities\":[\"runtime.health\",\"media.probe\",\"audio.extract\",\"srt.parse\",\"srt.serialize\","
              "\"asr.transcribe\",\"job.cancel\"],\"whisperRuntimeAvailable\":false,\"ffmpegAvailable\":"
           << bool_json(ffmpeg_available) << ",\"ffprobeAvailable\":" << bool_json(ffprobe_available)
-          << ",\"hardwareAcceleration\":\"cpu\"}";
+          << ",\"hardwareAcceleration\":\"" << (cuda_supported ? "gpu" : "cpu") << "\",\"cudaSupported\":"
+          << bool_json(cuda_supported) << ",\"recommendedLocalAcceleration\":\"" << (cuda_supported ? "gpu" : "cpu")
+          << "\"}";
   return payload.str();
 }
 
@@ -821,6 +855,8 @@ NativeResult asr_transcribe_result(const std::string& request) {
   const auto source_language = extract_string(request, "sourceLanguage").value_or("auto");
   const auto target_language = extract_string(request, "targetLanguage").value_or("");
   const auto job_id = extract_string(request, "jobId").value_or("native-job");
+  const bool prefer_cuda = extract_bool(request, "preferCuda").value_or(false);
+  const bool cuda_supported = detect_cuda_support();
 
   if (asr_provider == "mock.asr") {
     std::vector<SubtitleWarning> warnings;
@@ -911,6 +947,9 @@ NativeResult asr_transcribe_result(const std::string& request) {
   if (source_language != "auto" && !source_language.empty()) {
     command << " -l " << quote_shell_value(source_language);
   }
+  if (prefer_cuda && cuda_supported) {
+    command << " -ngl 999";
+  }
 
   const auto output = run_command_capture(command.str());
   const auto srt_path = output_base.string() + ".srt";
@@ -927,6 +966,9 @@ NativeResult asr_transcribe_result(const std::string& request) {
   warnings.push_back({"NativeWhisperRuntime", "Transcription was produced by a verified local whisper.cpp runtime.", ""});
   if (extracted_audio) {
     warnings.push_back({"AudioPreExtracted", "Input media was converted to mono 16 kHz WAV before transcription.", ""});
+  }
+  if (prefer_cuda && !cuda_supported) {
+    warnings.push_back({"CudaFallback", "CUDA acceleration was requested but the native backend did not detect CUDA support.", ""});
   }
   const auto srt_text = read_text_file(srt_path);
   if (srt_text.empty()) {

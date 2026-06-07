@@ -138,6 +138,7 @@ function registerIpc(): void {
 
   ipcMain.handle('settings:get', async () => settingsStore.get());
   ipcMain.handle('settings:update', async (_event, patch) => settingsStore.update(patch));
+  ipcMain.handle('settings:get-secret', async (_event, providerId: string) => settingsStore.getSecret(providerId));
   ipcMain.handle('settings:set-secret', async (_event, providerId, secret) => settingsStore.setSecret(providerId, secret));
   ipcMain.handle('settings:test-provider', async (_event, providerId: string) => {
     const asrProvider = asrProviders.find((provider) => provider.id === providerId);

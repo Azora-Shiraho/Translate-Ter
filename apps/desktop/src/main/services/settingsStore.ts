@@ -1,10 +1,11 @@
 import { app, safeStorage } from 'electron';
+import { spawnSync } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { chmodSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { AppSettingsPatch, AppSettingsPublic, ProviderSecretInput } from '@shared/models';
 
-const DEFAULT_SETTINGS: AppSettingsPublic = {
+const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = {
   schemaVersion: 1,
   uiLanguage: 'en-US',
   sourceLanguage: 'auto',
@@ -20,19 +21,24 @@ const DEFAULT_SETTINGS: AppSettingsPublic = {
 };
 
 export class SettingsStore {
+  private defaultsPromise: Promise<AppSettingsPublic> | undefined;
+
   async get(): Promise<AppSettingsPublic> {
+    const defaults = await this.defaults();
     try {
       const raw = await readFile(this.settingsPath(), 'utf8');
-      return { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as AppSettingsPublic), schemaVersion: 1 };
+      return { ...defaults, ...(JSON.parse(raw) as AppSettingsPublic), schemaVersion: 1 };
     } catch {
-      await this.write(DEFAULT_SETTINGS);
-      return DEFAULT_SETTINGS;
+      await this.write(defaults);
+      return defaults;
     }
   }
 
   async update(patch: AppSettingsPatch): Promise<AppSettingsPublic> {
     const current = await this.get();
+    const defaults = await this.defaults();
     const next: AppSettingsPublic = {
+      ...defaults,
       ...current,
       ...patch,
       schemaVersion: 1,
@@ -41,13 +47,13 @@ export class SettingsStore {
         patch.translationRequestsPerMinute ?? current.translationRequestsPerMinute,
         1,
         600,
-        DEFAULT_SETTINGS.translationRequestsPerMinute
+        defaults.translationRequestsPerMinute
       ),
       translationTokenBudgetPerMinute: clampPositiveInteger(
         patch.translationTokenBudgetPerMinute ?? current.translationTokenBudgetPerMinute,
         1000,
         1_000_000,
-        DEFAULT_SETTINGS.translationTokenBudgetPerMinute
+        defaults.translationTokenBudgetPerMinute
       )
     };
     await this.write(next);
@@ -98,6 +104,16 @@ export class SettingsStore {
     }
   }
 
+  private async defaults(): Promise<AppSettingsPublic> {
+    if (!this.defaultsPromise) {
+      this.defaultsPromise = Promise.resolve({
+        ...STATIC_DEFAULT_SETTINGS,
+        localWhisperUseCuda: detectCudaSupport()
+      });
+    }
+    return this.defaultsPromise;
+  }
+
   private async write(settings: AppSettingsPublic): Promise<void> {
     const file = this.settingsPath();
     await mkdir(dirname(file), { recursive: true });
@@ -114,6 +130,37 @@ export class SettingsStore {
   }
 }
 
+function detectCudaSupport(): boolean {
+  const hasCudaEnv = Boolean(process.env.CUDA_PATH || process.env.CUDA_HOME);
+  if (hasCudaEnv) return true;
+
+  const nvidiaSmi = spawnSync('nvidia-smi', ['-L'], {
+    windowsHide: true,
+    stdio: 'ignore'
+  });
+  if (nvidiaSmi.status === 0) return true;
+
+  if (process.platform === 'win32') {
+    const nvidiaGpu = spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        "(Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'NVIDIA' } | Measure-Object).Count"
+      ],
+      {
+        windowsHide: true,
+        encoding: 'utf8'
+      }
+    );
+    if (nvidiaGpu.status === 0 && Number.parseInt(String(nvidiaGpu.stdout ?? '').trim(), 10) > 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 type SecretRecord =
   | {
       schemaVersion: 1;
@@ -128,11 +175,11 @@ type SecretRecord =
     };
 
 function hasSecretValue(secret: ProviderSecretInput): boolean {
-  return Boolean(secret.apiKey || secret.baseUrl || secret.organization);
+  return Boolean(secret.apiKey || secret.baseUrl || secret.organization || secret.model);
 }
 
 function clampConcurrency(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_SETTINGS.translationConcurrency;
+  if (!Number.isFinite(value)) return STATIC_DEFAULT_SETTINGS.translationConcurrency;
   return Math.max(1, Math.min(6, Math.round(value)));
 }
 

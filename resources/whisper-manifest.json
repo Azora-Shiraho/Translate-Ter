@@ -1,7 +1,7 @@
 {
   "manifestVersion": 1,
-  "enabled": false,
-  "note": "Disabled sample manifest. Replace this file with a trusted local or remote manifest containing real URLs, sizes, and pinned non-zero SHA-256 values before enabling downloads or execution.",
+  "enabled": true,
+  "note": "Windows x64 runtime is pinned to an official whisper.cpp release archive. Linux and macOS runtime assets remain unconfigured until verified distribution URLs and hashes are added.",
   "downloadPolicy": {
     "requiresUserConsent": true,
     "verifyBeforeInstall": true,
@@ -36,13 +36,13 @@
   },
   "runtime": {
     "provider": "whisper.cpp",
-    "version": "sample-disabled",
+    "version": "v1.8.3",
     "cliKind": "whisper-cli",
     "platforms": {
       "win32-x64": {
-        "binary": "bin/whisper-cli.exe",
-        "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-        "url": "disabled://sample-whisper-cli-win32-x64",
+        "binary": "bin/Release/whisper-cli.exe",
+        "sha256": "d824b1e37599f882b396e73f1ee0bfd5d0529f700314c48311dcbd00b803321d",
+        "url": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-bin-x64.zip",
         "acceleration": "cpu"
       },
       "linux-x64": {
@@ -62,21 +62,21 @@
   "models": [
     {
       "id": "ggml-base",
-      "displayName": "Whisper base (sample, not configured)",
+      "displayName": "Whisper base",
       "languageScope": "multilingual",
-      "sizeBytes": 0,
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sizeBytes": 147951465,
+      "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
       "path": "models/ggml-base.bin",
-      "url": "disabled://sample-model"
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
     },
     {
       "id": "ggml-small",
-      "displayName": "Whisper small (sample, not configured)",
+      "displayName": "Whisper small",
       "languageScope": "multilingual",
-      "sizeBytes": 0,
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "sizeBytes": 487601967,
+      "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
       "path": "models/ggml-small.bin",
-      "url": "disabled://sample-model-small"
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
     }
   ]
 }

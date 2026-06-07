@@ -26,6 +26,7 @@ import type {
   JobSnapshot,
   NativeHealth,
   ProviderHealth,
+  ProviderSecretInput,
   SubtitleSegment,
   SubtitleStatus,
   WhisperModelInfo,
@@ -54,6 +55,7 @@ function App(): JSX.Element {
   const [nativeHealth, setNativeHealth] = useState<NativeHealth>();
   const [runtimeStatus, setRuntimeStatus] = useState<WhisperRuntimeStatus>();
   const [providerHealth, setProviderHealth] = useState<Record<string, ProviderHealth>>({});
+  const [providerSecrets, setProviderSecrets] = useState<Record<string, ProviderSecretInput>>({});
   const [job, setJob] = useState<JobSnapshot>();
   const [mediaPath, setMediaPath] = useState('');
   const [exportPath, setExportPath] = useState('');
@@ -75,10 +77,18 @@ function App(): JSX.Element {
         window.translateTer.assets.listWhisperModels(),
         window.translateTer.native.health().catch(() => undefined)
       ]);
+      const [cloudAsrSecret, llmSecret] = await Promise.all([
+        window.translateTer.settings.getSecret('cloud.openai'),
+        window.translateTer.settings.getSecret('openai.compatible')
+      ]);
       if (!mounted) return;
       setSettings(nextSettings);
       setModels(nextModels);
       setNativeHealth(nextHealth);
+      setProviderSecrets({
+        'cloud.openai': cloudAsrSecret ?? {},
+        'openai.compatible': llmSecret ?? {}
+      });
       await i18n.changeLanguage(nextSettings.uiLanguage);
       if (mounted) setMessage(i18n.t('ready'));
     })();
@@ -113,7 +123,8 @@ function App(): JSX.Element {
     try {
       const status = await window.translateTer.assets.ensureWhisperRuntime({
         modelId: settings.whisperModelId,
-        allowDownload: false
+        allowDownload: settings.allowWhisperAssetDownload,
+        preferCuda: settings.localWhisperUseCuda
       });
       setRuntimeStatus(status);
       setMessage(status.message ?? t(runtimeActionLabel(status.actionRequired)));
@@ -128,6 +139,10 @@ function App(): JSX.Element {
   async function testProvider(providerId: string): Promise<void> {
     setCheckingProvider(providerId);
     try {
+      const draftSecret = providerSecrets[providerId];
+      if (draftSecret) {
+        await window.translateTer.settings.setSecret(providerId, draftSecret);
+      }
       const health = await window.translateTer.settings.testProvider(providerId);
       setProviderHealth((current) => ({ ...current, [providerId]: health }));
       setMessage(health.message ?? t(providerStatusLabel(health.status)));
@@ -153,6 +168,7 @@ function App(): JSX.Element {
         targetLanguage: settings.targetLanguage,
         asrProviderId: settings.asrProviderId,
         whisperModelId: settings.whisperModelId,
+        localWhisperUseCuda: settings.localWhisperUseCuda,
         allowWhisperAssetDownload: settings.allowWhisperAssetDownload,
         allowCloudAsrUpload: settings.allowCloudAsrUpload,
         translationProviderPriority: settings.translationProviderPriority,
@@ -207,6 +223,21 @@ function App(): JSX.Element {
     });
   }
 
+  async function saveProviderSecret(providerId: string): Promise<void> {
+    await window.translateTer.settings.setSecret(providerId, providerSecrets[providerId] ?? {});
+    setMessage(t('providerSaved'));
+  }
+
+  function updateProviderSecret(providerId: string, patch: Partial<ProviderSecretInput>): void {
+    setProviderSecrets((current) => ({
+      ...current,
+      [providerId]: {
+        ...current[providerId],
+        ...patch
+      }
+    }));
+  }
+
   const currentStepIndex = useMemo(() => {
     const step = job?.step ?? 'import';
     return steps.indexOf(step);
@@ -222,6 +253,12 @@ function App(): JSX.Element {
   const warningCount = (job?.warnings.length ?? 0) + (job?.subtitleDocument?.metadata.warnings.length ?? 0);
   const sourceLabel = settings ? languageLabel(settings.sourceLanguage, settings.uiLanguage) : '';
   const targetLabel = settings ? languageLabel(settings.targetLanguage, settings.uiLanguage) : '';
+  const translationProviderId = settings?.translationProviderPriority[0] ?? 'mock.local';
+  const supportsCuda = Boolean(nativeHealth?.cudaSupported || runtimeStatus?.acceleration.cudaSupported);
+  const llmHealth = providerHealth[translationProviderId];
+  const asrHealth = providerHealth[settings?.asrProviderId ?? 'mock.asr'];
+  const cloudAsrSecret = providerSecrets['cloud.openai'] ?? {};
+  const llmSecret = providerSecrets['openai.compatible'] ?? {};
 
   if (!settings) return <div className="boot">Translate-Ter</div>;
 
@@ -390,38 +427,111 @@ function App(): JSX.Element {
             <ProviderCard
               activeId={settings.asrProviderId}
               detail={t(asrProviders.find((provider) => provider.id === settings.asrProviderId)?.descriptionKey ?? 'providerReady')}
-              health={providerHealth[settings.asrProviderId]}
+              health={asrHealth}
               loading={checkingProvider === settings.asrProviderId}
               onTest={() => void testProvider(settings.asrProviderId)}
             />
-            <label>
-              {t('whisperModel')}
-              <select value={settings.whisperModelId} onChange={(event) => void updateSettings({ whisperModelId: event.target.value })}>
-                {models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.displayName} · {model.installed ? t('installed') : t('missing')}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="modelCard">
-              <div>
-                <span className={selectedModel?.installed ? 'signal good' : 'signal'} />
-                <strong>{selectedModel?.displayName ?? t('whisperModel')}</strong>
-                <small>{selectedModel ? formatBytes(selectedModel.sizeBytes) : t('missing')}</small>
-              </div>
-              <button className="secondary compact" disabled={checkingRuntime} onClick={() => void checkRuntime()}>
-                <HardDriveDownload size={16} />
-                {checkingRuntime ? t('checking') : t('checkRuntime')}
-              </button>
-              {runtimeStatus && (
-                <p>
-                  {t(runtimeActionLabel(runtimeStatus.actionRequired))}
-                  {' · '}
-                  {runtimeStatus.acceleration.selected.toUpperCase()}
-                </p>
-              )}
-            </div>
+            {settings.asrProviderId === 'mock.asr' && (
+              <InlineNotice
+                title={t('mockProvider')}
+                detail={t('mockProviderBypass')}
+              />
+            )}
+            {settings.asrProviderId === 'local.whisper.cpp' && (
+              <>
+                <div className="providerCard">
+                  <div>
+                    <strong>{t('localRuntimeSettings')}</strong>
+                    <small>{t('localProviderDetail')}</small>
+                  </div>
+                </div>
+                <label>
+                  {t('whisperModel')}
+                  <select value={settings.whisperModelId} onChange={(event) => void updateSettings({ whisperModelId: event.target.value })}>
+                    {models.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.displayName} · {model.installed ? t('installed') : t('missing')}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <ToggleField
+                  label={t('allowWhisperDownloads')}
+                  detail={t('allowWhisperDownloadsDetail')}
+                  checked={settings.allowWhisperAssetDownload}
+                  onChange={(checked) => void updateSettings({ allowWhisperAssetDownload: checked })}
+                />
+                <ToggleField
+                  label={t('cudaAcceleration')}
+                  detail={supportsCuda ? t('cudaDetected') : t('cudaUnavailable')}
+                  checked={settings.localWhisperUseCuda}
+                  disabled={!supportsCuda}
+                  onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
+                />
+                <div className="modelCard">
+                  <div>
+                    <span className={selectedModel?.installed ? 'signal good' : 'signal'} />
+                    <strong>{selectedModel?.displayName ?? t('whisperModel')}</strong>
+                    <small>{selectedModel ? formatBytes(selectedModel.sizeBytes) : t('missing')}</small>
+                  </div>
+                  <button className="secondary compact" disabled={checkingRuntime} onClick={() => void checkRuntime()}>
+                    <HardDriveDownload size={16} />
+                    {checkingRuntime ? t('checking') : t('checkRuntime')}
+                  </button>
+                  {runtimeStatus && (
+                    <p title={runtimeStatus.acceleration.fallbackReason}>
+                      {t(runtimeActionLabel(runtimeStatus.actionRequired))}
+                      {' · '}
+                      {runtimeStatus.acceleration.selected.toUpperCase()}
+                      {' · '}
+                      {t('runtimeVariant')}: {runtimeStatus.acceleration.runtimeVariant.toUpperCase()}
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+            {settings.asrProviderId === 'cloud.openai' && (
+              <>
+                <div className="providerCard">
+                  <div>
+                    <strong>{t('cloudProviderSettings')}</strong>
+                    <small>{t('cloudProviderDetail')}</small>
+                  </div>
+                </div>
+                <TextField
+                  label={t('baseUrl')}
+                  value={cloudAsrSecret.baseUrl ?? ''}
+                  placeholder="https://api.openai.com/v1"
+                  onChange={(value) => updateProviderSecret('cloud.openai', { baseUrl: value })}
+                />
+                <TextField
+                  label={t('apiKey')}
+                  value={cloudAsrSecret.apiKey ?? ''}
+                  placeholder="sk-..."
+                  type="password"
+                  onChange={(value) => updateProviderSecret('cloud.openai', { apiKey: value })}
+                />
+                <TextField
+                  label={t('model')}
+                  value={cloudAsrSecret.model ?? ''}
+                  placeholder="whisper-1"
+                  onChange={(value) => updateProviderSecret('cloud.openai', { model: value })}
+                />
+                <ToggleField
+                  label={t('uploadConsent')}
+                  detail={t('uploadConsentDetail')}
+                  checked={settings.allowCloudAsrUpload}
+                  onChange={(checked) => void updateSettings({ allowCloudAsrUpload: checked })}
+                />
+                <ProviderActionRow
+                  savingLabel={t('saveProvider')}
+                  testingLabel={checkingProvider === 'cloud.openai' ? t('checking') : t('test')}
+                  onSave={() => void saveProviderSecret('cloud.openai')}
+                  onTest={() => void testProvider('cloud.openai')}
+                  testDisabled={checkingProvider === 'cloud.openai'}
+                />
+              </>
+            )}
             <button className="primary" disabled={busy || !mediaPath.trim()} onClick={() => void createAndStart()}>
               <Play size={16} />
               {t('startTranscription')}
@@ -432,8 +542,13 @@ function App(): JSX.Element {
             <label>
               {t('translationProvider')}
               <select
-                value={settings.translationProviderPriority[0] ?? 'mock.local'}
-                onChange={(event) => void updateSettings({ translationProviderPriority: [event.target.value, 'mock.local'] })}
+                value={translationProviderId}
+                onChange={(event) =>
+                  void updateSettings({
+                    translationProviderPriority:
+                      event.target.value === 'mock.local' ? ['mock.local'] : [event.target.value, 'mock.local']
+                  })
+                }
               >
                 {translationProviders.map((provider) => (
                   <option key={provider} value={provider}>
@@ -443,12 +558,88 @@ function App(): JSX.Element {
               </select>
             </label>
             <ProviderCard
-              activeId={settings.translationProviderPriority[0] ?? 'mock.local'}
+              activeId={translationProviderId}
               detail={t('translationProviderDetail')}
-              health={providerHealth[settings.translationProviderPriority[0] ?? 'mock.local']}
-              loading={checkingProvider === (settings.translationProviderPriority[0] ?? 'mock.local')}
-              onTest={() => void testProvider(settings.translationProviderPriority[0] ?? 'mock.local')}
+              health={llmHealth}
+              loading={checkingProvider === translationProviderId}
+              onTest={() => void testProvider(translationProviderId)}
             />
+            {translationProviderId === 'mock.local' && (
+              <InlineNotice
+                title={t('translationProvider')}
+                detail={t('mockTranslationBypass')}
+              />
+            )}
+            {translationProviderId === 'openai.compatible' && (
+              <>
+                <div className="providerCard">
+                  <div>
+                    <strong>{t('llmProviderSettings')}</strong>
+                    <small>{t('translationProviderDetail')}</small>
+                  </div>
+                </div>
+                <TextField
+                  label={t('baseUrl')}
+                  value={llmSecret.baseUrl ?? ''}
+                  placeholder="https://api.openai.com/v1"
+                  onChange={(value) => updateProviderSecret('openai.compatible', { baseUrl: value })}
+                />
+                <TextField
+                  label={t('apiKey')}
+                  value={llmSecret.apiKey ?? ''}
+                  placeholder="sk-..."
+                  type="password"
+                  onChange={(value) => updateProviderSecret('openai.compatible', { apiKey: value })}
+                />
+                <TextField
+                  label={t('model')}
+                  value={llmSecret.model ?? ''}
+                  placeholder="gpt-4o-mini"
+                  onChange={(value) => updateProviderSecret('openai.compatible', { model: value })}
+                />
+                <TextField
+                  label={t('organization')}
+                  value={llmSecret.organization ?? ''}
+                  placeholder={t('optional')}
+                  onChange={(value) => updateProviderSecret('openai.compatible', { organization: value })}
+                />
+                <div className="providerCard">
+                  <div>
+                    <strong>{t('translationRateLimits')}</strong>
+                    <small>{t('translationRateLimitsDetail')}</small>
+                  </div>
+                </div>
+                <NumberField
+                  label={t('concurrency')}
+                  min={1}
+                  max={6}
+                  value={settings.translationConcurrency}
+                  onChange={(value) => void updateSettings({ translationConcurrency: value })}
+                />
+                <NumberField
+                  label={t('requestsPerMinute')}
+                  min={1}
+                  max={600}
+                  value={settings.translationRequestsPerMinute}
+                  onChange={(value) => void updateSettings({ translationRequestsPerMinute: value })}
+                />
+                <NumberField
+                  label={t('tokenBudgetPerMinute')}
+                  min={1000}
+                  max={1000000}
+                  step={1000}
+                  value={settings.translationTokenBudgetPerMinute}
+                  onChange={(value) => void updateSettings({ translationTokenBudgetPerMinute: value })}
+                />
+                <ProviderActionRow
+                  savingLabel={t('saveProvider')}
+                  testingLabel={checkingProvider === 'openai.compatible' ? t('checking') : t('test')}
+                  onSave={() => void saveProviderSecret('openai.compatible')}
+                  onTest={() => void testProvider('openai.compatible')}
+                  testDisabled={checkingProvider === 'openai.compatible'}
+                />
+              </>
+            )}
             <button className="primary" disabled={busy || !job?.subtitleDocument} onClick={() => void translateJob()}>
               <Languages size={16} />
               {t('translateSubtitles')}
@@ -502,6 +693,11 @@ function App(): JSX.Element {
                 value={nativeHealth?.hardwareAcceleration?.toUpperCase() ?? t('unknown')}
                 tone={nativeHealth?.hardwareAcceleration === 'gpu' ? 'good' : 'muted'}
               />
+              <StatusLine
+                label={t('cudaAcceleration')}
+                value={supportsCuda ? t('cudaDetectedShort') : t('cudaUnavailableShort')}
+                tone={supportsCuda ? 'good' : 'muted'}
+              />
               <StatusLine label={t('runtimeBinary')} value={runtimeStatus?.binary.installed ? t('installed') : t('notChecked')} tone={runtimeStatus?.binary.installed ? 'good' : 'muted'} />
               <StatusLine label={t('runtimeModel')} value={runtimeStatus?.model.installed ? t('installed') : t('notChecked')} tone={runtimeStatus?.model.installed ? 'good' : 'muted'} />
             </div>
@@ -545,6 +741,17 @@ function InspectorSection(props: { icon: React.ReactNode; title: string; childre
   );
 }
 
+function InlineNotice(props: { title: string; detail: string }): JSX.Element {
+  return (
+    <div className="providerCard">
+      <div>
+        <strong>{props.title}</strong>
+        <small>{props.detail}</small>
+      </div>
+    </div>
+  );
+}
+
 function ProviderCard(props: {
   activeId: string;
   detail: string;
@@ -575,6 +782,93 @@ function StatusLine(props: { label: string; value: string; tone: 'good' | 'muted
     <div className="statusLine">
       <span>{props.label}</span>
       <strong className={props.tone}>{props.value}</strong>
+    </div>
+  );
+}
+
+function TextField(props: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  type?: 'text' | 'password';
+}): JSX.Element {
+  return (
+    <label>
+      {props.label}
+      <input
+        type={props.type ?? 'text'}
+        value={props.value}
+        placeholder={props.placeholder}
+        onChange={(event) => props.onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function NumberField(props: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onChange: (value: number) => void;
+}): JSX.Element {
+  return (
+    <label>
+      {props.label}
+      <input
+        type="number"
+        min={props.min}
+        max={props.max}
+        step={props.step ?? 1}
+        value={props.value}
+        onChange={(event) => props.onChange(Number(event.target.value))}
+      />
+    </label>
+  );
+}
+
+function ToggleField(props: {
+  label: string;
+  detail: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}): JSX.Element {
+  return (
+    <label>
+      {props.label}
+      <div className="statusLine">
+        <span>{props.detail}</span>
+        <input
+          type="checkbox"
+          checked={props.checked}
+          disabled={props.disabled}
+          onChange={(event) => props.onChange(event.target.checked)}
+        />
+      </div>
+    </label>
+  );
+}
+
+function ProviderActionRow(props: {
+  savingLabel: string;
+  testingLabel: string;
+  onSave: () => void;
+  onTest: () => void;
+  testDisabled?: boolean;
+}): JSX.Element {
+  return (
+    <div className="segmented two">
+      <button onClick={props.onSave}>
+        <Save size={16} />
+        {props.savingLabel}
+      </button>
+      <button onClick={props.onTest} disabled={props.testDisabled}>
+        <CheckCircle2 size={16} />
+        {props.testingLabel}
+      </button>
     </div>
   );
 }

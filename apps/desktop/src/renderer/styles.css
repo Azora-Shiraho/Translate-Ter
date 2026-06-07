@@ -330,7 +330,7 @@ h3 {
 }
 
 textarea,
-input,
+input:not([type='checkbox']),
 select {
   width: 100%;
   border: 1px solid #d2d2d7;
@@ -341,7 +341,7 @@ select {
 }
 
 textarea:focus,
-input:focus,
+input:not([type='checkbox']):focus,
 select:focus {
   border-color: #0071e3;
 }
@@ -352,10 +352,16 @@ textarea {
   padding: 8px 10px;
 }
 
-input,
+input:not([type='checkbox']),
 select {
   height: 36px;
   padding: 0 10px;
+}
+
+input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
 }
 
 .status {
@@ -529,6 +535,10 @@ label {
 }
 
 .segmented button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 30px;
   overflow: hidden;
   border-radius: 999px;
