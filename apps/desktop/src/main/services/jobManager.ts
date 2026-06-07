@@ -41,6 +41,8 @@ export class JobManager extends EventEmitter {
       translationConcurrency: request.translationConcurrency ?? 2,
       translationRequestsPerMinute: request.translationRequestsPerMinute ?? 60,
       translationTokenBudgetPerMinute: request.translationTokenBudgetPerMinute ?? 60_000,
+      translationLinesPerRequest: request.translationLinesPerRequest ?? 8,
+      translationBatchStride: request.translationBatchStride ?? 4,
       warnings: [],
       createdAt: now,
       updatedAt: now
@@ -91,8 +93,7 @@ export class JobManager extends EventEmitter {
 
     await this.setProgress(job, 'extracting-audio', 38, 'Extracting audio.');
     const extraction = await this.nativeBackend.extractAudio({
-      mediaPath: job.mediaPath,
-      segmentDurationSec: 60
+      mediaPath: job.mediaPath
     });
     if (!extraction.ok && job.asrProviderId !== 'mock.asr') {
       this.fail(job, extraction.error?.code ?? 'AudioExtractFailed', extraction.error?.message ?? 'Native backend failed to extract audio.', true);
@@ -178,7 +179,9 @@ export class JobManager extends EventEmitter {
     const result = await scheduler.translateDocument(job.subtitleDocument, {
       sourceLanguage: job.sourceLanguage === 'auto' ? 'en' : job.sourceLanguage,
       targetLanguage: job.targetLanguage,
-      providerPriority: job.translationProviderPriority
+      providerPriority: job.translationProviderPriority,
+      batchSize: job.translationLinesPerRequest,
+      batchStride: job.translationBatchStride
     });
     job.subtitleDocument = result.document;
     job.step = 'export';

@@ -56,6 +56,8 @@ export type AppSettingsPublic = {
   translationConcurrency: number;
   translationRequestsPerMinute: number;
   translationTokenBudgetPerMinute: number;
+  translationLinesPerRequest: number;
+  translationBatchStride: number;
 };
 
 export type AppSettingsPatch = Partial<AppSettingsPublic>;
@@ -134,6 +136,8 @@ export type CreateJobRequest = {
   translationConcurrency?: number;
   translationRequestsPerMinute?: number;
   translationTokenBudgetPerMinute?: number;
+  translationLinesPerRequest?: number;
+  translationBatchStride?: number;
 };
 
 export type JobStage =
@@ -167,6 +171,8 @@ export type JobSnapshot = {
   translationConcurrency: number;
   translationRequestsPerMinute: number;
   translationTokenBudgetPerMinute: number;
+  translationLinesPerRequest: number;
+  translationBatchStride: number;
   subtitleDocument?: SubtitleDocument;
   error?: {
     code: string;

@@ -174,7 +174,9 @@ function App(): JSX.Element {
         translationProviderPriority: settings.translationProviderPriority,
         translationConcurrency: settings.translationConcurrency,
         translationRequestsPerMinute: settings.translationRequestsPerMinute,
-        translationTokenBudgetPerMinute: settings.translationTokenBudgetPerMinute
+        translationTokenBudgetPerMinute: settings.translationTokenBudgetPerMinute,
+        translationLinesPerRequest: settings.translationLinesPerRequest,
+        translationBatchStride: settings.translationBatchStride
       });
       setJob(nextJob);
     } catch (error) {
@@ -620,6 +622,31 @@ function App(): JSX.Element {
                   step={1000}
                   value={settings.translationTokenBudgetPerMinute}
                   onChange={(value) => void updateSettings({ translationTokenBudgetPerMinute: value })}
+                />
+                <div className="providerCard">
+                  <div>
+                    <strong>{t('translationBatching')}</strong>
+                    <small>{t('translationBatchingDetail')}</small>
+                  </div>
+                </div>
+                <NumberField
+                  label={t('linesPerRequest')}
+                  min={1}
+                  max={32}
+                  value={settings.translationLinesPerRequest}
+                  onChange={(value) =>
+                    void updateSettings({
+                      translationLinesPerRequest: value,
+                      translationBatchStride: Math.min(settings.translationBatchStride, value)
+                    })
+                  }
+                />
+                <NumberField
+                  label={t('batchStride')}
+                  min={1}
+                  max={settings.translationLinesPerRequest}
+                  value={settings.translationBatchStride}
+                  onChange={(value) => void updateSettings({ translationBatchStride: value })}
                 />
                 <ProviderActionRow
                   savingLabel={t('saveProvider')}

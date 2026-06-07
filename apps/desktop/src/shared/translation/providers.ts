@@ -27,10 +27,11 @@ export class MockTranslationProvider implements TranslationProvider {
   }
 
   async translateBatch(request: TranslationBatchRequest): Promise<TranslationBatchResult> {
+    const targetIds = new Set(request.targetSegmentIds ?? request.segments.map((segment) => segment.id));
     return {
       providerId: this.id,
       modelId: 'mock-echo',
-      translations: request.segments.map((segment) => ({
+      translations: request.segments.filter((segment) => targetIds.has(segment.id)).map((segment) => ({
         id: segment.id,
         translatedText: `[${request.targetLanguage}] ${segment.sourceText}`
       }))
@@ -156,8 +157,10 @@ export function buildJsonTranslationPrompt(request: TranslationBatchRequest): st
       requirements: [
         'Do not change timestamps.',
         'Return one translatedText for every segment id.',
-        'Do not merge, split, omit, or invent segment ids.'
+        'Do not merge, split, omit, or invent segment ids.',
+        'Only return translations for ids listed in targetSegmentIds; other segments are context only.'
       ],
+      targetSegmentIds: request.targetSegmentIds ?? request.segments.map((segment) => segment.id),
       segments: request.segments
     },
     null,
@@ -188,7 +191,7 @@ function parseProviderJson(content: string, request: TranslationBatchRequest): T
     });
   }
 
-  const expectedIds = new Set(request.segments.map((segment) => segment.id));
+  const expectedIds = new Set(request.targetSegmentIds ?? request.segments.map((segment) => segment.id));
   const seen = new Set<string>();
   const translations = segments.map((segment) => {
     const candidate = segment as { id?: unknown; translatedText?: unknown };

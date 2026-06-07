@@ -44,6 +44,8 @@ export class TranslationScheduler {
       targetLanguage: string;
       tone?: 'neutral' | 'formal' | 'casual';
       providerPriority?: string[];
+      batchSize?: number;
+      batchStride?: number;
       signal?: AbortSignal;
     }
   ): Promise<TranslationRunResult> {
@@ -60,6 +62,9 @@ export class TranslationScheduler {
       targetLanguage: request.targetLanguage,
       tone: request.tone ?? 'neutral',
       signal: request.signal
+    }, {
+      batchSize: request.batchSize,
+      batchStride: request.batchStride
     });
     const checkpoints: BatchCheckpoint[] = batches.map((batch) => ({
       batchId: batch.batchId,
@@ -113,7 +118,7 @@ export class TranslationScheduler {
                 }
                 const providerResult = await provider.translateBatch(batch);
                 validateTranslationCoverage(
-                  batch.segments.map((segment) => segment.id),
+                  batch.targetSegmentIds ?? batch.segments.map((segment) => segment.id),
                   providerResult.translations.map((item) => item.id)
                 );
                 attemptRecord.completedAt = new Date().toISOString();

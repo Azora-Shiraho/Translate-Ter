@@ -17,7 +17,9 @@ const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = 
   translationProviderPriority: ['mock.local', 'openai.compatible'],
   translationConcurrency: 2,
   translationRequestsPerMinute: 60,
-  translationTokenBudgetPerMinute: 60_000
+  translationTokenBudgetPerMinute: 60_000,
+  translationLinesPerRequest: 8,
+  translationBatchStride: 4
 };
 
 export class SettingsStore {
@@ -54,6 +56,23 @@ export class SettingsStore {
         1000,
         1_000_000,
         defaults.translationTokenBudgetPerMinute
+      ),
+      translationLinesPerRequest: clampPositiveInteger(
+        patch.translationLinesPerRequest ?? current.translationLinesPerRequest,
+        1,
+        32,
+        defaults.translationLinesPerRequest
+      ),
+      translationBatchStride: clampPositiveInteger(
+        patch.translationBatchStride ?? current.translationBatchStride,
+        1,
+        clampPositiveInteger(
+          patch.translationLinesPerRequest ?? current.translationLinesPerRequest,
+          1,
+          32,
+          defaults.translationLinesPerRequest
+        ),
+        defaults.translationBatchStride
       )
     };
     await this.write(next);

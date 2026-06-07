@@ -16,6 +16,7 @@ export type TranslationBatchRequest = {
   tone: 'neutral' | 'formal' | 'casual';
   glossary?: Record<string, string>;
   segments: Pick<SubtitleSegment, 'id' | 'sourceText'>[];
+  targetSegmentIds?: string[];
   signal?: AbortSignal;
 };
 

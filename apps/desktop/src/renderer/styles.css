@@ -279,7 +279,7 @@ button:disabled {
 
 .subtitlePanel {
   min-height: 420px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .panelHeader {
@@ -313,7 +313,7 @@ h3 {
   display: grid;
   grid-template-columns: 102px 102px minmax(200px, 1fr) minmax(200px, 1fr) 106px;
   gap: 10px;
-  align-items: center;
+  align-items: start;
   padding: 10px 14px;
   border-bottom: 1px solid #eeeeef;
   font-size: 13px;
@@ -346,9 +346,10 @@ select:focus {
 }
 
 textarea {
-  min-height: 54px;
+  min-height: 96px;
   resize: vertical;
   padding: 8px 10px;
+  line-height: 1.45;
 }
 
 input:not([type='checkbox']),
