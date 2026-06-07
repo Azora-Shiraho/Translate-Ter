@@ -33,7 +33,7 @@ import type {
   WhisperModelInfo,
   WhisperRuntimeStatus
 } from '@shared/types';
-import type { JobStage } from '@shared/models';
+import type { AssetEvent, JobStage } from '@shared/models';
 import { formatTimestamp } from '@shared/srt';
 import { languageLabel, languageRegistry } from '@shared/languages';
 
@@ -67,6 +67,7 @@ function App(): JSX.Element {
   const [bilingualOrder, setBilingualOrder] = useState<BilingualOrder>('source-first');
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>();
   const [message, setMessage] = useState(t('ready'));
+  const [runtimeActivity, setRuntimeActivity] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [checkingRuntime, setCheckingRuntime] = useState(false);
   const [checkingProvider, setCheckingProvider] = useState<string>();
@@ -100,15 +101,24 @@ function App(): JSX.Element {
       if (mounted) setMessage(i18n.t('ready'));
     })();
 
-    const unsubscribe = window.translateTer.jobs.onEvent((event) => {
+    const unsubscribeJobs = window.translateTer.jobs.onEvent((event) => {
       if (event.type === 'snapshot') setJob(event.job);
       if (event.type === 'progress') setMessage(event.message ?? translateStage(event.stage));
       if (event.type === 'error') setMessage(event.message);
     });
+    const unsubscribeAssets = window.translateTer.assets.onEvent((event) => {
+      const nextMessage = assetEventLabel(event, (key, options) => i18n.t(key, options));
+      setRuntimeActivity(nextMessage);
+      setMessage(nextMessage);
+      if (event.type === 'ready' || event.type === 'error') {
+        void refreshModels();
+      }
+    });
 
     return () => {
       mounted = false;
-      unsubscribe();
+      unsubscribeJobs();
+      unsubscribeAssets();
     };
   }, [i18n, translateStage]);
 
@@ -176,6 +186,8 @@ function App(): JSX.Element {
   async function checkRuntime(): Promise<void> {
     if (!settings) return;
     setCheckingRuntime(true);
+    setRuntimeActivity(t('runtimeChecking'));
+    setMessage(t('runtimeChecking'));
     try {
       const status = await window.translateTer.assets.ensureWhisperRuntime({
         modelId: settings.whisperModelId,
@@ -183,10 +195,14 @@ function App(): JSX.Element {
         preferCuda: settings.localWhisperUseCuda
       });
       setRuntimeStatus(status);
-      setMessage(status.message ?? t(runtimeActionLabel(status.actionRequired)));
+      const nextMessage = status.message ?? t(runtimeActionLabel(status.actionRequired));
+      setRuntimeActivity(nextMessage);
+      setMessage(nextMessage);
       await refreshModels();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      const nextMessage = error instanceof Error ? error.message : String(error);
+      setRuntimeActivity(nextMessage);
+      setMessage(nextMessage);
     } finally {
       setCheckingRuntime(false);
     }
@@ -834,6 +850,7 @@ function App(): JSX.Element {
                           {t('runtimeVariant')}: {runtimeStatus.acceleration.runtimeVariant.toUpperCase()}
                         </p>
                       )}
+                      {runtimeActivity && <p title={runtimeActivity}>{runtimeActivity}</p>}
                     </div>
                   </>
                 )}
@@ -1227,6 +1244,25 @@ function providerStatusLabel(status: ProviderHealth['status']): string {
 
 function runtimeActionLabel(action: WhisperRuntimeStatus['actionRequired'] = 'none'): string {
   return `runtimeAction.${action}`;
+}
+
+function assetEventLabel(event: AssetEvent, t: (key: string, options?: Record<string, unknown>) => string): string {
+  switch (event.type) {
+    case 'download-start':
+      return t('runtimeDownloading');
+    case 'download-progress':
+      return event.receivedBytes
+        ? t('runtimeDownloadingBytes', { bytes: formatBytes(event.receivedBytes) })
+        : t('runtimeDownloading');
+    case 'verify':
+      return t('runtimeVerifying');
+    case 'extract':
+      return t('runtimeExtracting');
+    case 'ready':
+      return t('runtimeReady');
+    case 'error':
+      return t('runtimeError');
+  }
 }
 
 function providerLabel(providerId: string, t: (key: string) => string): string {

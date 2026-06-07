@@ -263,6 +263,7 @@ export class WhisperAssetManager extends EventEmitter {
       stream.on('finish', resolveDownload);
 
       const reader = response.body!.getReader();
+      let receivedBytes = 0;
       const pump = (): void => {
         reader
           .read()
@@ -272,11 +273,12 @@ export class WhisperAssetManager extends EventEmitter {
               return;
             }
             const chunk = Buffer.from(value);
+            receivedBytes += chunk.length;
             this.emitAsset({
               type: 'download-progress',
               scope,
               message: scope === 'runtime' ? 'Downloading whisper runtime...' : 'Downloading whisper model...',
-              receivedBytes: chunk.length
+              receivedBytes
             });
             stream.write(chunk, (error) => {
               if (error) {
