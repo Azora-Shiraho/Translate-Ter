@@ -43,6 +43,13 @@ const translationProviders = ['openai.compatible'] as const;
 type ExportVariant = 'source' | 'translated' | 'bilingual';
 type BilingualOrder = 'source-first' | 'target-first';
 type AppView = 'workspace' | 'settings';
+type ToastTone = 'neutral' | 'warning' | 'error' | 'success';
+type ToastMessage = {
+  id: string;
+  message: string;
+  tone: ToastTone;
+  exiting: boolean;
+};
 
 const asrProviders = [
   { id: 'local.whisper.cpp', nameKey: 'localProvider', descriptionKey: 'localProviderDetail' },
@@ -68,6 +75,7 @@ function App(): JSX.Element {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>();
   const [message, setMessage] = useState(t('ready'));
   const [runtimeActivity, setRuntimeActivity] = useState<string>();
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [busy, setBusy] = useState(false);
   const [checkingRuntime, setCheckingRuntime] = useState(false);
   const [checkingProvider, setCheckingProvider] = useState<string>();
@@ -110,6 +118,9 @@ function App(): JSX.Element {
       const nextMessage = assetEventLabel(event, (key, options) => i18n.t(key, options));
       setRuntimeActivity(nextMessage);
       setMessage(nextMessage);
+      if (event.type !== 'download-progress') {
+        pushToast(nextMessage, toastToneForAssetEvent(event));
+      }
       if (event.type === 'ready' || event.type === 'error') {
         void refreshModels();
       }
@@ -187,7 +198,7 @@ function App(): JSX.Element {
     if (!settings) return;
     setCheckingRuntime(true);
     setRuntimeActivity(t('runtimeChecking'));
-    setMessage(t('runtimeChecking'));
+    pushStatus(t('runtimeChecking'));
     try {
       const status = await window.translateTer.assets.ensureWhisperRuntime({
         modelId: settings.whisperModelId,
@@ -197,12 +208,12 @@ function App(): JSX.Element {
       setRuntimeStatus(status);
       const nextMessage = status.message ?? t(runtimeActionLabel(status.actionRequired));
       setRuntimeActivity(nextMessage);
-      setMessage(nextMessage);
+      pushStatus(nextMessage, status.actionRequired === 'none' ? 'success' : 'warning');
       await refreshModels();
     } catch (error) {
       const nextMessage = error instanceof Error ? error.message : String(error);
       setRuntimeActivity(nextMessage);
-      setMessage(nextMessage);
+      pushStatus(nextMessage, 'error');
     } finally {
       setCheckingRuntime(false);
     }
@@ -350,6 +361,22 @@ function App(): JSX.Element {
     await window.translateTer.jobs.cancel(job.id);
     setJob(await window.translateTer.jobs.get(job.id));
     setMessage(t('stopped'));
+  }
+
+  function pushStatus(nextMessage: string, tone: ToastTone = 'neutral'): void {
+    setMessage(nextMessage);
+    pushToast(nextMessage, tone);
+  }
+
+  function pushToast(nextMessage: string, tone: ToastTone = 'neutral'): void {
+    const id = `toast-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setToasts((current) => [...current.slice(-3), { id, message: nextMessage, tone, exiting: false }]);
+    window.setTimeout(() => {
+      setToasts((current) => current.map((toast) => (toast.id === id ? { ...toast, exiting: true } : toast)));
+      window.setTimeout(() => {
+        setToasts((current) => current.filter((toast) => toast.id !== id));
+      }, 360);
+    }, 4200);
   }
 
   if (!settings) return <div className="boot">Translate-Ter</div>;
@@ -1048,6 +1075,21 @@ function App(): JSX.Element {
           )}
         </div>
       </footer>
+      <ToastStack toasts={toasts} />
+    </div>
+  );
+}
+
+function ToastStack(props: { toasts: ToastMessage[] }): JSX.Element | null {
+  if (props.toasts.length === 0) return null;
+  return (
+    <div className="toastStack" aria-live="polite" aria-atomic="false">
+      {[...props.toasts].reverse().map((toast) => (
+        <div className={`toastCard ${toast.tone}${toast.exiting ? ' exiting' : ''}`} key={toast.id}>
+          <span className="toastMark" />
+          <p>{toast.message}</p>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1262,6 +1304,22 @@ function assetEventLabel(event: AssetEvent, t: (key: string, options?: Record<st
       return t('runtimeReady');
     case 'error':
       return t('runtimeError');
+  }
+}
+
+function toastToneForAssetEvent(event: AssetEvent): ToastTone {
+  switch (event.type) {
+    case 'ready':
+      return 'success';
+    case 'error':
+      return 'error';
+    case 'verify':
+    case 'extract':
+      return 'warning';
+    case 'download-start':
+    case 'download-progress':
+    default:
+      return 'neutral';
   }
 }
 
