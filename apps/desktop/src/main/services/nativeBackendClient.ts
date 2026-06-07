@@ -127,6 +127,7 @@ export class NativeBackendClient {
     }
 
     return new Promise((resolveResponse) => {
+      const timeoutMs = this.timeoutFor(type);
       const timeout = setTimeout(() => {
         this.pending.delete(requestId);
         resolveResponse(
@@ -136,7 +137,7 @@ export class NativeBackendClient {
             retryable: true
           })
         );
-      }, 10_000);
+      }, timeoutMs);
 
       this.pending.set(requestId, {
         type,
@@ -159,6 +160,22 @@ export class NativeBackendClient {
         );
       });
     });
+  }
+
+  private timeoutFor(type: NativeProtocolType): number {
+    switch (type) {
+      case 'asr.transcribe':
+        return 30 * 60 * 1000;
+      case 'audio.extract':
+        return 5 * 60 * 1000;
+      case 'media.probe':
+      case 'srt.parse':
+      case 'srt.serialize':
+      case 'runtime.health':
+      case 'job.cancel':
+      default:
+        return 30_000;
+    }
   }
 
   private errorResponse<TPayload>(

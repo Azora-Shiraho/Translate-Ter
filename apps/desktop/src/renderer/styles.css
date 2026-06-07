@@ -161,11 +161,13 @@ button:disabled {
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: 260px 92px minmax(0, 1fr);
+  overflow: auto;
+  align-content: start;
   gap: 16px;
+  padding-right: 4px;
 }
 
-.media,
+.jobHero,
 .subtitlePanel,
 .inspector,
 .metricCard {
@@ -174,58 +176,44 @@ button:disabled {
   background: #ffffff;
 }
 
-.media {
-  overflow: hidden;
-}
-
-.mediaScreen {
-  position: relative;
-  display: grid;
-  height: 205px;
-  place-items: center;
-  background: #000000;
-  color: #f5f5f7;
-}
-
-.mediaChrome {
-  position: absolute;
-  top: 14px;
-  right: 16px;
-  left: 16px;
-  display: flex;
-  justify-content: space-between;
-  color: #a1a1a6;
-  font-size: 12px;
-}
-
-.mediaHero {
-  display: flex;
-  max-width: 86%;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  text-align: center;
-}
-
-.mediaHero strong {
-  max-width: 340px;
-  overflow: hidden;
-  font-size: 21px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.transport,
+.jobHero,
 .statusStrip {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 12px;
   color: #6e6e73;
   font-size: 13px;
 }
 
-.transport {
-  padding: 12px 16px;
+.jobHero {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+}
+
+.jobHeroHeader,
+.jobHeroMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.jobHeroHeader {
+  justify-content: space-between;
+}
+
+.jobHeroHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #1d1d1f;
+}
+
+.jobHeroProgress {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .statusStrip {
@@ -252,7 +240,6 @@ button:disabled {
   background: #0071e3;
 }
 
-.iconButton,
 .swapButton {
   display: grid;
   width: 32px;
@@ -291,7 +278,7 @@ button:disabled {
 }
 
 .subtitlePanel {
-  min-height: 0;
+  min-height: 420px;
   overflow: hidden;
 }
 
@@ -319,8 +306,7 @@ h3 {
 }
 
 .subtitleTable {
-  height: calc(100vh - 522px);
-  overflow: auto;
+  overflow: visible;
 }
 
 .row {
@@ -579,12 +565,6 @@ label {
   gap: 12px;
   color: #6e6e73;
   font-size: 13px;
-}
-
-.monoTime,
-.progressValue {
-  flex: none;
-  font-variant-numeric: tabular-nums;
 }
 
 .muted {

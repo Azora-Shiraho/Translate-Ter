@@ -387,6 +387,14 @@ std::optional<int> parse_timestamp_ms(const std::string& timestamp) {
          std::stoi(match[3].str()) * 1000 + normalize_millis(std::stoi(match[4].str()));
 }
 
+std::optional<int> parse_loose_timestamp_ms(const std::string& timestamp) {
+  const std::regex pattern(R"((\d{1,2}):([0-5]\d):([0-5]\d)[\.,](\d{1,3}))");
+  std::smatch match;
+  if (!std::regex_match(timestamp, match, pattern)) return std::nullopt;
+  return std::stoi(match[1].str()) * 3600000 + std::stoi(match[2].str()) * 60000 +
+         std::stoi(match[3].str()) * 1000 + normalize_millis(std::stoi(match[4].str()));
+}
+
 std::string format_timestamp(int ms) {
   const int hours = ms / 3600000;
   const int minutes = (ms % 3600000) / 60000;
@@ -519,6 +527,45 @@ std::vector<Segment> parse_srt_text(
 
   if (source_language) *source_language = "auto";
   if (input_media_path) *input_media_path = "";
+  return segments;
+}
+
+std::vector<Segment> parse_whisper_timestamped_text(
+    const std::string& text,
+    std::vector<SubtitleWarning>* warnings) {
+  std::vector<Segment> segments;
+  std::stringstream lines(text);
+  std::string line;
+  const std::regex timing_pattern(
+      R"(\[\s*(\d{1,2}:\d{2}:\d{2}[\.,]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[\.,]\d{1,3})\s*\]\s*(.*))");
+
+  while (std::getline(lines, line)) {
+    if (line.empty()) continue;
+    std::smatch timing;
+    if (!std::regex_match(line, timing, timing_pattern)) {
+      continue;
+    }
+
+    const auto start = parse_loose_timestamp_ms(timing[1].str());
+    const auto end = parse_loose_timestamp_ms(timing[2].str());
+    if (!start || !end) {
+      continue;
+    }
+
+    Segment segment;
+    segment.index = static_cast<int>(segments.size()) + 1;
+    segment.start_ms = *start;
+    segment.end_ms = *end;
+    segment.source_text = timing[3].str();
+    segment.status = "transcribed";
+    segment.confidence = 0.92;
+    segment.has_confidence = false;
+    segments.push_back(segment);
+  }
+
+  if (segments.empty() && warnings) {
+    warnings->push_back({"ParseError", "Whisper timestamp output did not contain parseable subtitle lines.", ""});
+  }
   return segments;
 }
 
@@ -978,7 +1025,10 @@ NativeResult asr_transcribe_result(const std::string& request) {
     return {false, "", "InternalError", "whisper.cpp produced an empty SRT file.", true};
   }
 
-  const auto segments = parse_srt_text(srt_text, &warnings);
+  auto segments = parse_srt_text(srt_text, &warnings);
+  if (segments.empty()) {
+    segments = parse_whisper_timestamped_text(srt_text, &warnings);
+  }
   if (segments.empty()) {
     return {false, "", "InternalError", "whisper.cpp SRT output did not contain parseable subtitle segments.", true};
   }

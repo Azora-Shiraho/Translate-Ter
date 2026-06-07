@@ -300,31 +300,21 @@ function App(): JSX.Element {
 
       <main className="workspace">
         <section className="mainPane">
-          <div className="media">
-            <div className="mediaScreen" aria-label={t('preview')}>
-              <div className="mediaChrome">
-                <span>{t(stageLabel(job?.stage ?? 'idle'))}</span>
-                <span>{completion}%</span>
-              </div>
-              <div className="mediaHero">
-                <FileVideo size={54} />
-                <strong title={job?.fileName ?? t('chooseMedia')}>{job?.fileName ?? t('chooseMedia')}</strong>
-                <span>{sourceLabel}</span>
-                <ArrowRight size={16} />
-                <span>{targetLabel}</span>
-              </div>
+          <section className="jobHero" aria-label={t('preview')}>
+            <div className="jobHeroHeader">
+              <strong title={job?.fileName ?? t('chooseMedia')}>{job?.fileName ?? t('chooseMedia')}</strong>
+              <span>{t(stageLabel(job?.stage ?? 'idle'))}</span>
             </div>
-            <div className="transport">
-              <button className="iconButton" title="play" disabled>
-                <Play size={16} />
-              </button>
-              <span className="monoTime">{t('previewTime')}</span>
-              <div className="track">
-                <span style={{ width: `${completion}%` }} />
-              </div>
-              <span className="progressValue">{completion}%</span>
+            <div className="jobHeroMeta">
+              <span>{sourceLabel}</span>
+              <ArrowRight size={16} />
+              <span>{targetLabel}</span>
+              <span className="jobHeroProgress">{completion}%</span>
             </div>
-          </div>
+            <div className="track">
+              <span style={{ width: `${completion}%` }} />
+            </div>
+          </section>
 
           <section className="summaryGrid" aria-label={t('workflowSummary')}>
             <MetricCard icon={<Gauge size={16} />} label={t('jobStage')} value={t(stageLabel(job?.stage ?? 'idle'))} />
