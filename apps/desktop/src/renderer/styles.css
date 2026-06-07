@@ -191,6 +191,17 @@ button:disabled {
   padding: 16px 18px;
 }
 
+.jobActions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(4, auto);
+  gap: 10px;
+  align-items: end;
+}
+
+.heroField {
+  min-width: 0;
+}
+
 .jobHeroHeader,
 .jobHeroMeta {
   display: flex;
@@ -279,7 +290,7 @@ button:disabled {
 
 .subtitlePanel {
   min-height: 420px;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .panelHeader {
@@ -306,7 +317,15 @@ h3 {
 }
 
 .subtitleTable {
-  overflow: visible;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid #eeeeef;
+}
+
+.subtitleWorkspace {
+  display: grid;
+  grid-template-rows: minmax(280px, 1fr) auto;
+  min-height: 0;
 }
 
 .row {
@@ -319,6 +338,22 @@ h3 {
   font-size: 13px;
 }
 
+.row.selectable {
+  width: 100%;
+  border-radius: 0;
+  background: #ffffff;
+  color: inherit;
+  text-align: left;
+}
+
+.row.selectable:hover {
+  background: #fafafc;
+}
+
+.row.selectable.selected {
+  background: #eef5ff;
+}
+
 .row.head {
   position: sticky;
   top: 0;
@@ -326,6 +361,17 @@ h3 {
   background: #f5f5f7;
   color: #6e6e73;
   font-weight: 600;
+}
+
+.previewText {
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+
+.translatedPreview {
+  color: #1d1d1f;
 }
 
 textarea,
@@ -350,6 +396,22 @@ textarea {
   resize: vertical;
   padding: 8px 10px;
   line-height: 1.45;
+}
+
+.segmentEditor {
+  border-top: 1px solid #d2d2d7;
+  background: #ffffff;
+}
+
+.compactHeader {
+  padding: 12px 18px;
+}
+
+.editorGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 0 18px 18px;
 }
 
 input:not([type='checkbox']),
@@ -583,5 +645,10 @@ label {
 
   .inspector {
     max-height: none;
+  }
+
+  .jobActions,
+  .editorGrid {
+    grid-template-columns: 1fr;
   }
 }

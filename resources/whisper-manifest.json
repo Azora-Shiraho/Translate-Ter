@@ -45,6 +45,12 @@
         "url": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-bin-x64.zip",
         "acceleration": "cpu"
       },
+      "win32-x64-cuda": {
+        "binary": "bin/Release/whisper-cli.exe",
+        "sha256": "a5ef69599305bdf3e135047b1a2151dcea79bc0fa201e3ea8681069c2abc7a8c",
+        "url": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-cublas-11.8.0-bin-x64.zip",
+        "acceleration": "cuda"
+      },
       "linux-x64": {
         "binary": "bin/whisper-cli",
         "sha256": "0000000000000000000000000000000000000000000000000000000000000000",

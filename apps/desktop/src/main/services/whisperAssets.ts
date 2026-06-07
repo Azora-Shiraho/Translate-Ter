@@ -48,10 +48,9 @@ export class WhisperAssetManager {
 
   async ensureRuntime(request: WhisperRuntimeRequest): Promise<WhisperRuntimeStatus> {
     const manifest = await this.manifest();
-    const platformKey = this.platformKey();
-    const runtime = manifest.runtime.platforms[platformKey];
     const model = manifest.models.find((item) => item.id === request.modelId) ?? manifest.models[0];
     const cudaSupported = detectCudaSupport();
+    const { runtime, platformKey } = this.selectRuntime(manifest, request.preferCuda, cudaSupported);
 
     if (manifest.enabled === false) {
       return this.status(
@@ -309,6 +308,25 @@ export class WhisperAssetManager {
 
   private platformKey(): string {
     return `${process.platform}-${process.arch}`;
+  }
+
+  private selectRuntime(
+    manifest: WhisperManifest,
+    preferCuda: boolean,
+    cudaSupported: boolean
+  ): {
+    runtime: WhisperManifest['runtime']['platforms'][string] | undefined;
+    platformKey: string;
+  } {
+    const baseKey = this.platformKey();
+    const preferredKeys = preferCuda && cudaSupported ? [`${baseKey}-cuda`, baseKey] : [baseKey];
+    for (const key of preferredKeys) {
+      const runtime = manifest.runtime.platforms[key];
+      if (runtime) {
+        return { runtime, platformKey: key };
+      }
+    }
+    return { runtime: undefined, platformKey: preferredKeys[0] };
   }
 
   private async exists(path: string): Promise<boolean> {

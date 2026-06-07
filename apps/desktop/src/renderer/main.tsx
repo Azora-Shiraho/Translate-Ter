@@ -61,6 +61,7 @@ function App(): JSX.Element {
   const [exportPath, setExportPath] = useState('');
   const [exportVariant, setExportVariant] = useState<ExportVariant>('translated');
   const [bilingualOrder, setBilingualOrder] = useState<BilingualOrder>('source-first');
+  const [selectedSegmentId, setSelectedSegmentId] = useState<string>();
   const [message, setMessage] = useState(t('ready'));
   const [busy, setBusy] = useState(false);
   const [checkingRuntime, setCheckingRuntime] = useState(false);
@@ -103,6 +104,18 @@ function App(): JSX.Element {
       unsubscribe();
     };
   }, [i18n, translateStage]);
+
+  useEffect(() => {
+    if (!job?.subtitleDocument?.segments.length) {
+      setSelectedSegmentId(undefined);
+      return;
+    }
+    setSelectedSegmentId((current) =>
+      current && job.subtitleDocument?.segments.some((segment) => segment.id === current)
+        ? current
+        : job.subtitleDocument?.segments[0]?.id
+    );
+  }, [job?.subtitleDocument]);
 
   async function updateSettings(patch: Partial<AppSettingsPublic>): Promise<void> {
     const next = await window.translateTer.saveSettings(patch);
@@ -262,6 +275,7 @@ function App(): JSX.Element {
   const cloudAsrSecret = providerSecrets['cloud.openai'] ?? {};
   const llmSecret = providerSecrets['openai.compatible'] ?? {};
   const canForceStop = Boolean(job && !['completed', 'failed', 'cancelled'].includes(job.stage));
+  const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) ?? segments[0];
 
   async function forceStop(): Promise<void> {
     if (!job) return;
@@ -325,6 +339,32 @@ function App(): JSX.Element {
             <div className="track">
               <span style={{ width: `${completion}%` }} />
             </div>
+            <div className="jobActions">
+              <label className="heroField">
+                <span>{t('mediaPath')}</span>
+                <input
+                  value={mediaPath}
+                  placeholder={t('placeholderPath')}
+                  onChange={(event) => setMediaPath(event.target.value)}
+                />
+              </label>
+              <button className="secondary" onClick={() => void pickMedia()}>
+                <FileVideo size={16} />
+                {t('chooseMedia')}
+              </button>
+              <button className="primary" disabled={busy || !mediaPath.trim()} onClick={() => void createAndStart()}>
+                <Play size={16} />
+                {t('startTranscription')}
+              </button>
+              <button className="secondary" disabled={busy || !job?.subtitleDocument} onClick={() => void translateJob()}>
+                <Languages size={16} />
+                {t('translateSubtitles')}
+              </button>
+              <button className="secondary" disabled={busy || !job?.subtitleDocument || !exportPath.trim()} onClick={() => void exportSrt()}>
+                <Save size={16} />
+                {t('exportSrt')}
+              </button>
+            </div>
           </section>
 
           <section className="summaryGrid" aria-label={t('workflowSummary')}>
@@ -343,7 +383,8 @@ function App(): JSX.Element {
               <span>{t('rows', { count: segments.length })}</span>
             </div>
             {job?.subtitleDocument ? (
-              <div className="subtitleTable">
+              <div className="subtitleWorkspace">
+                <div className="subtitleTable">
                 <div className="row head">
                   <span>{t('start')}</span>
                   <span>{t('end')}</span>
@@ -352,23 +393,50 @@ function App(): JSX.Element {
                   <span>{t('status')}</span>
                 </div>
                 {job.subtitleDocument.segments.map((segment) => (
-                  <div className="row" key={segment.id}>
+                  <button
+                    type="button"
+                    className={segment.id === selectedSegment?.id ? 'row selectable selected' : 'row selectable'}
+                    key={segment.id}
+                    onClick={() => setSelectedSegmentId(segment.id)}
+                  >
                     <span>{formatTimestamp(segment.startMs)}</span>
                     <span>{formatTimestamp(segment.endMs)}</span>
-                    <textarea
-                      aria-label={`${t('original')} ${segment.index + 1}`}
-                      value={segment.sourceText}
-                      onChange={(event) => void updateSegment(segment, { sourceText: event.target.value })}
-                    />
-                    <textarea
-                      aria-label={`${t('translated')} ${segment.index + 1}`}
-                      value={segment.translatedText ?? ''}
-                      placeholder={t('translated')}
-                      onChange={(event) => void updateSegment(segment, { translatedText: event.target.value })}
-                    />
+                    <div className="previewText">{segment.sourceText}</div>
+                    <div className="previewText translatedPreview">{segment.translatedText ?? ''}</div>
                     <span className={`status ${segment.status}`}>{t(statusLabel(segment.status))}</span>
-                  </div>
+                  </button>
                 ))}
+                </div>
+                {selectedSegment && (
+                  <div className="segmentEditor">
+                    <div className="panelHeader compactHeader">
+                      <div>
+                        <h3>{t('status')} #{selectedSegment.index}</h3>
+                        <p>{formatTimestamp(selectedSegment.startMs)} - {formatTimestamp(selectedSegment.endMs)}</p>
+                      </div>
+                      <span className={`status ${selectedSegment.status}`}>{t(statusLabel(selectedSegment.status))}</span>
+                    </div>
+                    <div className="editorGrid">
+                      <label>
+                        {t('original')}
+                        <textarea
+                          aria-label={`${t('original')} ${selectedSegment.index}`}
+                          value={selectedSegment.sourceText}
+                          onChange={(event) => void updateSegment(selectedSegment, { sourceText: event.target.value })}
+                        />
+                      </label>
+                      <label>
+                        {t('translated')}
+                        <textarea
+                          aria-label={`${t('translated')} ${selectedSegment.index}`}
+                          value={selectedSegment.translatedText ?? ''}
+                          placeholder={t('translated')}
+                          onChange={(event) => void updateSegment(selectedSegment, { translatedText: event.target.value })}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="empty">
@@ -381,21 +449,6 @@ function App(): JSX.Element {
         </section>
 
         <aside className="inspector">
-          <InspectorSection icon={<Download size={16} />} title={t('import')}>
-            <label>
-              {t('mediaPath')}
-              <input
-                value={mediaPath}
-                placeholder={t('placeholderPath')}
-                onChange={(event) => setMediaPath(event.target.value)}
-              />
-            </label>
-            <button className="secondary" onClick={() => void pickMedia()}>
-              <FileVideo size={16} />
-              {t('chooseMedia')}
-            </button>
-          </InspectorSection>
-
           <InspectorSection icon={<Settings size={16} />} title={t('asr')}>
             <div className="languagePair">
               <SelectField
@@ -533,10 +586,6 @@ function App(): JSX.Element {
                 />
               </>
             )}
-            <button className="primary" disabled={busy || !mediaPath.trim()} onClick={() => void createAndStart()}>
-              <Play size={16} />
-              {t('startTranscription')}
-            </button>
           </InspectorSection>
 
           <InspectorSection icon={<Languages size={16} />} title={t('translate')}>
@@ -666,10 +715,6 @@ function App(): JSX.Element {
                 />
               </>
             )}
-            <button className="primary" disabled={busy || !job?.subtitleDocument} onClick={() => void translateJob()}>
-              <Languages size={16} />
-              {t('translateSubtitles')}
-            </button>
           </InspectorSection>
 
           <InspectorSection icon={<Save size={16} />} title={t('export')}>

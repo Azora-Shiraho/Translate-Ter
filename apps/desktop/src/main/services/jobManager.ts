@@ -113,7 +113,7 @@ export class JobManager extends EventEmitter {
       const cloudDocument = await this.transcribeWithCloudAsr(job, extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path);
       if (this.isCancelled(job.id)) return;
       if (!cloudDocument) return;
-      job.subtitleDocument = cloudDocument;
+      job.subtitleDocument = normalizeDocumentForSubtitleDisplay(cloudDocument);
       job.step = 'subtitles';
       await this.setProgress(job, 'completed', 100, 'Cloud transcription complete.');
       return;
@@ -159,7 +159,7 @@ export class JobManager extends EventEmitter {
       return;
     }
 
-    job.subtitleDocument = document;
+    job.subtitleDocument = normalizeDocumentForSubtitleDisplay(document);
     job.step = 'subtitles';
     this.cancelledJobs.delete(job.id);
     await this.setProgress(job, 'completed', 100, 'Transcription complete.');
@@ -195,7 +195,7 @@ export class JobManager extends EventEmitter {
       batchSize: job.translationLinesPerRequest,
       batchStride: job.translationBatchStride
     });
-    job.subtitleDocument = result.document;
+    job.subtitleDocument = normalizeDocumentForSubtitleDisplay(result.document);
     job.step = 'export';
     job.warnings = [
       ...job.warnings,
@@ -363,7 +363,7 @@ function nativePayloadToDocument(payload: unknown, job: JobSnapshot): SubtitleDo
 
 function mockDocument(job: JobSnapshot): SubtitleDocument {
   const now = new Date().toISOString();
-  return {
+  return normalizeDocumentForSubtitleDisplay({
     id: `doc-${job.id}`,
     format: 'srt',
     sourceLanguage: job.sourceLanguage,
@@ -394,9 +394,40 @@ function mockDocument(job: JobSnapshot): SubtitleDocument {
       asrProvider: job.asrProviderId,
       warnings: [...job.warnings]
     }
-  };
+  });
 }
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeDocumentForSubtitleDisplay(document: SubtitleDocument): SubtitleDocument {
+  return {
+    ...document,
+    segments: document.segments.map((segment) => ({
+      ...segment,
+      sourceText: wrapSubtitleText(segment.sourceText),
+      translatedText: segment.translatedText ? wrapSubtitleText(segment.translatedText) : segment.translatedText
+    }))
+  };
+}
+
+function wrapSubtitleText(text: string, maxLineLength = 36): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+
+  const words = normalized.split(' ');
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (current && next.length > maxLineLength) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = next;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.join('\n');
 }
