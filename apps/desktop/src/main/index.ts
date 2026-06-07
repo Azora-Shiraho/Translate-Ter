@@ -149,9 +149,9 @@ function registerIpc(): void {
     const secret = settingsStore.getSecret(providerId);
     return {
       providerId,
-      ok: Boolean(secret?.apiKey) || providerId === 'mock.local',
-      status: providerId === 'mock.local' || secret?.apiKey ? 'healthy' : 'unconfigured',
-      message: secret?.apiKey || providerId === 'mock.local' ? undefined : 'Provider API key is not configured.'
+      ok: Boolean(secret?.apiKey),
+      status: secret?.apiKey ? 'healthy' : 'unconfigured',
+      message: secret?.apiKey ? undefined : 'Provider API key is not configured.'
     };
   });
 

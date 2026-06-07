@@ -87,12 +87,19 @@ export class JobManager extends EventEmitter {
         code: runtime.actionRequired,
         message: runtime.message ?? 'Local runtime needs setup before real transcription.'
       });
+      this.fail(
+        job,
+        runtimeActionToErrorCode(runtime.actionRequired),
+        runtime.message ?? 'Local runtime needs setup before real transcription.',
+        runtime.actionRequired !== 'manifest-not-configured'
+      );
+      return;
     }
 
     await this.setProgress(job, 'probing', 18, 'Probing media.');
     const probe = await this.nativeBackend.probeMedia({ mediaPath: job.mediaPath });
     if (this.isCancelled(job.id)) return;
-    if (!probe.ok && job.asrProviderId !== 'mock.asr') {
+    if (!probe.ok) {
       this.fail(job, probe.error?.code ?? 'ProbeFailed', probe.error?.message ?? 'Native backend failed to probe media.', true);
       return;
     }
@@ -102,7 +109,7 @@ export class JobManager extends EventEmitter {
       mediaPath: job.mediaPath
     });
     if (this.isCancelled(job.id)) return;
-    if (!extraction.ok && job.asrProviderId !== 'mock.asr') {
+    if (!extraction.ok) {
       this.fail(job, extraction.error?.code ?? 'AudioExtractFailed', extraction.error?.message ?? 'Native backend failed to extract audio.', true);
       return;
     }
@@ -138,16 +145,6 @@ export class JobManager extends EventEmitter {
     if (this.isCancelled(job.id)) return;
 
     if (!response.ok) {
-      if (job.asrProviderId === 'mock.asr') {
-        job.subtitleDocument = mockDocument(job);
-        job.step = 'subtitles';
-        job.warnings.push({
-          code: response.error?.code ?? 'MockFallback',
-          message: response.error?.message ?? 'Native backend unavailable; generated mock subtitles.'
-        });
-        await this.setProgress(job, 'completed', 100, 'Mock transcription complete.');
-        return;
-      }
       this.fail(job, response.error?.code ?? 'NativeBackendError', response.error?.message ?? 'Native backend failed.', Boolean(response.error?.retryable));
       return;
     }
@@ -338,6 +335,10 @@ export class JobManager extends EventEmitter {
   }
 }
 
+function runtimeActionToErrorCode(action: NonNullable<JobSnapshot['error']>['code'] | string): 'ManifestNotConfigured' | 'DownloadRequired' {
+  return action === 'manifest-not-configured' ? 'ManifestNotConfigured' : 'DownloadRequired';
+}
+
 function nativePayloadToDocument(payload: unknown, job: JobSnapshot): SubtitleDocument | undefined {
   const candidate = payload as { document?: SubtitleDocument; segments?: SubtitleSegment[] } | undefined;
   if (candidate?.document?.format === 'srt' && Array.isArray(candidate.document.segments)) {
@@ -359,42 +360,6 @@ function nativePayloadToDocument(payload: unknown, job: JobSnapshot): SubtitleDo
     };
   }
   return undefined;
-}
-
-function mockDocument(job: JobSnapshot): SubtitleDocument {
-  const now = new Date().toISOString();
-  return normalizeDocumentForSubtitleDisplay({
-    id: `doc-${job.id}`,
-    format: 'srt',
-    sourceLanguage: job.sourceLanguage,
-    targetLanguage: job.targetLanguage,
-    segments: [
-      {
-        id: `${job.id}-seg-1`,
-        index: 1,
-        startMs: 0,
-        endMs: 3200,
-        sourceText: 'This is a local mock subtitle generated for workflow testing.',
-        status: 'transcribed',
-        confidence: 0.99
-      },
-      {
-        id: `${job.id}-seg-2`,
-        index: 2,
-        startMs: 3600,
-        endMs: 7200,
-        sourceText: 'Configure whisper.cpp or a cloud ASR provider for real transcription.',
-        status: 'transcribed',
-        confidence: 0.99
-      }
-    ],
-    metadata: {
-      inputMediaPath: job.mediaPath,
-      createdAt: now,
-      asrProvider: job.asrProviderId,
-      warnings: [...job.warnings]
-    }
-  });
 }
 
 function delay(ms: number): Promise<void> {

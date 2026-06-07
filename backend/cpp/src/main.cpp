@@ -349,7 +349,7 @@ std::string health_payload() {
   payload << "{\"protocolVersion\":1,\"backendVersion\":\"0.4.0\",\"status\":\""
           << (media_tools_available ? "ok" : "degraded")
           << "\",\"capabilities\":[\"runtime.health\",\"media.probe\",\"audio.extract\",\"srt.parse\",\"srt.serialize\","
-             "\"asr.transcribe\",\"job.cancel\"],\"whisperRuntimeAvailable\":true,\"ffmpegAvailable\":"
+             "\"asr.transcribe\",\"job.cancel\"],\"whisperRuntimeAvailable\":false,\"ffmpegAvailable\":"
           << bool_json(ffmpeg_available) << ",\"ffprobeAvailable\":" << bool_json(ffprobe_available)
           << ",\"hardwareAcceleration\":\"" << (cuda_supported ? "gpu" : "cpu") << "\",\"cudaSupported\":"
           << bool_json(cuda_supported) << ",\"recommendedLocalAcceleration\":\"" << (cuda_supported ? "gpu" : "cpu")
@@ -903,37 +903,6 @@ NativeResult audio_extract_result(const std::string& request) {
   return {true, payload.str(), "", "", false};
 }
 
-std::vector<Segment> create_mock_segments() {
-  Segment first;
-  first.index = 1;
-  first.start_ms = 900;
-  first.end_ms = 3100;
-  first.source_text = "Welcome to Translate-Ter.";
-  first.status = "transcribed";
-  first.confidence = 0.92;
-  first.has_confidence = true;
-
-  Segment second;
-  second.index = 2;
-  second.start_ms = 3600;
-  second.end_ms = 6200;
-  second.source_text = "This first build keeps every subtitle timestamp stable.";
-  second.status = "transcribed";
-  second.confidence = 0.92;
-  second.has_confidence = true;
-
-  Segment third;
-  third.index = 3;
-  third.start_ms = 6900;
-  third.end_ms = 9800;
-  third.source_text = "You can edit text, translate batches, and export SRT.";
-  third.status = "transcribed";
-  third.confidence = 0.92;
-  third.has_confidence = true;
-
-  return {first, second, third};
-}
-
 NativeResult asr_transcribe_result(const std::string& request) {
   const auto asr_provider = extract_string(request, "asrProviderId").value_or("local.whisper.cpp");
   const auto media_path = extract_string(request, "audioPath").value_or(
@@ -944,26 +913,8 @@ NativeResult asr_transcribe_result(const std::string& request) {
   const bool prefer_cuda = extract_bool(request, "preferCuda").value_or(false);
   const bool cuda_supported = detect_cuda_support();
 
-  if (asr_provider == "mock.asr") {
-    std::vector<SubtitleWarning> warnings;
-    return {
-        true,
-        document_payload_from_segments(
-            create_mock_segments(),
-            "doc-" + job_id,
-            source_language,
-            target_language,
-            media_path,
-            "native-mock",
-            asr_provider,
-            warnings),
-        "",
-        "",
-        false};
-  }
-
   if (!starts_with(asr_provider, "local.whisper")) {
-    return {false, "", "UnsupportedCommand", "Only mock.asr and local.whisper.cpp are supported by the native MVP.", false};
+    return {false, "", "UnsupportedCommand", "Only local.whisper.cpp is supported by the native backend for offline transcription.", false};
   }
 
   const auto binary_path = extract_string(request, "binaryPath");
