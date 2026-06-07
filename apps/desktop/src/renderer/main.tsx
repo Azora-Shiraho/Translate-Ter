@@ -261,6 +261,15 @@ function App(): JSX.Element {
   const asrHealth = providerHealth[settings?.asrProviderId ?? 'mock.asr'];
   const cloudAsrSecret = providerSecrets['cloud.openai'] ?? {};
   const llmSecret = providerSecrets['openai.compatible'] ?? {};
+  const canForceStop = Boolean(job && !['completed', 'failed', 'cancelled'].includes(job.stage));
+
+  async function forceStop(): Promise<void> {
+    if (!job) return;
+    setBusy(false);
+    await window.translateTer.jobs.cancel(job.id);
+    setJob(await window.translateTer.jobs.get(job.id));
+    setMessage(t('stopped'));
+  }
 
   if (!settings) return <div className="boot">Translate-Ter</div>;
 
@@ -725,6 +734,12 @@ function App(): JSX.Element {
       <footer className="statusStrip">
         <span>{t('progress')}: {completion}%</span>
         <span title={message}>{message}</span>
+        {canForceStop && (
+          <button className="textButton" onClick={() => void forceStop()}>
+            <AlertCircle size={14} />
+            {t('forceStop')}
+          </button>
+        )}
         {job?.error && (
           <button className="textButton" onClick={() => void createAndStart()}>
             <RotateCcw size={14} />

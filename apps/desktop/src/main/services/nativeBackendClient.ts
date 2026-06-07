@@ -32,6 +32,7 @@ const MISSING_EXECUTABLE_ERROR: NativeProtocolError = {
 
 export class NativeBackendClient {
   private processPromise: Promise<import('node:child_process').ChildProcessWithoutNullStreams | undefined> | undefined;
+  private childProcess: import('node:child_process').ChildProcessWithoutNullStreams | undefined;
   private readonly pending = new Map<
     string,
     {
@@ -92,6 +93,21 @@ export class NativeBackendClient {
     bilingualOrder?: 'source-first' | 'target-first';
   }): Promise<NativeProtocolResponse<{ srt: string }>> {
     return this.request('srt.serialize', payload);
+  }
+
+  async cancelRunningWork(): Promise<void> {
+    const child = this.childProcess;
+    this.processPromise = undefined;
+    this.childProcess = undefined;
+    this.stdoutBuffer = '';
+    if (!child) {
+      return;
+    }
+    try {
+      child.kill();
+    } catch {
+      // Best effort; close handler will drain pending requests.
+    }
   }
 
   async request<TPayload = unknown>(
@@ -264,8 +280,14 @@ export class NativeBackendClient {
       });
 
       child.once('spawn', () => finalize(child));
+      child.once('spawn', () => {
+        this.childProcess = child;
+      });
       child.once('error', () => finalize(undefined));
       child.once('close', () => {
+        if (this.childProcess === child) {
+          this.childProcess = undefined;
+        }
         if (this.processPromise) {
           this.processPromise = undefined;
         }

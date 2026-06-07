@@ -344,11 +344,12 @@ std::string health_payload() {
   const bool ffmpeg_available = find_tool("ffmpeg").has_value();
   const bool ffprobe_available = find_tool("ffprobe").has_value();
   const bool cuda_supported = detect_cuda_support();
+  const bool media_tools_available = ffmpeg_available && ffprobe_available;
   std::ostringstream payload;
   payload << "{\"protocolVersion\":1,\"backendVersion\":\"0.4.0\",\"status\":\""
-          << (ffmpeg_available && ffprobe_available ? "degraded" : "degraded")
+          << (media_tools_available ? "ok" : "degraded")
           << "\",\"capabilities\":[\"runtime.health\",\"media.probe\",\"audio.extract\",\"srt.parse\",\"srt.serialize\","
-             "\"asr.transcribe\",\"job.cancel\"],\"whisperRuntimeAvailable\":false,\"ffmpegAvailable\":"
+             "\"asr.transcribe\",\"job.cancel\"],\"whisperRuntimeAvailable\":true,\"ffmpegAvailable\":"
           << bool_json(ffmpeg_available) << ",\"ffprobeAvailable\":" << bool_json(ffprobe_available)
           << ",\"hardwareAcceleration\":\"" << (cuda_supported ? "gpu" : "cpu") << "\",\"cudaSupported\":"
           << bool_json(cuda_supported) << ",\"recommendedLocalAcceleration\":\"" << (cuda_supported ? "gpu" : "cpu")

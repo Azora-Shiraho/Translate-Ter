@@ -11,6 +11,7 @@ import type { WhisperAssetManager } from './whisperAssets';
 
 export class JobManager extends EventEmitter {
   private jobs = new Map<string, JobSnapshot>();
+  private cancelledJobs = new Set<string>();
 
   constructor(
     private readonly settings: SettingsStore,
@@ -22,9 +23,10 @@ export class JobManager extends EventEmitter {
 
   create(request: CreateJobRequest): JobSnapshot {
     validateAsrRequest(request);
+    const jobId = `job-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const job: JobSnapshot = {
-      id: `job-${crypto.randomUUID()}`,
+      id: jobId,
       mediaPath: request.mediaPath,
       fileName: basename(request.mediaPath),
       step: 'asr',
@@ -47,6 +49,7 @@ export class JobManager extends EventEmitter {
       createdAt: now,
       updatedAt: now
     };
+    this.cancelledJobs.delete(jobId);
     this.save(job);
     return job;
   }
@@ -61,6 +64,7 @@ export class JobManager extends EventEmitter {
     const job = this.get(jobId);
     await this.setProgress(job, 'checking-runtime', 8, 'Checking ASR runtime.');
     const nativeHealth = await this.nativeBackend.health();
+    if (this.isCancelled(job.id)) return;
     if (!nativeHealth.capabilities.includes('asr.transcribe')) {
       job.warnings.push({
         code: 'NativeCapabilityUnavailable',
@@ -76,6 +80,7 @@ export class JobManager extends EventEmitter {
           preferCuda: job.localWhisperUseCuda
         })
       : undefined;
+    if (this.isCancelled(job.id)) return;
 
     if (runtime?.actionRequired && runtime.actionRequired !== 'none') {
       job.warnings.push({
@@ -86,6 +91,7 @@ export class JobManager extends EventEmitter {
 
     await this.setProgress(job, 'probing', 18, 'Probing media.');
     const probe = await this.nativeBackend.probeMedia({ mediaPath: job.mediaPath });
+    if (this.isCancelled(job.id)) return;
     if (!probe.ok && job.asrProviderId !== 'mock.asr') {
       this.fail(job, probe.error?.code ?? 'ProbeFailed', probe.error?.message ?? 'Native backend failed to probe media.', true);
       return;
@@ -95,6 +101,7 @@ export class JobManager extends EventEmitter {
     const extraction = await this.nativeBackend.extractAudio({
       mediaPath: job.mediaPath
     });
+    if (this.isCancelled(job.id)) return;
     if (!extraction.ok && job.asrProviderId !== 'mock.asr') {
       this.fail(job, extraction.error?.code ?? 'AudioExtractFailed', extraction.error?.message ?? 'Native backend failed to extract audio.', true);
       return;
@@ -104,6 +111,7 @@ export class JobManager extends EventEmitter {
 
     if (job.asrProviderId === 'cloud.openai') {
       const cloudDocument = await this.transcribeWithCloudAsr(job, extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path);
+      if (this.isCancelled(job.id)) return;
       if (!cloudDocument) return;
       job.subtitleDocument = cloudDocument;
       job.step = 'subtitles';
@@ -127,6 +135,7 @@ export class JobManager extends EventEmitter {
           }
         : undefined
     });
+    if (this.isCancelled(job.id)) return;
 
     if (!response.ok) {
       if (job.asrProviderId === 'mock.asr') {
@@ -144,6 +153,7 @@ export class JobManager extends EventEmitter {
     }
 
     const document = nativePayloadToDocument(response.payload, job);
+    if (this.isCancelled(job.id)) return;
     if (!document) {
       this.fail(job, 'MalformedNativeResponse', 'Native backend did not return a subtitle document.', true);
       return;
@@ -151,11 +161,13 @@ export class JobManager extends EventEmitter {
 
     job.subtitleDocument = document;
     job.step = 'subtitles';
+    this.cancelledJobs.delete(job.id);
     await this.setProgress(job, 'completed', 100, 'Transcription complete.');
   }
 
   async translate(jobId: string): Promise<JobSnapshot> {
     const job = this.get(jobId);
+    this.cancelledJobs.delete(job.id);
     if (!job.subtitleDocument) throw new Error('No subtitle document is available to translate.');
     await this.setProgress(job, 'translating', 35, 'Translating subtitle batches.');
     const secret = this.settings.getSecret('openai.compatible');
@@ -201,8 +213,12 @@ export class JobManager extends EventEmitter {
 
   async cancel(jobId: string): Promise<void> {
     const job = this.get(jobId);
+    this.cancelledJobs.add(job.id);
+    await this.nativeBackend.cancelRunningWork();
     job.stage = 'cancelled';
+    job.step = 'asr';
     job.progress = 0;
+    job.error = undefined;
     job.updatedAt = new Date().toISOString();
     this.save(job);
   }
@@ -228,6 +244,10 @@ export class JobManager extends EventEmitter {
   }
 
   private fail(job: JobSnapshot, code: string, message: string, retryable: boolean): void {
+    if (this.isCancelled(job.id)) {
+      return;
+    }
+    this.cancelledJobs.delete(job.id);
     job.stage = 'failed';
     job.error = { code, message, retryable };
     job.updatedAt = new Date().toISOString();
@@ -238,6 +258,10 @@ export class JobManager extends EventEmitter {
   private save(job: JobSnapshot): void {
     this.jobs.set(job.id, structuredClone(job));
     this.emit('job-event', { type: 'snapshot', job: structuredClone(job) } satisfies JobEvent);
+  }
+
+  private isCancelled(jobId: string): boolean {
+    return this.cancelledJobs.has(jobId);
   }
 
   private async transcribeWithCloudAsr(job: JobSnapshot, audioPath?: string): Promise<SubtitleDocument | undefined> {
