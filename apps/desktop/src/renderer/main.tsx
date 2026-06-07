@@ -343,14 +343,6 @@ function App(): JSX.Element {
             {t('settings')}
           </button>
         </div>
-        <div className="topChromeSide">
-          <div className="languageRoute">
-            <Languages size={14} />
-            <span>{sourceLabel}</span>
-            <ArrowRight size={14} />
-            <span>{targetLabel}</span>
-          </div>
-        </div>
       </header>
 
       {activeView === 'workspace' ? (
@@ -412,7 +404,7 @@ function App(): JSX.Element {
                   <div className="railNote">
                     <span className={`signal ${llmHealth?.ok ? 'good' : llmHealth ? 'warn' : ''}`} />
                     <div>
-                      <strong>{translationProviderId}</strong>
+                      <strong>{providerLabel(translationProviderId, t)}</strong>
                       <small>{llmHealth ? t(providerStatusLabel(llmHealth.status)) : t('translationProviderDetail')}</small>
                     </div>
                   </div>
@@ -752,9 +744,9 @@ function App(): JSX.Element {
                     onChange={(event) => void updateSettings({ asrProviderId: event.target.value })}
                   >
                     {asrProviders.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {t(provider.nameKey)} · {provider.id}
-                      </option>
+                    <option key={provider.id} value={provider.id}>
+                        {providerLabel(provider.id, t)}
+                    </option>
                     ))}
                   </select>
                 </label>
@@ -888,7 +880,7 @@ function App(): JSX.Element {
                   >
                     {translationProviders.map((provider) => (
                       <option key={provider} value={provider}>
-                        {provider}
+                        {providerLabel(provider, t)}
                       </option>
                     ))}
                   </select>
@@ -1076,7 +1068,7 @@ function ProviderCard(props: {
     <div className="providerCard">
       <div>
         <span className={`signal ${tone}`} />
-        <strong title={props.activeId}>{props.activeId}</strong>
+        <strong title={props.activeId}>{providerLabel(props.activeId, t)}</strong>
         <small>{props.health ? t(providerStatusLabel(props.health.status)) : props.detail}</small>
       </div>
       <button className="secondary compact" disabled={props.loading} onClick={props.onTest}>
@@ -1222,6 +1214,23 @@ function providerStatusLabel(status: ProviderHealth['status']): string {
 
 function runtimeActionLabel(action: WhisperRuntimeStatus['actionRequired'] = 'none'): string {
   return `runtimeAction.${action}`;
+}
+
+function providerLabel(providerId: string, t: (key: string) => string): string {
+  switch (providerId) {
+    case 'local.whisper.cpp':
+      return t('localWhisperCppProvider');
+    case 'cloud.openai':
+      return t('cloudOpenaiProvider');
+    case 'mock.asr':
+      return t('mockAsrProvider');
+    case 'openai.compatible':
+      return t('openaiCompatibleProvider');
+    case 'mock.local':
+      return t('mockTranslationProvider');
+    default:
+      return providerId;
+  }
 }
 
 function shortLanguage(code: string): string {
