@@ -412,7 +412,7 @@ function normalizeDocumentForSubtitleDisplay(document: SubtitleDocument): Subtit
   };
 }
 
-function wrapSubtitleText(text: string, maxLineLength = 36): string {
+function wrapSubtitleText(text: string, maxLineLength = 28): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
 

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { CreateJobRequest, JobEvent, JobSnapshot, SubtitleDocument, SubtitleSegment } from '@shared/models';
+import type { AssetEvent, CreateJobRequest, JobEvent, JobSnapshot, SubtitleDocument, SubtitleSegment } from '@shared/models';
 import { JobManager } from './services/jobManager';
 import { NativeBackendClient } from './services/nativeBackendClient';
 import { SettingsStore } from './services/settingsStore';
@@ -53,6 +53,9 @@ app.on('window-all-closed', () => {
 function registerIpc(): void {
   jobManager.on('job-event', (event: JobEvent) => {
     mainWindow?.webContents.send('jobs:event', event);
+  });
+  whisperAssets.on('asset-event', (event: AssetEvent) => {
+    mainWindow?.webContents.send('assets:event', event);
   });
 
   async function selectMedia(): Promise<string | undefined> {

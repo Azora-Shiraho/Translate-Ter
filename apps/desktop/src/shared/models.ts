@@ -189,6 +189,14 @@ export type JobEvent =
   | { type: 'progress'; jobId: string; stage: JobStage; progress: number; message?: string }
   | { type: 'error'; jobId: string; code: string; message: string; retryable: boolean };
 
+export type AssetEvent =
+  | { type: 'download-start'; scope: 'runtime' | 'model'; message: string }
+  | { type: 'download-progress'; scope: 'runtime' | 'model'; message: string; receivedBytes?: number }
+  | { type: 'verify'; scope: 'runtime' | 'model'; message: string }
+  | { type: 'extract'; scope: 'runtime'; message: string }
+  | { type: 'ready'; scope: 'runtime' | 'model'; message: string }
+  | { type: 'error'; scope: 'runtime' | 'model'; message: string };
+
 export type NativeHealth = {
   protocolVersion: number;
   backendVersion: string;

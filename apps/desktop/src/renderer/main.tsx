@@ -99,9 +99,13 @@ function App(): JSX.Element {
       if (event.type === 'progress') setMessage(event.message ?? translateStage(event.stage));
       if (event.type === 'error') setMessage(event.message);
     });
+    const unsubscribeAssets = window.translateTer.assets.onEvent((event) => {
+      setMessage(event.message);
+    });
     return () => {
       mounted = false;
       unsubscribe();
+      unsubscribeAssets();
     };
   }, [i18n, translateStage]);
 
@@ -288,8 +292,8 @@ function App(): JSX.Element {
   if (!settings) return <div className="boot">Translate-Ter</div>;
 
   return (
-    <div className="app">
-      <header className="header">
+    <div className="appShell">
+      <header className="topChrome">
         <div className="windowDots" aria-hidden="true">
           <span />
           <span />
@@ -322,24 +326,33 @@ function App(): JSX.Element {
           </select>
         </label>
       </header>
+      <nav className="workflowRail">
+        {steps.map((step, index) => (
+          <span className={index < currentStepIndex ? 'workflowStep done' : index === currentStepIndex ? 'workflowStep active' : 'workflowStep'} key={step}>
+            <span className="workflowStepDot" />
+            <strong>{index + 1}</strong>
+            <span>{t(step)}</span>
+          </span>
+        ))}
+      </nav>
 
-      <main className="workspace">
-        <section className="mainPane">
-          <section className="jobHero" aria-label={t('preview')}>
-            <div className="jobHeroHeader">
+      <main className="workstation">
+        <section className="editorStage">
+          <section className="jobOverview" aria-label={t('preview')}>
+            <div className="jobOverviewMain">
               <strong title={job?.fileName ?? t('chooseMedia')}>{job?.fileName ?? t('chooseMedia')}</strong>
               <span>{t(stageLabel(job?.stage ?? 'idle'))}</span>
             </div>
-            <div className="jobHeroMeta">
+            <div className="jobOverviewMeta">
               <span>{sourceLabel}</span>
               <ArrowRight size={16} />
               <span>{targetLabel}</span>
-              <span className="jobHeroProgress">{completion}%</span>
+              <span className="jobOverviewProgress">{completion}%</span>
             </div>
-            <div className="track">
+            <div className="jobOverviewBar track">
               <span style={{ width: `${completion}%` }} />
             </div>
-            <div className="jobActions">
+            <div className="jobOverviewActions">
               <label className="heroField">
                 <span>{t('mediaPath')}</span>
                 <input
@@ -365,16 +378,15 @@ function App(): JSX.Element {
                 {t('exportSrt')}
               </button>
             </div>
+            <div className="jobOverviewStats" aria-label={t('workflowSummary')}>
+              <MetricCard icon={<Gauge size={16} />} label={t('jobStage')} value={t(stageLabel(job?.stage ?? 'idle'))} />
+              <MetricCard icon={<Languages size={16} />} label={t('languagePair')} value={`${shortLanguage(settings.sourceLanguage)} -> ${shortLanguage(settings.targetLanguage)}`} />
+              <MetricCard icon={<ShieldCheck size={16} />} label={t('translatedRows')} value={`${translatedCount}/${segments.length}`} />
+              <MetricCard icon={<AlertCircle size={16} />} label={t('warnings')} value={String(warningCount)} />
+            </div>
           </section>
 
-          <section className="summaryGrid" aria-label={t('workflowSummary')}>
-            <MetricCard icon={<Gauge size={16} />} label={t('jobStage')} value={t(stageLabel(job?.stage ?? 'idle'))} />
-            <MetricCard icon={<Languages size={16} />} label={t('languagePair')} value={`${shortLanguage(settings.sourceLanguage)} -> ${shortLanguage(settings.targetLanguage)}`} />
-            <MetricCard icon={<ShieldCheck size={16} />} label={t('translatedRows')} value={`${translatedCount}/${segments.length}`} />
-            <MetricCard icon={<AlertCircle size={16} />} label={t('warnings')} value={String(warningCount)} />
-          </section>
-
-          <section className="subtitlePanel">
+          <section className="subtitleWorkbench">
             <div className="panelHeader">
               <div>
                 <h2>{t('subtitles')}</h2>
@@ -448,7 +460,175 @@ function App(): JSX.Element {
           </section>
         </section>
 
-        <aside className="inspector">
+        <aside className="contextPanel">
+          <InspectorSection icon={<Save size={16} />} title={t('export')}>
+            <div className="segmented">
+              {[
+                ['translated', t('translatedOnly')],
+                ['source', t('sourceOnly')],
+                ['bilingual', t('bilingual')]
+              ].map(([value, label]) => (
+                <button
+                  className={exportVariant === value ? 'selected' : ''}
+                  key={value}
+                  onClick={() => setExportVariant(value as ExportVariant)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {exportVariant === 'bilingual' && (
+              <div className="segmented two">
+                {[
+                  ['source-first', t('sourceFirst')],
+                  ['target-first', t('targetFirst')]
+                ].map(([value, label]) => (
+                  <button
+                    className={bilingualOrder === value ? 'selected' : ''}
+                    key={value}
+                    onClick={() => setBilingualOrder(value as BilingualOrder)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <input value={exportPath} placeholder={t('exportPath')} onChange={(event) => setExportPath(event.target.value)} />
+            <button className="primary" disabled={busy || !job?.subtitleDocument || !exportPath.trim()} onClick={() => void exportSrt()}>
+              <Save size={16} />
+              {t('exportSrt')}
+            </button>
+          </InspectorSection>
+
+          <InspectorSection icon={<Languages size={16} />} title={t('translate')}>
+            <label>
+              {t('translationProvider')}
+              <select
+                value={translationProviderId}
+                onChange={(event) =>
+                  void updateSettings({
+                    translationProviderPriority:
+                      event.target.value === 'mock.local' ? ['mock.local'] : [event.target.value, 'mock.local']
+                  })
+                }
+              >
+                {translationProviders.map((provider) => (
+                  <option key={provider} value={provider}>
+                    {provider}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <ProviderCard
+              activeId={translationProviderId}
+              detail={t('translationProviderDetail')}
+              health={llmHealth}
+              loading={checkingProvider === translationProviderId}
+              onTest={() => void testProvider(translationProviderId)}
+            />
+            {translationProviderId === 'mock.local' && (
+              <InlineNotice
+                title={t('translationProvider')}
+                detail={t('mockTranslationBypass')}
+              />
+            )}
+            {translationProviderId === 'openai.compatible' && (
+              <>
+                <div className="providerCard">
+                  <div>
+                    <strong>{t('llmProviderSettings')}</strong>
+                    <small>{t('translationProviderDetail')}</small>
+                  </div>
+                </div>
+                <TextField
+                  label={t('baseUrl')}
+                  value={llmSecret.baseUrl ?? ''}
+                  placeholder="https://api.openai.com/v1"
+                  onChange={(value) => updateProviderSecret('openai.compatible', { baseUrl: value })}
+                />
+                <TextField
+                  label={t('apiKey')}
+                  value={llmSecret.apiKey ?? ''}
+                  placeholder="sk-..."
+                  type="password"
+                  onChange={(value) => updateProviderSecret('openai.compatible', { apiKey: value })}
+                />
+                <TextField
+                  label={t('model')}
+                  value={llmSecret.model ?? ''}
+                  placeholder="gpt-4o-mini"
+                  onChange={(value) => updateProviderSecret('openai.compatible', { model: value })}
+                />
+                <TextField
+                  label={t('organization')}
+                  value={llmSecret.organization ?? ''}
+                  placeholder={t('optional')}
+                  onChange={(value) => updateProviderSecret('openai.compatible', { organization: value })}
+                />
+                <div className="providerCard">
+                  <div>
+                    <strong>{t('translationRateLimits')}</strong>
+                    <small>{t('translationRateLimitsDetail')}</small>
+                  </div>
+                </div>
+                <NumberField
+                  label={t('concurrency')}
+                  min={1}
+                  max={6}
+                  value={settings.translationConcurrency}
+                  onChange={(value) => void updateSettings({ translationConcurrency: value })}
+                />
+                <NumberField
+                  label={t('requestsPerMinute')}
+                  min={1}
+                  max={600}
+                  value={settings.translationRequestsPerMinute}
+                  onChange={(value) => void updateSettings({ translationRequestsPerMinute: value })}
+                />
+                <NumberField
+                  label={t('tokenBudgetPerMinute')}
+                  min={1000}
+                  max={1000000}
+                  step={1000}
+                  value={settings.translationTokenBudgetPerMinute}
+                  onChange={(value) => void updateSettings({ translationTokenBudgetPerMinute: value })}
+                />
+                <div className="providerCard">
+                  <div>
+                    <strong>{t('translationBatching')}</strong>
+                    <small>{t('translationBatchingDetail')}</small>
+                  </div>
+                </div>
+                <NumberField
+                  label={t('linesPerRequest')}
+                  min={1}
+                  max={32}
+                  value={settings.translationLinesPerRequest}
+                  onChange={(value) =>
+                    void updateSettings({
+                      translationLinesPerRequest: value,
+                      translationBatchStride: Math.min(settings.translationBatchStride, value)
+                    })
+                  }
+                />
+                <NumberField
+                  label={t('batchStride')}
+                  min={1}
+                  max={settings.translationLinesPerRequest}
+                  value={settings.translationBatchStride}
+                  onChange={(value) => void updateSettings({ translationBatchStride: value })}
+                />
+                <ProviderActionRow
+                  savingLabel={t('saveProvider')}
+                  testingLabel={checkingProvider === 'openai.compatible' ? t('checking') : t('test')}
+                  onSave={() => void saveProviderSecret('openai.compatible')}
+                  onTest={() => void testProvider('openai.compatible')}
+                  testDisabled={checkingProvider === 'openai.compatible'}
+                />
+              </>
+            )}
+          </InspectorSection>
+
           <InspectorSection icon={<Settings size={16} />} title={t('asr')}>
             <div className="languagePair">
               <SelectField
@@ -587,175 +767,6 @@ function App(): JSX.Element {
               </>
             )}
           </InspectorSection>
-
-          <InspectorSection icon={<Languages size={16} />} title={t('translate')}>
-            <label>
-              {t('translationProvider')}
-              <select
-                value={translationProviderId}
-                onChange={(event) =>
-                  void updateSettings({
-                    translationProviderPriority:
-                      event.target.value === 'mock.local' ? ['mock.local'] : [event.target.value, 'mock.local']
-                  })
-                }
-              >
-                {translationProviders.map((provider) => (
-                  <option key={provider} value={provider}>
-                    {provider}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <ProviderCard
-              activeId={translationProviderId}
-              detail={t('translationProviderDetail')}
-              health={llmHealth}
-              loading={checkingProvider === translationProviderId}
-              onTest={() => void testProvider(translationProviderId)}
-            />
-            {translationProviderId === 'mock.local' && (
-              <InlineNotice
-                title={t('translationProvider')}
-                detail={t('mockTranslationBypass')}
-              />
-            )}
-            {translationProviderId === 'openai.compatible' && (
-              <>
-                <div className="providerCard">
-                  <div>
-                    <strong>{t('llmProviderSettings')}</strong>
-                    <small>{t('translationProviderDetail')}</small>
-                  </div>
-                </div>
-                <TextField
-                  label={t('baseUrl')}
-                  value={llmSecret.baseUrl ?? ''}
-                  placeholder="https://api.openai.com/v1"
-                  onChange={(value) => updateProviderSecret('openai.compatible', { baseUrl: value })}
-                />
-                <TextField
-                  label={t('apiKey')}
-                  value={llmSecret.apiKey ?? ''}
-                  placeholder="sk-..."
-                  type="password"
-                  onChange={(value) => updateProviderSecret('openai.compatible', { apiKey: value })}
-                />
-                <TextField
-                  label={t('model')}
-                  value={llmSecret.model ?? ''}
-                  placeholder="gpt-4o-mini"
-                  onChange={(value) => updateProviderSecret('openai.compatible', { model: value })}
-                />
-                <TextField
-                  label={t('organization')}
-                  value={llmSecret.organization ?? ''}
-                  placeholder={t('optional')}
-                  onChange={(value) => updateProviderSecret('openai.compatible', { organization: value })}
-                />
-                <div className="providerCard">
-                  <div>
-                    <strong>{t('translationRateLimits')}</strong>
-                    <small>{t('translationRateLimitsDetail')}</small>
-                  </div>
-                </div>
-                <NumberField
-                  label={t('concurrency')}
-                  min={1}
-                  max={6}
-                  value={settings.translationConcurrency}
-                  onChange={(value) => void updateSettings({ translationConcurrency: value })}
-                />
-                <NumberField
-                  label={t('requestsPerMinute')}
-                  min={1}
-                  max={600}
-                  value={settings.translationRequestsPerMinute}
-                  onChange={(value) => void updateSettings({ translationRequestsPerMinute: value })}
-                />
-                <NumberField
-                  label={t('tokenBudgetPerMinute')}
-                  min={1000}
-                  max={1000000}
-                  step={1000}
-                  value={settings.translationTokenBudgetPerMinute}
-                  onChange={(value) => void updateSettings({ translationTokenBudgetPerMinute: value })}
-                />
-                <div className="providerCard">
-                  <div>
-                    <strong>{t('translationBatching')}</strong>
-                    <small>{t('translationBatchingDetail')}</small>
-                  </div>
-                </div>
-                <NumberField
-                  label={t('linesPerRequest')}
-                  min={1}
-                  max={32}
-                  value={settings.translationLinesPerRequest}
-                  onChange={(value) =>
-                    void updateSettings({
-                      translationLinesPerRequest: value,
-                      translationBatchStride: Math.min(settings.translationBatchStride, value)
-                    })
-                  }
-                />
-                <NumberField
-                  label={t('batchStride')}
-                  min={1}
-                  max={settings.translationLinesPerRequest}
-                  value={settings.translationBatchStride}
-                  onChange={(value) => void updateSettings({ translationBatchStride: value })}
-                />
-                <ProviderActionRow
-                  savingLabel={t('saveProvider')}
-                  testingLabel={checkingProvider === 'openai.compatible' ? t('checking') : t('test')}
-                  onSave={() => void saveProviderSecret('openai.compatible')}
-                  onTest={() => void testProvider('openai.compatible')}
-                  testDisabled={checkingProvider === 'openai.compatible'}
-                />
-              </>
-            )}
-          </InspectorSection>
-
-          <InspectorSection icon={<Save size={16} />} title={t('export')}>
-            <div className="segmented">
-              {[
-                ['translated', t('translatedOnly')],
-                ['source', t('sourceOnly')],
-                ['bilingual', t('bilingual')]
-              ].map(([value, label]) => (
-                <button
-                  className={exportVariant === value ? 'selected' : ''}
-                  key={value}
-                  onClick={() => setExportVariant(value as ExportVariant)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {exportVariant === 'bilingual' && (
-              <div className="segmented two">
-                {[
-                  ['source-first', t('sourceFirst')],
-                  ['target-first', t('targetFirst')]
-                ].map(([value, label]) => (
-                  <button
-                    className={bilingualOrder === value ? 'selected' : ''}
-                    key={value}
-                    onClick={() => setBilingualOrder(value as BilingualOrder)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-            <input value={exportPath} placeholder={t('exportPath')} onChange={(event) => setExportPath(event.target.value)} />
-            <button className="primary" disabled={busy || !job?.subtitleDocument || !exportPath.trim()} onClick={() => void exportSrt()}>
-              <Save size={16} />
-              {t('exportSrt')}
-            </button>
-          </InspectorSection>
-
           <InspectorSection icon={<MonitorCog size={16} />} title={t('runtime')}>
             <div className="runtimeGrid">
               <StatusLine label={t('nativeBackend')} value={nativeHealth?.status ? t(nativeHealth.status) : t('unknown')} tone={nativeHealth?.status === 'ok' ? 'good' : 'muted'} />
@@ -776,7 +787,7 @@ function App(): JSX.Element {
         </aside>
       </main>
 
-      <footer className="statusStrip">
+      <footer className="systemStrip">
         <span>{t('progress')}: {completion}%</span>
         <span title={message}>{message}</span>
         {canForceStop && (

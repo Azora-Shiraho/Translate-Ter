@@ -6,6 +6,7 @@ import type {
   JobEvent,
   JobSnapshot,
   NativeHealth,
+  AssetEvent,
   ProviderHealth,
   ProviderSecretInput,
   SubtitleDocument,
@@ -68,7 +69,14 @@ const api = {
     listWhisperModels: () => ipcRenderer.invoke('assets:list-whisper-models') as Promise<WhisperModelInfo[]>,
     ensureWhisperRuntime: (request: WhisperRuntimeRequest) =>
       ipcRenderer.invoke('assets:ensure-whisper-runtime', request) as Promise<WhisperRuntimeStatus>,
-    deleteModel: (modelId: string) => ipcRenderer.invoke('assets:delete-model', modelId) as Promise<void>
+    deleteModel: (modelId: string) => ipcRenderer.invoke('assets:delete-model', modelId) as Promise<void>,
+    onEvent: (listener: (event: AssetEvent) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: AssetEvent) => listener(payload);
+      ipcRenderer.on('assets:event', handler);
+      return () => {
+        ipcRenderer.off('assets:event', handler);
+      };
+    }
   },
   native: {
     health: () => ipcRenderer.invoke('native:health') as Promise<NativeHealth>

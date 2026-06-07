@@ -1,10 +1,11 @@
+import { EventEmitter } from 'node:events';
 import { app } from 'electron';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { access, copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import type { WhisperModelInfo, WhisperRuntimeRequest, WhisperRuntimeStatus } from '@shared/models';
+import type { AssetEvent, WhisperModelInfo, WhisperRuntimeRequest, WhisperRuntimeStatus } from '@shared/models';
 
 type WhisperManifest = {
   manifestVersion: number;
@@ -29,8 +30,12 @@ type WhisperManifest = {
   }>;
 };
 
-export class WhisperAssetManager {
+export class WhisperAssetManager extends EventEmitter {
   private manifestCache?: WhisperManifest;
+
+  constructor() {
+    super();
+  }
 
   async listModels(): Promise<WhisperModelInfo[]> {
     const manifest = await this.manifest();
@@ -123,8 +128,8 @@ export class WhisperAssetManager {
     }
 
     if (request.allowDownload && (!binaryVerified || !modelVerified)) {
-      if (!binaryVerified) await this.downloadAndInstall(runtime.url, binaryPath, runtime.sha256);
-      if (!modelVerified) await this.downloadAndInstall(model.url, modelPath, model.sha256);
+      if (!binaryVerified) await this.downloadAndInstall('runtime', runtime.url, binaryPath, runtime.sha256);
+      if (!modelVerified) await this.downloadAndInstall('model', model.url, modelPath, model.sha256);
     }
 
     const resolvedBinaryInstalled = await this.exists(binaryPath);
@@ -162,7 +167,7 @@ export class WhisperAssetManager {
     return join(app.getPath('userData'), 'runtime', 'whisper');
   }
 
-  private async downloadAndInstall(url: string | null, destination: string, sha256: string): Promise<void> {
+  private async downloadAndInstall(scope: 'runtime' | 'model', url: string | null, destination: string, sha256: string): Promise<void> {
     if (!url || url.startsWith('disabled://')) return;
     if (!isPinnedSha256(sha256)) {
       throw new Error('Refusing to download whisper asset without a pinned SHA-256 hash.');
@@ -172,35 +177,47 @@ export class WhisperAssetManager {
     await mkdir(dirname(destination), { recursive: true });
     await rm(tmpPath, { force: true });
 
+    this.emitAsset({
+      type: 'download-start',
+      scope,
+      message: scope === 'runtime' ? 'Downloading whisper runtime.' : 'Downloading whisper model.'
+    });
+
     if (url.startsWith('file://')) {
       const sourcePath = url.slice('file://'.length);
       await copyFile(sourcePath, tmpPath);
     } else if (url.startsWith('https://')) {
-      await this.downloadHttp(url, tmpPath);
+      await this.downloadHttp(scope, url, tmpPath);
     } else {
       throw new Error(`Unsupported whisper asset URL scheme: ${url}`);
     }
 
+    this.emitAsset({ type: 'verify', scope, message: scope === 'runtime' ? 'Verifying runtime checksum.' : 'Verifying model checksum.' });
     const verified = await this.verifySha256(tmpPath, sha256);
     if (!verified) {
       await rm(tmpPath, { force: true });
+      this.emitAsset({ type: 'error', scope, message: 'Downloaded file failed checksum verification.' });
       throw new Error('Downloaded asset failed SHA-256 verification.');
     }
     if (this.shouldExtractArchive(url, destination)) {
       const extractDir = this.archiveExtractDir(destination);
       await mkdir(extractDir, { recursive: true });
+      this.emitAsset({ type: 'extract', scope: 'runtime', message: 'Extracting runtime archive.' });
       await this.extractZip(tmpPath, extractDir);
       await writeFile(this.archiveMarkerPath(destination), sha256, 'utf8');
       await rm(tmpPath, { force: true });
+      this.emitAsset({ type: 'ready', scope, message: 'Runtime download complete.' });
       return;
     }
 
     await rename(tmpPath, destination);
+    this.emitAsset({ type: 'ready', scope, message: scope === 'runtime' ? 'Runtime download complete.' : 'Model download complete.' });
   }
 
-  private async downloadHttp(url: string, destination: string): Promise<void> {
+  private async downloadHttp(scope: 'runtime' | 'model', url: string, destination: string): Promise<void> {
     const response = await fetch(url);
     if (!response.ok || !response.body) {
+      this.emitAsset({ type: 'error', scope, message: `Download failed with HTTP ${response.status}.` });
       throw new Error(`Failed to download whisper asset: HTTP ${response.status}`);
     }
 
@@ -218,7 +235,14 @@ export class WhisperAssetManager {
               stream.end();
               return;
             }
-            stream.write(Buffer.from(value), (error) => {
+            const chunk = Buffer.from(value);
+            this.emitAsset({
+              type: 'download-progress',
+              scope,
+              message: scope === 'runtime' ? 'Downloading whisper runtime...' : 'Downloading whisper model...',
+              receivedBytes: chunk.length
+            });
+            stream.write(chunk, (error) => {
               if (error) {
                 reject(error);
                 return;
@@ -412,6 +436,10 @@ export class WhisperAssetManager {
       stream.on('data', (chunk) => hash.update(chunk));
       stream.on('end', () => resolveResult(hash.digest('hex').toLowerCase() === expected.toLowerCase()));
     });
+  }
+
+  private emitAsset(event: AssetEvent): void {
+    this.emit('asset-event', event);
   }
 }
 
