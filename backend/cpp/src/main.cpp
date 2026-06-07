@@ -167,6 +167,11 @@ bool path_exists(const std::filesystem::path& path) {
   return std::filesystem::exists(path, error) && !std::filesystem::is_directory(path, error);
 }
 
+bool directory_exists(const std::filesystem::path& path) {
+  std::error_code error;
+  return std::filesystem::exists(path, error) && std::filesystem::is_directory(path, error);
+}
+
 std::vector<std::filesystem::path> path_entries() {
   std::vector<std::filesystem::path> entries;
   const char* raw_path = std::getenv("PATH");
@@ -309,24 +314,34 @@ std::string bool_json(bool value) {
   return value ? "true" : "false";
 }
 
-bool detect_cuda_support() {
+bool detect_cuda_support(const std::vector<std::filesystem::path>& extra_search_roots = {}) {
+#if defined(_WIN32)
+  const std::array<std::string, 2> cuda_dlls = {"cublas64_11.dll", "cublasLt64_11.dll"};
+  std::vector<std::filesystem::path> search_roots = extra_search_roots;
+  if (const char* cuda_path = std::getenv("CUDA_PATH")) {
+    search_roots.emplace_back(std::filesystem::path(cuda_path) / "bin");
+  }
+  if (const char* cuda_home = std::getenv("CUDA_HOME")) {
+    search_roots.emplace_back(std::filesystem::path(cuda_home) / "bin");
+  }
+  for (const auto& entry : path_entries()) {
+    if (directory_exists(entry)) {
+      search_roots.push_back(entry);
+    }
+  }
+
+  return std::all_of(cuda_dlls.begin(), cuda_dlls.end(), [&](const auto& dll_name) {
+    return std::any_of(search_roots.begin(), search_roots.end(), [&](const auto& root) {
+      return path_exists(root / dll_name);
+    });
+  });
+#else
   if (std::getenv("CUDA_PATH") != nullptr || std::getenv("CUDA_HOME") != nullptr) {
     return true;
   }
 
   if (find_tool("nvidia-smi").has_value()) {
     return true;
-  }
-
-#if defined(_WIN32)
-  const auto gpu_probe = run_command_capture(
-      "powershell.exe -NoProfile -Command \"(Get-CimInstance Win32_VideoController | "
-      "Where-Object { $_.Name -match 'NVIDIA' } | Measure-Object).Count\"");
-  if (gpu_probe.exit_code == 0) {
-    const auto count = without_line_breaks(gpu_probe.output);
-    if (!count.empty() && count != "0") {
-      return true;
-    }
   }
 #endif
 
@@ -911,7 +926,6 @@ NativeResult asr_transcribe_result(const std::string& request) {
   const auto target_language = extract_string(request, "targetLanguage").value_or("");
   const auto job_id = extract_string(request, "jobId").value_or("native-job");
   const bool prefer_cuda = extract_bool(request, "preferCuda").value_or(false);
-  const bool cuda_supported = detect_cuda_support();
 
   if (!starts_with(asr_provider, "local.whisper")) {
     return {false, "", "UnsupportedCommand", "Only local.whisper.cpp is supported by the native backend for offline transcription.", false};
@@ -938,6 +952,7 @@ NativeResult asr_transcribe_result(const std::string& request) {
   if (media_path.empty() || !path_exists(media_path)) {
     return {false, "", "MalformedRequest", "asr.transcribe requires an existing payload.mediaPath.", false};
   }
+  const bool cuda_supported = detect_cuda_support({std::filesystem::path(*binary_path).parent_path()});
 
   const auto job_safe = sanitize_id(job_id);
   auto output_dir = requested_output_dir(request, job_id, "asr");

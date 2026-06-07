@@ -2,10 +2,14 @@ import { EventEmitter } from 'node:events';
 import { app } from 'electron';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { access, copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { createReadStream, createWriteStream, existsSync } from 'node:fs';
+import { access, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { AssetEvent, WhisperModelInfo, WhisperRuntimeRequest, WhisperRuntimeStatus } from '@shared/models';
+
+const NVIDIA_CUDA_REDIST_BASE_URL = 'https://developer.download.nvidia.com/compute/cuda/redist/';
+const NVIDIA_CUDA_11_8_REDIST_MANIFEST_URL = `${NVIDIA_CUDA_REDIST_BASE_URL}redistrib_11.8.0.json`;
+const WINDOWS_CUBLAS_DLLS = ['cublas64_11.dll', 'cublasLt64_11.dll'];
 
 type WhisperManifest = {
   manifestVersion: number;
@@ -30,6 +34,16 @@ type WhisperManifest = {
   }>;
 };
 
+type CudaRedistribManifest = {
+  libcublas?: Record<
+    string,
+    {
+      relative_path?: string;
+      sha256?: string;
+    }
+  >;
+};
+
 export class WhisperAssetManager extends EventEmitter {
   private manifestCache?: WhisperManifest;
 
@@ -52,9 +66,15 @@ export class WhisperAssetManager extends EventEmitter {
   }
 
   async ensureRuntime(request: WhisperRuntimeRequest): Promise<WhisperRuntimeStatus> {
+    await this.migrateLegacyCacheIfNeeded();
     const manifest = await this.manifest();
     const model = manifest.models.find((item) => item.id === request.modelId) ?? manifest.models[0];
-    const cudaSupported = detectCudaSupport();
+    const cudaHardwareSupported = detectCudaHardwareSupport();
+    let cudaSupported = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest));
+    if (request.preferCuda && cudaHardwareSupported && !cudaSupported && request.allowDownload) {
+      await this.ensureWindowsCudaRuntimeDependencies(manifest);
+      cudaSupported = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest));
+    }
     const { runtime, platformKey } = this.selectRuntime(manifest, request.preferCuda, cudaSupported);
 
     if (manifest.enabled === false) {
@@ -65,6 +85,7 @@ export class WhisperAssetManager extends EventEmitter {
         model.id,
         runtime?.acceleration ?? 'cpu',
         request.preferCuda,
+        cudaHardwareSupported,
         cudaSupported,
         false,
         false,
@@ -87,6 +108,7 @@ export class WhisperAssetManager extends EventEmitter {
         model.id,
         'cpu',
         request.preferCuda,
+        cudaHardwareSupported,
         cudaSupported,
         false,
         false,
@@ -115,6 +137,7 @@ export class WhisperAssetManager extends EventEmitter {
         model.id,
         runtime.acceleration,
         request.preferCuda,
+        cudaHardwareSupported,
         cudaSupported,
         binaryExists,
         modelExists,
@@ -144,6 +167,7 @@ export class WhisperAssetManager extends EventEmitter {
       model.id,
       runtime.acceleration,
       request.preferCuda,
+      cudaHardwareSupported,
       cudaSupported,
       resolvedBinaryInstalled,
       resolvedModelInstalled,
@@ -164,7 +188,19 @@ export class WhisperAssetManager extends EventEmitter {
   }
 
   cacheDir(): string {
+    if (app.isPackaged) {
+      return join(dirname(process.execPath), 'runtime', 'whisper');
+    }
+    return join(resolve('.'), '.runtime', 'whisper');
+  }
+
+  private legacyCacheDir(): string {
     return join(app.getPath('userData'), 'runtime', 'whisper');
+  }
+
+  private cudaRuntimeSearchRoots(manifest: WhisperManifest): string[] {
+    const runtime = manifest.runtime.platforms[`${this.platformKey()}-cuda`];
+    return runtime ? [dirname(join(this.cacheDir(), runtime.binary))] : [];
   }
 
   private async downloadAndInstall(scope: 'runtime' | 'model', url: string | null, destination: string, sha256: string): Promise<void> {
@@ -263,6 +299,7 @@ export class WhisperAssetManager extends EventEmitter {
     modelId: string,
     runtimeAcceleration: 'cpu' | 'cuda' | 'metal' | 'vulkan',
     preferCuda: boolean,
+    cudaHardwareSupported: boolean,
     cudaSupported: boolean,
     binaryInstalled: boolean,
     modelInstalled: boolean,
@@ -274,6 +311,8 @@ export class WhisperAssetManager extends EventEmitter {
     const fallbackReason =
       preferCuda && runtimeAcceleration !== 'cuda'
         ? 'The selected whisper runtime build does not include CUDA acceleration.'
+        : preferCuda && cudaHardwareSupported && !cudaSupported
+          ? 'NVIDIA hardware is present, but the required CUDA runtime DLLs for whisper.cpp were not found.'
         : preferCuda && !cudaSupported
           ? 'CUDA was requested but no supported NVIDIA runtime was detected on this machine.'
           : runtimeAcceleration === 'cuda' && !cudaSupported
@@ -441,15 +480,107 @@ export class WhisperAssetManager extends EventEmitter {
   private emitAsset(event: AssetEvent): void {
     this.emit('asset-event', event);
   }
+
+  private async migrateLegacyCacheIfNeeded(): Promise<void> {
+    const nextCacheDir = this.cacheDir();
+    const legacyCacheDir = this.legacyCacheDir();
+    if (nextCacheDir === legacyCacheDir) return;
+    if (await this.exists(nextCacheDir)) return;
+    if (!(await this.exists(legacyCacheDir))) return;
+
+    await mkdir(dirname(nextCacheDir), { recursive: true });
+    try {
+      await rename(legacyCacheDir, nextCacheDir);
+    } catch {
+      // Fall back to copy-on-demand via normal download/install flow if move fails.
+    }
+  }
+
+  private async ensureWindowsCudaRuntimeDependencies(manifest: WhisperManifest): Promise<void> {
+    if (process.platform !== 'win32') return;
+    const runtime = manifest.runtime.platforms[`${this.platformKey()}-cuda`];
+    if (!runtime) return;
+
+    const runtimeDir = dirname(join(this.cacheDir(), runtime.binary));
+    if (hasWindowsCudaRuntime([runtimeDir])) return;
+
+    const packageInfo = await this.fetchCudaLibcublasPackage();
+    if (!packageInfo.relative_path || !packageInfo.sha256 || !isPinnedSha256(packageInfo.sha256)) {
+      throw new Error('NVIDIA CUDA libcublas redistributable metadata is missing a pinned SHA-256 hash.');
+    }
+
+    const downloadDir = join(this.cacheDir(), 'downloads');
+    const archivePath = join(downloadDir, basename(packageInfo.relative_path));
+    const extractDir = join(this.cacheDir(), 'cuda-redist', 'libcublas');
+    await mkdir(downloadDir, { recursive: true });
+    await mkdir(runtimeDir, { recursive: true });
+    await rm(archivePath, { force: true });
+    await rm(extractDir, { force: true, recursive: true });
+
+    this.emitAsset({ type: 'download-start', scope: 'runtime', message: 'Downloading CUDA cuBLAS runtime.' });
+    await this.downloadHttp('runtime', `${NVIDIA_CUDA_REDIST_BASE_URL}${packageInfo.relative_path}`, archivePath);
+
+    this.emitAsset({ type: 'verify', scope: 'runtime', message: 'Verifying CUDA cuBLAS runtime checksum.' });
+    const verified = await this.verifySha256(archivePath, packageInfo.sha256);
+    if (!verified) {
+      await rm(archivePath, { force: true });
+      throw new Error('Downloaded CUDA cuBLAS runtime failed SHA-256 verification.');
+    }
+
+    this.emitAsset({ type: 'extract', scope: 'runtime', message: 'Extracting CUDA cuBLAS runtime.' });
+    await mkdir(extractDir, { recursive: true });
+    await this.extractZip(archivePath, extractDir);
+
+    const dllPaths = await findFilesByName(extractDir, WINDOWS_CUBLAS_DLLS);
+    for (const dllName of WINDOWS_CUBLAS_DLLS) {
+      const sourcePath = dllPaths.get(dllName.toLowerCase());
+      if (!sourcePath) {
+        throw new Error(`CUDA cuBLAS runtime archive did not contain ${dllName}.`);
+      }
+      await copyFile(sourcePath, join(runtimeDir, dllName));
+    }
+
+    await rm(archivePath, { force: true });
+    await rm(extractDir, { force: true, recursive: true });
+    this.emitAsset({ type: 'ready', scope: 'runtime', message: 'CUDA cuBLAS runtime is ready.' });
+  }
+
+  private async fetchCudaLibcublasPackage(): Promise<NonNullable<CudaRedistribManifest['libcublas']>[string]> {
+    const response = await fetch(NVIDIA_CUDA_11_8_REDIST_MANIFEST_URL);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch NVIDIA CUDA redistributable manifest: HTTP ${response.status}`);
+    }
+    const manifest = (await response.json()) as CudaRedistribManifest;
+    const packageInfo = manifest.libcublas?.['windows-x86_64'];
+    if (!packageInfo) {
+      throw new Error('NVIDIA CUDA redistributable manifest does not list libcublas for windows-x86_64.');
+    }
+    return packageInfo;
+  }
 }
 
 function isPinnedSha256(value: string): boolean {
   return /^[a-f0-9]{64}$/i.test(value) && !/^0{64}$/i.test(value);
 }
 
-function detectCudaSupport(): boolean {
+function detectCudaSupport(extraSearchRoots: string[] = []): boolean {
   if (process.platform !== 'win32' && process.platform !== 'linux') return false;
+  if (process.platform === 'win32') {
+    return hasWindowsCudaRuntime(extraSearchRoots);
+  }
   if (process.env.CUDA_PATH || process.env.CUDA_HOME) return true;
+
+  const probe = spawnSync('nvidia-smi', ['-L'], {
+    windowsHide: true,
+    stdio: 'ignore'
+  });
+  if (probe.status === 0) return true;
+
+  return false;
+}
+
+function detectCudaHardwareSupport(): boolean {
+  if (process.platform !== 'win32' && process.platform !== 'linux') return false;
 
   const probe = spawnSync('nvidia-smi', ['-L'], {
     windowsHide: true,
@@ -476,4 +607,42 @@ function detectCudaSupport(): boolean {
   }
 
   return false;
+}
+
+function hasWindowsCudaRuntime(extraSearchRoots: string[] = []): boolean {
+  const searchRoots = [
+    ...extraSearchRoots,
+    process.env.CUDA_PATH ? join(process.env.CUDA_PATH, 'bin') : undefined,
+    process.env.CUDA_HOME ? join(process.env.CUDA_HOME, 'bin') : undefined,
+    ...String(process.env.PATH ?? '')
+      .split(';')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+  ].filter((entry): entry is string => Boolean(entry));
+
+  return WINDOWS_CUBLAS_DLLS.every((dllName) => searchRoots.some((root) => existsSync(join(root, dllName))));
+}
+
+async function findFilesByName(root: string, names: string[]): Promise<Map<string, string>> {
+  const wanted = new Set(names.map((name) => name.toLowerCase()));
+  const found = new Map<string, string>();
+  const stack = [root];
+
+  while (stack.length > 0 && found.size < wanted.size) {
+    const current = stack.pop()!;
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(path);
+        continue;
+      }
+      const key = entry.name.toLowerCase();
+      if (wanted.has(key)) {
+        found.set(key, path);
+      }
+    }
+  }
+
+  return found;
 }

@@ -1,7 +1,7 @@
 import { app, safeStorage } from 'electron';
 import { spawnSync } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { chmodSync, readFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { AppSettingsPatch, AppSettingsPublic, ProviderSecretInput } from '@shared/models';
 
@@ -151,6 +151,10 @@ export class SettingsStore {
 }
 
 function detectCudaSupport(): boolean {
+  if (process.platform === 'win32') {
+    return hasWindowsCudaRuntime();
+  }
+
   const hasCudaEnv = Boolean(process.env.CUDA_PATH || process.env.CUDA_HOME);
   if (hasCudaEnv) return true;
 
@@ -160,25 +164,21 @@ function detectCudaSupport(): boolean {
   });
   if (nvidiaSmi.status === 0) return true;
 
-  if (process.platform === 'win32') {
-    const nvidiaGpu = spawnSync(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-Command',
-        "(Get-CimInstance Win32_VideoController | Where-Object { $_.Name -match 'NVIDIA' } | Measure-Object).Count"
-      ],
-      {
-        windowsHide: true,
-        encoding: 'utf8'
-      }
-    );
-    if (nvidiaGpu.status === 0 && Number.parseInt(String(nvidiaGpu.stdout ?? '').trim(), 10) > 0) {
-      return true;
-    }
-  }
-
   return false;
+}
+
+function hasWindowsCudaRuntime(): boolean {
+  const dllNames = ['cublas64_11.dll', 'cublasLt64_11.dll'];
+  const searchRoots = [
+    process.env.CUDA_PATH ? join(process.env.CUDA_PATH, 'bin') : undefined,
+    process.env.CUDA_HOME ? join(process.env.CUDA_HOME, 'bin') : undefined,
+    ...String(process.env.PATH ?? '')
+      .split(';')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+  ].filter((entry): entry is string => Boolean(entry));
+
+  return dllNames.every((dllName) => searchRoots.some((root) => existsSync(join(root, dllName))));
 }
 
 type SecretRecord =
