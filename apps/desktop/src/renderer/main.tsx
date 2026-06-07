@@ -38,7 +38,7 @@ import { formatTimestamp } from '@shared/srt';
 import { languageLabel, languageRegistry } from '@shared/languages';
 
 const steps = ['import', 'asr', 'subtitles', 'translate', 'export'] as const;
-const translationProviders = ['mock.local', 'openai.compatible'] as const;
+const translationProviders = ['openai.compatible'] as const;
 
 type ExportVariant = 'source' | 'translated' | 'bilingual';
 type BilingualOrder = 'source-first' | 'target-first';
@@ -46,8 +46,7 @@ type AppView = 'workspace' | 'settings';
 
 const asrProviders = [
   { id: 'local.whisper.cpp', nameKey: 'localProvider', descriptionKey: 'localProviderDetail' },
-  { id: 'cloud.openai', nameKey: 'cloudProvider', descriptionKey: 'cloudProviderDetail' },
-  { id: 'mock.asr', nameKey: 'mockProvider', descriptionKey: 'mockProviderDetail' }
+  { id: 'cloud.openai', nameKey: 'cloudProvider', descriptionKey: 'cloudProviderDetail' }
 ] as const;
 
 function App(): JSX.Element {
@@ -139,6 +138,27 @@ function App(): JSX.Element {
     document.documentElement.dataset.theme =
       settings.theme === 'system' ? (systemPrefersDark ? 'dark' : 'light') : settings.theme;
   }, [settings, systemPrefersDark]);
+
+  useEffect(() => {
+    if (!settings) return;
+    const migratedTranslationPriority = settings.translationProviderPriority.filter(
+      (providerId) => providerId !== 'mock.local'
+    );
+    const migratedAsrProviderId =
+      settings.asrProviderId === 'mock.asr' ? 'local.whisper.cpp' : settings.asrProviderId;
+    const needsMigration =
+      migratedAsrProviderId !== settings.asrProviderId ||
+      migratedTranslationPriority.length !== settings.translationProviderPriority.length ||
+      migratedTranslationPriority.length === 0;
+
+    if (!needsMigration) return;
+
+    void updateSettings({
+      asrProviderId: migratedAsrProviderId,
+      translationProviderPriority:
+        migratedTranslationPriority.length > 0 ? migratedTranslationPriority : ['openai.compatible']
+    });
+  }, [settings]);
 
   async function updateSettings(patch: Partial<AppSettingsPublic>): Promise<void> {
     const next = await window.translateTer.saveSettings(patch);
@@ -292,10 +312,10 @@ function App(): JSX.Element {
   const warningCount = (job?.warnings.length ?? 0) + (job?.subtitleDocument?.metadata.warnings.length ?? 0);
   const sourceLabel = settings ? languageLabel(settings.sourceLanguage, settings.uiLanguage) : '';
   const targetLabel = settings ? languageLabel(settings.targetLanguage, settings.uiLanguage) : '';
-  const translationProviderId = settings?.translationProviderPriority[0] ?? 'mock.local';
+  const translationProviderId = settings?.translationProviderPriority[0] ?? 'openai.compatible';
   const supportsCuda = Boolean(nativeHealth?.cudaSupported || runtimeStatus?.acceleration.cudaSupported);
   const llmHealth = providerHealth[translationProviderId];
-  const asrHealth = providerHealth[settings?.asrProviderId ?? 'mock.asr'];
+  const asrHealth = providerHealth[settings?.asrProviderId ?? 'local.whisper.cpp'];
   const cloudAsrSecret = providerSecrets['cloud.openai'] ?? {};
   const llmSecret = providerSecrets['openai.compatible'] ?? {};
   const canForceStop = Boolean(job && !['completed', 'failed', 'cancelled'].includes(job.stage));
@@ -757,9 +777,6 @@ function App(): JSX.Element {
                   loading={checkingProvider === settings.asrProviderId}
                   onTest={() => void testProvider(settings.asrProviderId)}
                 />
-                {settings.asrProviderId === 'mock.asr' && (
-                  <InlineNotice title={t('mockProvider')} detail={t('mockProviderBypass')} />
-                )}
                 {settings.asrProviderId === 'local.whisper.cpp' && (
                   <>
                     <div className="providerCard">
@@ -873,8 +890,7 @@ function App(): JSX.Element {
                     value={translationProviderId}
                     onChange={(event) =>
                       void updateSettings({
-                        translationProviderPriority:
-                          event.target.value === 'mock.local' ? ['mock.local'] : [event.target.value, 'mock.local']
+                        translationProviderPriority: [event.target.value]
                       })
                     }
                   >
@@ -892,9 +908,6 @@ function App(): JSX.Element {
                   loading={checkingProvider === translationProviderId}
                   onTest={() => void testProvider(translationProviderId)}
                 />
-                {translationProviderId === 'mock.local' && (
-                  <InlineNotice title={t('translationProvider')} detail={t('mockTranslationBypass')} />
-                )}
                 {translationProviderId === 'openai.compatible' && (
                   <>
                     <div className="providerCard">
@@ -1222,12 +1235,8 @@ function providerLabel(providerId: string, t: (key: string) => string): string {
       return t('localWhisperCppProvider');
     case 'cloud.openai':
       return t('cloudOpenaiProvider');
-    case 'mock.asr':
-      return t('mockAsrProvider');
     case 'openai.compatible':
       return t('openaiCompatibleProvider');
-    case 'mock.local':
-      return t('mockTranslationProvider');
     default:
       return providerId;
   }

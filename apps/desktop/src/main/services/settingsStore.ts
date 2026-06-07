@@ -15,7 +15,7 @@ const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = 
   whisperModelId: 'ggml-base',
   allowWhisperAssetDownload: true,
   allowCloudAsrUpload: false,
-  translationProviderPriority: ['mock.local', 'openai.compatible'],
+  translationProviderPriority: ['openai.compatible'],
   translationConcurrency: 2,
   translationRequestsPerMinute: 60,
   translationTokenBudgetPerMinute: 60_000,
