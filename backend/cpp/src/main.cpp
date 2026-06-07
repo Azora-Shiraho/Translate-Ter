@@ -947,8 +947,8 @@ NativeResult asr_transcribe_result(const std::string& request) {
   if (source_language != "auto" && !source_language.empty()) {
     command << " -l " << quote_shell_value(source_language);
   }
-  if (prefer_cuda && cuda_supported) {
-    command << " -ngl 999";
+  if (!prefer_cuda || !cuda_supported) {
+    command << " -ng";
   }
 
   const auto output = run_command_capture(command.str());
@@ -969,6 +969,9 @@ NativeResult asr_transcribe_result(const std::string& request) {
   }
   if (prefer_cuda && !cuda_supported) {
     warnings.push_back({"CudaFallback", "CUDA acceleration was requested but the native backend did not detect CUDA support.", ""});
+  }
+  if (!prefer_cuda) {
+    warnings.push_back({"CudaDisabled", "CUDA acceleration was disabled for this whisper.cpp transcription run.", ""});
   }
   const auto srt_text = read_text_file(srt_path);
   if (srt_text.empty()) {
