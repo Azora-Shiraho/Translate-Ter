@@ -45,6 +45,7 @@ export type WorkflowStep = 'import' | 'asr' | 'subtitles' | 'translate' | 'expor
 export type AppSettingsPublic = {
   schemaVersion: 1;
   uiLanguage: 'en-US' | 'zh-CN';
+  theme: 'dark' | 'light' | 'system';
   sourceLanguage: string;
   targetLanguage: string;
   asrProviderId: string;

@@ -8,6 +8,7 @@ import type { AppSettingsPatch, AppSettingsPublic, ProviderSecretInput } from '@
 const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = {
   schemaVersion: 1,
   uiLanguage: 'en-US',
+  theme: 'system',
   sourceLanguage: 'auto',
   targetLanguage: 'zh-CN',
   asrProviderId: 'local.whisper.cpp',
