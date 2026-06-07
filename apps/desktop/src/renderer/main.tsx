@@ -76,6 +76,7 @@ function App(): JSX.Element {
   const [message, setMessage] = useState(t('ready'));
   const [runtimeActivity, setRuntimeActivity] = useState<string>();
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [copyBubble, setCopyBubble] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [checkingRuntime, setCheckingRuntime] = useState(false);
   const [checkingProvider, setCheckingProvider] = useState<string>();
@@ -112,7 +113,7 @@ function App(): JSX.Element {
     const unsubscribeJobs = window.translateTer.jobs.onEvent((event) => {
       if (event.type === 'snapshot') setJob(event.job);
       if (event.type === 'progress') setMessage(event.message ?? translateStage(event.stage));
-      if (event.type === 'error') setMessage(event.message);
+      if (event.type === 'error') pushStatus(event.message, 'error');
     });
     const unsubscribeAssets = window.translateTer.assets.onEvent((event) => {
       const nextMessage = assetEventLabel(event, (key, options) => i18n.t(key, options));
@@ -228,9 +229,9 @@ function App(): JSX.Element {
       }
       const health = await window.translateTer.settings.testProvider(providerId);
       setProviderHealth((current) => ({ ...current, [providerId]: health }));
-      setMessage(health.message ?? t(providerStatusLabel(health.status)));
+      pushStatus(health.message ?? t(providerStatusLabel(health.status)), health.ok ? 'success' : 'warning');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
       setCheckingProvider(undefined);
     }
@@ -263,7 +264,7 @@ function App(): JSX.Element {
       });
       setJob(nextJob);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
       setBusy(false);
     }
@@ -275,7 +276,7 @@ function App(): JSX.Element {
     try {
       setJob(await window.translateTer.startTranslation(job.id));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
       setBusy(false);
     }
@@ -286,9 +287,9 @@ function App(): JSX.Element {
     setBusy(true);
     try {
       await window.translateTer.exportSrt(job.subtitleDocument, exportPath.trim(), exportVariant, bilingualOrder);
-      setMessage(t('exported'));
+      pushStatus(t('exported'), 'success');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
       setBusy(false);
     }
@@ -310,7 +311,7 @@ function App(): JSX.Element {
 
   async function saveProviderSecret(providerId: string): Promise<void> {
     await window.translateTer.settings.setSecret(providerId, providerSecrets[providerId] ?? {});
-    setMessage(t('providerSaved'));
+    pushStatus(t('providerSaved'), 'success');
   }
 
   function updateProviderSecret(providerId: string, patch: Partial<ProviderSecretInput>): void {
@@ -360,7 +361,7 @@ function App(): JSX.Element {
     setBusy(false);
     await window.translateTer.jobs.cancel(job.id);
     setJob(await window.translateTer.jobs.get(job.id));
-    setMessage(t('stopped'));
+    pushStatus(t('stopped'), 'warning');
   }
 
   function pushStatus(nextMessage: string, tone: ToastTone = 'neutral'): void {
@@ -377,6 +378,21 @@ function App(): JSX.Element {
         setToasts((current) => current.filter((toast) => toast.id !== id));
       }, 360);
     }, 4200);
+  }
+
+  async function copyToastMessage(toast: ToastMessage): Promise<void> {
+    if (toast.tone !== 'error') return;
+    try {
+      await navigator.clipboard.writeText(toast.message);
+      showCopyBubble(t('copiedToClipboard'));
+    } catch {
+      showCopyBubble(t('copyFailed'));
+    }
+  }
+
+  function showCopyBubble(nextMessage: string): void {
+    setCopyBubble(nextMessage);
+    window.setTimeout(() => setCopyBubble(undefined), 1800);
   }
 
   if (!settings) return <div className="boot">Translate-Ter</div>;
@@ -1075,23 +1091,46 @@ function App(): JSX.Element {
           )}
         </div>
       </footer>
-      <ToastStack toasts={toasts} />
+      <ToastStack toasts={toasts} copyTitle={t('copyErrorToast')} onCopyError={(toast) => void copyToastMessage(toast)} />
+      <BottomBubble message={copyBubble} />
     </div>
   );
 }
 
-function ToastStack(props: { toasts: ToastMessage[] }): JSX.Element | null {
+function ToastStack(props: {
+  toasts: ToastMessage[];
+  copyTitle: string;
+  onCopyError: (toast: ToastMessage) => void;
+}): JSX.Element | null {
   if (props.toasts.length === 0) return null;
   return (
     <div className="toastStack" aria-live="polite" aria-atomic="false">
-      {[...props.toasts].reverse().map((toast) => (
-        <div className={`toastCard ${toast.tone}${toast.exiting ? ' exiting' : ''}`} key={toast.id}>
-          <span className="toastMark" />
-          <p>{toast.message}</p>
-        </div>
-      ))}
+      {[...props.toasts].reverse().map((toast) =>
+        toast.tone === 'error' ? (
+          <button
+            className={`toastCard copyable ${toast.tone}${toast.exiting ? ' exiting' : ''}`}
+            key={toast.id}
+            title={props.copyTitle}
+            type="button"
+            onClick={() => props.onCopyError(toast)}
+          >
+            <span className="toastMark" />
+            <p>{toast.message}</p>
+          </button>
+        ) : (
+          <div className={`toastCard ${toast.tone}${toast.exiting ? ' exiting' : ''}`} key={toast.id}>
+            <span className="toastMark" />
+            <p>{toast.message}</p>
+          </div>
+        )
+      )}
     </div>
   );
+}
+
+function BottomBubble(props: { message?: string }): JSX.Element | null {
+  if (!props.message) return null;
+  return <div className="bottomBubble">{props.message}</div>;
 }
 
 function MetricCard(props: { icon: React.ReactNode; label: string; value: string }): JSX.Element {
@@ -1303,7 +1342,7 @@ function assetEventLabel(event: AssetEvent, t: (key: string, options?: Record<st
     case 'ready':
       return t('runtimeReady');
     case 'error':
-      return t('runtimeError');
+      return event.message || t('runtimeError');
   }
 }
 
