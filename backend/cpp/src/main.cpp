@@ -569,6 +569,33 @@ std::vector<Segment> parse_whisper_timestamped_text(
   return segments;
 }
 
+std::vector<Segment> parse_whisper_json_text(
+    const std::string& json,
+    std::vector<SubtitleWarning>* warnings) {
+  std::vector<Segment> segments;
+  const std::regex segment_pattern(
+      R"JSON(\{[^{}]*"offsets"\s*:\s*\{[^{}]*"from"\s*:\s*(\d+)\s*,\s*"to"\s*:\s*(\d+)[^{}]*\}[^{}]*"text"\s*:\s*"((?:\\.|[^"\\])*)"[^{}]*\})JSON");
+
+  auto begin = std::sregex_iterator(json.begin(), json.end(), segment_pattern);
+  auto end = std::sregex_iterator();
+  for (auto it = begin; it != end; ++it) {
+    Segment segment;
+    segment.index = static_cast<int>(segments.size()) + 1;
+    segment.start_ms = std::stoi((*it)[1].str());
+    segment.end_ms = std::stoi((*it)[2].str());
+    segment.source_text = json_unescape((*it)[3].str());
+    segment.status = "transcribed";
+    segment.confidence = 0.92;
+    segment.has_confidence = false;
+    segments.push_back(segment);
+  }
+
+  if (segments.empty() && warnings) {
+    warnings->push_back({"ParseError", "Whisper JSON output did not contain parseable segment offsets.", ""});
+  }
+  return segments;
+}
+
 std::string document_payload_from_segments(
     const std::vector<Segment>& segments,
     std::string_view document_id,
@@ -990,7 +1017,8 @@ NativeResult asr_transcribe_result(const std::string& request) {
   const auto output_base = output_dir / job_safe;
   std::ostringstream command;
   command << quote_shell_value(*binary_path) << " -m " << quote_shell_value(*model_path)
-          << " -f " << quote_shell_arg(whisper_input) << " -osrt -of " << quote_shell_arg(output_base);
+          << " -f " << quote_shell_arg(whisper_input)
+          << " --output-srt --output-json-full --output-file " << quote_shell_arg(output_base);
   if (source_language != "auto" && !source_language.empty()) {
     command << " -l " << quote_shell_value(source_language);
   }
@@ -1000,7 +1028,8 @@ NativeResult asr_transcribe_result(const std::string& request) {
 
   const auto output = run_command_capture(command.str());
   const auto srt_path = output_base.string() + ".srt";
-  if (output.exit_code != 0 || !path_exists(srt_path)) {
+  const auto json_path = output_base.string() + ".json";
+  if (output.exit_code != 0 || (!path_exists(srt_path) && !path_exists(json_path))) {
     return {
         false,
         "",
@@ -1020,14 +1049,21 @@ NativeResult asr_transcribe_result(const std::string& request) {
   if (!prefer_cuda) {
     warnings.push_back({"CudaDisabled", "CUDA acceleration was disabled for this whisper.cpp transcription run.", ""});
   }
-  const auto srt_text = read_text_file(srt_path);
-  if (srt_text.empty()) {
-    return {false, "", "InternalError", "whisper.cpp produced an empty SRT file.", true};
+  std::vector<Segment> segments;
+  if (path_exists(srt_path)) {
+    const auto srt_text = read_text_file(srt_path);
+    if (!srt_text.empty()) {
+      segments = parse_srt_text(srt_text, &warnings);
+      if (segments.empty()) {
+        segments = parse_whisper_timestamped_text(srt_text, &warnings);
+      }
+    }
   }
-
-  auto segments = parse_srt_text(srt_text, &warnings);
-  if (segments.empty()) {
-    segments = parse_whisper_timestamped_text(srt_text, &warnings);
+  if (segments.empty() && path_exists(json_path)) {
+    const auto json_text = read_text_file(json_path);
+    if (!json_text.empty()) {
+      segments = parse_whisper_json_text(json_text, &warnings);
+    }
   }
   if (segments.empty()) {
     return {false, "", "InternalError", "whisper.cpp SRT output did not contain parseable subtitle segments.", true};
