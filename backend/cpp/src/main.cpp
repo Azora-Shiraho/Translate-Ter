@@ -407,8 +407,19 @@ std::string format_timestamp(int ms) {
 }
 
 std::vector<std::string> split_blocks(const std::string& input) {
-  std::string normalized = input;
-  std::replace(normalized.begin(), normalized.end(), '\r', '\n');
+  std::string normalized;
+  normalized.reserve(input.size());
+  for (std::size_t i = 0; i < input.size(); ++i) {
+    const char ch = input[i];
+    if (ch == '\r') {
+      if (i + 1 < input.size() && input[i + 1] == '\n') {
+        continue;
+      }
+      normalized.push_back('\n');
+      continue;
+    }
+    normalized.push_back(ch);
+  }
   const std::string marker = "\n\n";
   std::vector<std::string> blocks;
   std::size_t start = 0;
