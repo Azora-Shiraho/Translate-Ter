@@ -1162,12 +1162,25 @@ input[type='checkbox'] {
   font-size: 12px;
 }
 
-.exportActions {
+.exportActionGroup {
   display: inline-grid;
-  grid-template-columns: repeat(3, minmax(86px, 1fr));
-  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
   flex: 0 1 360px;
   min-width: 280px;
+}
+
+.exportActionGroup > span {
+  color: var(--tt-text-strong);
+  font-weight: 700;
+}
+
+.exportActions {
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(66px, 1fr));
+  gap: 8px;
+  min-width: 0;
 }
 
 .exportButton {
@@ -1809,9 +1822,13 @@ input[type='checkbox'] {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .exportActions {
+  .exportActionGroup {
     width: 100%;
     min-width: 0;
+  }
+
+  .exportActions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .systemMiniTrack {

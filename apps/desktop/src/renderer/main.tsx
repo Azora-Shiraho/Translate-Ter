@@ -1182,25 +1182,21 @@ function App(): JSX.Element {
             <span style={{ width: `${footerProgress}%` }} />
           </div>
         </div>
-        <div className="exportActions">
-          <button
-            className="exportButton"
-            disabled={!canExportTranslated}
-            onClick={() => void exportSrt('translated')}
-          >
-            {exportingVariant === 'translated' ? <InlineDots /> : `${t('export')} ${t('translated')}`}
-          </button>
-          <button className="exportButton" disabled={!canExportSource} onClick={() => void exportSrt('source')}>
-            {exportingVariant === 'source' ? <InlineDots /> : `${t('export')} ${t('original')}`}
-          </button>
-          <button
-            className="exportButton"
-            disabled={!canExportBilingual}
-            onClick={() => void exportSrt('bilingual')}
-          >
-            {exportingVariant === 'bilingual' ? <InlineDots /> : `${t('export')} ${t('bilingual')}`}
-          </button>
-        </div>
+        <ExportActionGroup
+          title={t('export')}
+          labels={{
+            translated: t('translated'),
+            source: t('original'),
+            bilingual: t('bilingual')
+          }}
+          exportingVariant={exportingVariant}
+          disabled={{
+            translated: !canExportTranslated,
+            source: !canExportSource,
+            bilingual: !canExportBilingual
+          }}
+          onExport={(variant) => void exportSrt(variant)}
+        />
         <div className="systemActions">
           {canForceStop && (
             <button className="textButton" onClick={() => void forceStop()}>
@@ -1276,6 +1272,33 @@ function ToastStack(props: {
 function BottomBubble(props: { message?: string }): JSX.Element | null {
   if (!props.message) return null;
   return <div className="bottomBubble">{props.message}</div>;
+}
+
+function ExportActionGroup(props: {
+  title: string;
+  labels: Record<ExportVariant, string>;
+  exportingVariant?: ExportVariant;
+  disabled: Record<ExportVariant, boolean>;
+  onExport: (variant: ExportVariant) => void;
+}): JSX.Element {
+  const variants: ExportVariant[] = ['translated', 'source', 'bilingual'];
+  return (
+    <div className="exportActionGroup" aria-label={props.title}>
+      <span>{props.title}</span>
+      <div className="exportActions">
+        {variants.map((variant) => (
+          <button
+            className="exportButton"
+            disabled={props.disabled[variant]}
+            key={variant}
+            onClick={() => props.onExport(variant)}
+          >
+            {props.exportingVariant === variant ? <InlineDots /> : props.labels[variant]}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function MetricCard(props: { icon: React.ReactNode; label: string; value: string }): JSX.Element {
