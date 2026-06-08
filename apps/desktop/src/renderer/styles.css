@@ -447,84 +447,50 @@ button:disabled {
 
 .workspaceHero {
   display: grid;
-  grid-template-columns: minmax(0, 1.14fr) minmax(280px, 0.86fr);
-  gap: 14px;
-  min-width: 0;
-}
-
-.jobFocusPanel {
-  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 0.42fr) 92px;
+  align-items: stretch;
   gap: 12px;
   min-width: 0;
 }
 
 .jobMediaCard,
 .jobActionCard,
-.jobProgressCard {
+.jobActivityCard {
   display: grid;
   min-width: 0;
   align-content: center;
   gap: 10px;
-  min-height: 128px;
+  min-height: 116px;
   border: 1px solid var(--tt-border-soft);
   border-radius: var(--tt-radius-card);
   padding: 14px 16px;
   background: var(--tt-surface-panel-soft);
 }
 
+.jobActivityCard {
+  place-items: center;
+  padding: 0 14px;
+}
+
+.jobMediaCard {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
 .jobActionCard {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-content: start;
-  gap: 12px;
+  gap: 8px;
 }
 
 .jobActionCard .fieldLabel {
+  grid-column: 1 / -1;
   margin-bottom: 2px;
 }
 
-.jobProgressCard {
-  align-content: space-between;
-  min-height: 0;
-}
-
-.jobProgressCard .fieldLabel {
-  color: var(--tt-text-body);
-}
-
-.jobActionCard button,
-.jobProgressCard .track,
-.jobProgressCard .workingRibbon {
+.jobActionCard button {
   width: 100%;
-}
-
-.progressHeader,
-.jobOverviewMeta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.jobOverviewMain {
-  justify-content: space-between;
-  align-items: flex-start;
-}
-
-.jobTitleBlock {
-  display: grid;
-  gap: 10px;
   min-width: 0;
-}
-
-.jobTitleBlock strong {
-  overflow: hidden;
-  font: 600 30px/1.05 var(--tt-font-display);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.jobOverviewMeta {
-  flex-wrap: wrap;
+  padding-inline: 10px;
 }
 
 .stageBadge,
@@ -546,81 +512,35 @@ button:disabled {
   color: var(--tt-accent);
 }
 
-.track {
-  height: 6px;
-  overflow: hidden;
-  border-radius: var(--tt-radius-pill);
-  background: var(--tt-track);
-}
-
-.track span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--tt-accent), var(--tt-accent-strong));
-}
-
-.track.active {
-  height: 8px;
-  box-shadow: 0 0 0 1px rgba(77, 163, 255, 0.08), 0 0 22px rgba(77, 163, 255, 0.18);
-}
-
-.track.active span {
-  background:
-    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0 8px, transparent 8px 16px),
-    linear-gradient(90deg, var(--tt-accent), var(--tt-accent-strong));
-  background-blend-mode: screen;
-  background-size: 24px 24px, 100% 100%;
-  animation: progressFlow 760ms linear infinite;
-}
-
-.workingRibbon {
-  display: inline-flex;
+.activityPulse {
+  display: grid;
+  grid-template-columns: repeat(3, 10px);
   align-items: center;
-  gap: 9px;
-  width: fit-content;
-  max-width: 100%;
-  min-height: 34px;
-  border: 1px solid rgba(77, 163, 255, 0.22);
-  border-radius: var(--tt-radius-pill);
-  padding: 0 13px 0 10px;
-  color: var(--tt-text-strong);
-  background: var(--tt-surface-active);
-  font-size: 12px;
-  font-weight: 700;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 36px;
 }
 
-.workingRibbon span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workingOrb {
-  position: relative;
+.activityPulse span {
   width: 10px;
   height: 10px;
-  flex: 0 0 auto;
   border-radius: 50%;
+  background: var(--tt-border-strong);
+  opacity: 0.42;
+}
+
+.activityPulse.active span {
   background: var(--tt-accent);
-  box-shadow: 0 0 0 0 rgba(77, 163, 255, 0.42);
-  animation: workingPulse 1.1s ease-out infinite;
+  animation: activityBeat 1.05s ease-in-out infinite;
 }
 
-.heroField {
-  min-width: 0;
-  flex: 1;
+.activityPulse.active span:nth-child(2) {
+  animation-delay: 120ms;
 }
 
-.mediaSummary {
-  display: grid;
-  gap: 4px;
-  align-content: center;
-  min-height: 78px;
-  padding: 14px 16px;
-  border: 1px solid var(--tt-border-soft);
-  border-radius: var(--tt-radius-card);
-  background: var(--tt-surface-panel-soft);
+.activityPulse.active span:nth-child(3) {
+  animation-delay: 240ms;
 }
 
 .fieldLabel {
@@ -629,7 +549,6 @@ button:disabled {
   font-weight: 600;
 }
 
-.mediaSummary strong,
 .jobMediaCard strong {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -642,20 +561,12 @@ button:disabled {
   gap: 8px;
 }
 
-.mediaSummary small,
 .jobMediaCard small,
-.jobProgressCard small {
+.jobActivityCard small {
   overflow: hidden;
   color: var(--tt-text-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.overviewMetaGrid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  min-width: 380px;
 }
 
 .subtitleWorkbench {
@@ -751,7 +662,7 @@ h3 {
 }
 
 .jobMediaCard small,
-.jobProgressCard small {
+.jobActivityCard small {
   white-space: normal;
   word-break: break-word;
 }
@@ -1512,6 +1423,19 @@ input[type='checkbox'] {
   }
 }
 
+@keyframes activityBeat {
+  0%,
+  100% {
+    opacity: 0.36;
+    transform: scale(0.88);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
 @keyframes workingScan {
   0% {
     opacity: 0;
@@ -1564,11 +1488,11 @@ input[type='checkbox'] {
   }
 
   .workspaceHero {
-    grid-template-columns: minmax(0, 1fr) minmax(256px, 0.78fr);
+    grid-template-columns: minmax(0, 1fr) 86px;
   }
 
-  .overviewMetaGrid {
-    min-width: 0;
+  .jobActionCard {
+    grid-column: 1 / -1;
   }
 }
 
@@ -1632,11 +1556,7 @@ input[type='checkbox'] {
   }
 
   .workspaceHero {
-    grid-template-columns: 1fr;
-  }
-
-  .jobFocusPanel {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 82px;
   }
 
   .workflowRail {
@@ -1727,18 +1647,12 @@ input[type='checkbox'] {
   }
 
   .topChrome,
-  .topChromeSide,
   .settingsIntro {
     flex-wrap: wrap;
   }
 
   .topChromeTabs {
     margin-left: auto;
-  }
-
-  .overviewMetaGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 100%;
   }
 }
 
@@ -1803,16 +1717,16 @@ input[type='checkbox'] {
 
   .jobMediaCard,
   .jobActionCard,
-  .jobProgressCard {
+  .jobActivityCard {
     min-height: 0;
     padding: 13px 14px;
   }
 
-  .jobFocusPanel {
+  .workspaceHero {
     grid-template-columns: 1fr;
   }
 
-  .overviewMetaGrid {
+  .jobActionCard {
     grid-template-columns: 1fr;
   }
 

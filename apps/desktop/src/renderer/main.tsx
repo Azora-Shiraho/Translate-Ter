@@ -425,7 +425,6 @@ function App(): JSX.Element {
     job && !['idle', 'completed', 'failed', 'cancelled'].includes(job.stage)
   );
   const appWorking = busy || checkingRuntime || Boolean(checkingProvider) || jobIsRunning;
-  const workingMessage = runtimeActivity ?? modelActivity ?? message;
   const downloadPercent =
     activeDownload?.totalBytes && activeDownload.totalBytes > 0
       ? Math.min(100, Math.round((activeDownload.receivedBytes / activeDownload.totalBytes) * 100))
@@ -545,11 +544,6 @@ function App(): JSX.Element {
                   </div>
                   <div className="railMetrics">
                     <MetricCard
-                      icon={<Languages size={16} />}
-                      label={t('languagePair')}
-                      value={`${sourceLabel} -> ${targetLabel}`}
-                    />
-                    <MetricCard
                       icon={<ShieldCheck size={16} />}
                       label={t('translatedRows')}
                       value={`${translatedCount}/${segments.length}`}
@@ -585,30 +579,12 @@ function App(): JSX.Element {
             <section className="workspaceMain">
               <section className="jobOverview" aria-label={t('currentJob')}>
                 <div className="workspaceHero">
-                  <div className="jobFocusPanel">
-                    <div className="jobMediaCard">
-                      <span className="fieldLabel">{t('mediaFile')}</span>
-                      <strong title={jobTitle}>{jobTitle}</strong>
-                      <div className="jobMediaMeta">
-                        <span className="stageBadge">{t(stageLabel(job?.stage ?? 'idle'))}</span>
-                        <span className="metaPill">{`${sourceLabel} -> ${targetLabel}`}</span>
-                      </div>
-                      <small title={selectedMediaPath}>{selectedMediaPath || t('placeholderPath')}</small>
-                    </div>
-
-                    <div className="jobProgressCard">
-                      <div className="progressHeader">
-                        <span className="fieldLabel">{t('progress')}</span>
-                        <strong>{completion}%</strong>
-                      </div>
-                      <div className={`track${appWorking ? ' active' : ''}`}>
-                        <span style={{ width: `${completion}%` }} />
-                      </div>
-                      {appWorking ? (
-                        <WorkingRibbon message={workingMessage} />
-                      ) : (
-                        <small title={message}>{message}</small>
-                      )}
+                  <div className="jobMediaCard">
+                    <span className="fieldLabel">{t('mediaFile')}</span>
+                    <strong title={jobTitle}>{jobTitle}</strong>
+                    <div className="jobMediaMeta">
+                      <span className="stageBadge">{t(stageLabel(job?.stage ?? 'idle'))}</span>
+                      <span className="metaPill">{`${sourceLabel} -> ${targetLabel}`}</span>
                     </div>
                   </div>
 
@@ -634,6 +610,10 @@ function App(): JSX.Element {
                       <Languages size={16} />
                       {t('translateSubtitles')}
                     </button>
+                  </div>
+
+                  <div className="jobActivityCard">
+                    <ActivityPulse active={appWorking} />
                   </div>
                 </div>
               </section>
@@ -689,12 +669,8 @@ function App(): JSX.Element {
                           </span>
                         </div>
                         <div className="segmentDetailMeta">
-                          <span className="metaPill">
-                            {t('start')} {formatTimestamp(selectedSegment.startMs)}
-                          </span>
-                          <span className="metaPill">
-                            {t('end')} {formatTimestamp(selectedSegment.endMs)}
-                          </span>
+                          <span className="metaPill">{formatTimestamp(selectedSegment.startMs)}</span>
+                          <span className="metaPill">{formatTimestamp(selectedSegment.endMs)}</span>
                         </div>
                         <div className="editorGrid">
                           <div className="editorPane">
@@ -1218,11 +1194,12 @@ function App(): JSX.Element {
   );
 }
 
-function WorkingRibbon(props: { message: string }): JSX.Element {
+function ActivityPulse(props: { active: boolean }): JSX.Element {
   return (
-    <div className="workingRibbon" role="status" aria-live="polite">
-      <span className="workingOrb" />
-      <span title={props.message}>{props.message}</span>
+    <div className={props.active ? 'activityPulse active' : 'activityPulse'} role="status" aria-live="polite">
+      <span />
+      <span />
+      <span />
     </div>
   );
 }
