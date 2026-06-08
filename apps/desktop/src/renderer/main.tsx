@@ -61,6 +61,12 @@ type ActiveDownload = {
   totalBytes?: number;
   message: string;
 };
+type HealthTone = 'good' | 'warn' | 'error' | 'muted';
+type DerivedHealthState = {
+  tone: HealthTone;
+  label: string;
+  detail: string;
+};
 
 const asrProviders = [
   { id: 'local.whisper.cpp', nameKey: 'localProvider', descriptionKey: 'localProviderDetail' },
@@ -430,9 +436,6 @@ function App(): JSX.Element {
   const llmSecret = providerSecrets['openai.compatible'] ?? {};
   const canForceStop = Boolean(job && !['completed', 'failed', 'cancelled'].includes(job.stage));
   const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) ?? segments[0];
-  const runtimeSummary = runtimeStatus
-    ? `${t(runtimeActionLabel(runtimeStatus.actionRequired))} · ${runtimeStatus.acceleration.selected.toUpperCase()}`
-    : t('notChecked');
   const selectedMediaPath = job?.mediaPath ?? mediaPath.trim();
   const selectedMediaFileName =
     job?.fileName ?? selectedMediaPath.split(/[\\/]/).filter(Boolean).at(-1) ?? t('chooseMedia');
@@ -459,6 +462,19 @@ function App(): JSX.Element {
     ? `${t('downloadProgress')}${downloadPercent === undefined ? '' : ` ${downloadPercent}%`}`
     : `${t('progress')} ${completion}%`;
   const footerMessage = activeDownload?.message ?? message;
+  const runtimeState = deriveRuntimeState({
+    t,
+    runtimeStatus,
+    selectedModel,
+    asrProviderId: settings?.asrProviderId ?? 'local.whisper.cpp',
+    job
+  });
+  const translationState = deriveTranslationState({
+    t,
+    providerId: translationProviderId,
+    health: llmHealth,
+    job
+  });
 
   async function forceStop(): Promise<void> {
     if (!job) return;
@@ -582,19 +598,17 @@ function App(): JSX.Element {
                   </div>
                   <div className="railStatusStack">
                     <div className="railNote">
-                      <span className={`signal ${llmHealth?.ok ? 'good' : llmHealth ? 'warn' : ''}`} />
+                      <span className={`signal ${translationState.tone}`} />
                       <div>
                         <strong>{providerLabel(translationProviderId, t)}</strong>
-                        <small>
-                          {llmHealth ? t(providerStatusLabel(llmHealth.status)) : t('translationProviderDetail')}
-                        </small>
+                        <small>{translationState.detail}</small>
                       </div>
                     </div>
                     <div className="railNote">
-                      <span className={`signal ${runtimeStatus?.binary.installed ? 'good' : ''}`} />
+                      <span className={`signal ${runtimeState.tone}`} />
                       <div>
                         <strong>{t('runtime')}</strong>
-                        <small>{runtimeSummary}</small>
+                        <small>{runtimeState.detail}</small>
                       </div>
                     </div>
                   </div>
@@ -611,10 +625,6 @@ function App(): JSX.Element {
                     <span className="stageBadge">{t(stageLabel(job?.stage ?? 'idle'))}</span>
                     <span className="metaPill">{`${sourceLabel} -> ${targetLabel}`}</span>
                   </div>
-                </div>
-
-                <div className="jobActivityCard">
-                  <ActivityPulse active={appWorking} />
                 </div>
 
                 <div className="jobActionCard">
@@ -824,13 +834,13 @@ function App(): JSX.Element {
                       />
                       <StatusLine
                         label={t('runtimeBinary')}
-                        value={runtimeStatus?.binary.installed ? t('installed') : t('notChecked')}
-                        tone={runtimeStatus?.binary.installed ? 'good' : 'muted'}
+                        value={runtimeState.label}
+                        tone={runtimeState.tone}
                       />
                       <StatusLine
                         label={t('runtimeModel')}
-                        value={runtimeStatus?.model.installed ? t('installed') : t('notChecked')}
-                        tone={runtimeStatus?.model.installed ? 'good' : 'muted'}
+                        value={runtimeState.detail}
+                        tone={runtimeState.tone}
                       />
                     </div>
                   </InspectorSection>
@@ -923,6 +933,7 @@ function App(): JSX.Element {
                             'providerReady'
                         )}
                         health={asrHealth}
+                        state={runtimeState}
                         loading={checkingProvider === settings.asrProviderId}
                         onTest={() => void testProvider(settings.asrProviderId)}
                         showMessage={settings.asrProviderId !== 'local.whisper.cpp'}
@@ -1069,6 +1080,7 @@ function App(): JSX.Element {
                         activeId={translationProviderId}
                         detail={t('translationProviderDetail')}
                         health={llmHealth}
+                        state={translationState}
                         loading={checkingProvider === translationProviderId}
                         onTest={() => void testProvider(translationProviderId)}
                       />
@@ -1218,16 +1230,6 @@ function App(): JSX.Element {
   );
 }
 
-function ActivityPulse(props: { active: boolean }): JSX.Element {
-  return (
-    <div className={props.active ? 'activityPulse active' : 'activityPulse'} role="status" aria-live="polite">
-      <span />
-      <span />
-      <span />
-    </div>
-  );
-}
-
 function InlineDots(): JSX.Element {
   return (
     <span className="inlineDots" aria-label="Working">
@@ -1347,18 +1349,20 @@ function ProviderCard(props: {
   activeId: string;
   detail: string;
   health?: ProviderHealth;
+  state?: DerivedHealthState;
   loading: boolean;
   onTest: () => void;
   showMessage?: boolean;
 }): JSX.Element {
   const { t } = useTranslation();
-  const tone = props.health?.ok ? 'good' : props.health ? 'warn' : 'muted';
+  const tone = props.state?.tone ?? (props.health?.ok ? 'good' : props.health ? 'warn' : 'muted');
+  const summary = props.state?.detail ?? (props.health ? t(providerStatusLabel(props.health.status)) : props.detail);
   return (
     <div className="providerCard">
       <div>
         <span className={`signal ${tone}`} />
         <strong title={props.activeId}>{providerLabel(props.activeId, t)}</strong>
-        <small>{props.health ? t(providerStatusLabel(props.health.status)) : props.detail}</small>
+        <small>{summary}</small>
       </div>
       <button className="secondary compact" disabled={props.loading} onClick={props.onTest}>
         <CheckCircle2 size={16} />
@@ -1369,7 +1373,7 @@ function ProviderCard(props: {
   );
 }
 
-function StatusLine(props: { label: string; value: string; tone: 'good' | 'muted' }): JSX.Element {
+function StatusLine(props: { label: string; value: string; tone: HealthTone }): JSX.Element {
   return (
     <div className="statusLine">
       <span>{props.label}</span>
@@ -1555,6 +1559,69 @@ function providerLabel(providerId: string, t: (key: string) => string): string {
     default:
       return providerId;
   }
+}
+
+function deriveTranslationState(input: {
+  t: (key: string) => string;
+  providerId: string;
+  health?: ProviderHealth;
+  job?: JobSnapshot;
+}): DerivedHealthState {
+  const { t, providerId, health, job } = input;
+  if (job?.stage === 'failed' && job.error && job.step === 'translate') {
+    return { tone: 'error', label: t('error'), detail: job.error.message };
+  }
+  if (!health) {
+    return {
+      tone: 'muted',
+      label: t('notChecked'),
+      detail: t(providerId === 'openai.compatible' ? 'translationProviderNotChecked' : 'notChecked')
+    };
+  }
+  if (health.ok) {
+    return {
+      tone: 'good',
+      label: t(providerStatusLabel(health.status)),
+      detail: health.message ?? t('providerReady')
+    };
+  }
+  return {
+    tone: health.status === 'degraded' ? 'warn' : 'error',
+    label: t(providerStatusLabel(health.status)),
+    detail: health.message ?? t(providerStatusLabel(health.status))
+  };
+}
+
+function deriveRuntimeState(input: {
+  t: (key: string) => string;
+  runtimeStatus?: WhisperRuntimeStatus;
+  selectedModel?: WhisperModelInfo;
+  asrProviderId: string;
+  job?: JobSnapshot;
+}): DerivedHealthState {
+  const { t, runtimeStatus, selectedModel, asrProviderId, job } = input;
+  if (asrProviderId !== 'local.whisper.cpp') {
+    return { tone: 'good', label: t('providerReady'), detail: t('cloudProviderDetail') };
+  }
+  if (job?.stage === 'failed' && job.error && (job.step === 'asr' || job.step === 'subtitles')) {
+    return { tone: 'error', label: t('error'), detail: job.error.message };
+  }
+  if (!runtimeStatus) {
+    return { tone: 'muted', label: t('notChecked'), detail: t('runtimeNotChecked') };
+  }
+  if (runtimeStatus.binary.verified && runtimeStatus.model.verified) {
+    return {
+      tone: 'good',
+      label: t('installed'),
+      detail: runtimeStatus.message ?? `${selectedModel?.displayName ?? 'Whisper'} · ${t('runtimeReady')}`
+    };
+  }
+  const action = t(runtimeActionLabel(runtimeStatus.actionRequired));
+  return {
+    tone: runtimeStatus.binary.installed || runtimeStatus.model.installed ? 'warn' : 'error',
+    label: action,
+    detail: runtimeStatus.message ?? `${action} · ${runtimeStatus.acceleration.selected.toUpperCase()}`
+  };
 }
 
 function shortLanguage(code: string): string {

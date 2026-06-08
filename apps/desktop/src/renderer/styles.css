@@ -330,17 +330,21 @@ button:disabled {
 }
 
 .workflowStep.active {
-  border-color: rgba(77, 163, 255, 0.26);
+  border-color: rgba(77, 163, 255, 0.34);
+  background: linear-gradient(180deg, rgba(77, 163, 255, 0.16), rgba(77, 163, 255, 0.1));
   color: var(--tt-text-strong);
+  box-shadow: inset 0 0 0 1px rgba(77, 163, 255, 0.12);
 }
 
 .workflowStep.active .workflowStepDot {
   background: var(--tt-accent);
+  box-shadow: 0 0 0 4px rgba(77, 163, 255, 0.16);
 }
 
 .workflowStep.running .workflowStepDot {
   background: var(--tt-accent);
-  animation: workingPulse 1.1s ease-out infinite;
+  box-shadow: 0 0 0 0 rgba(77, 163, 255, 0.44);
+  animation: workingPulse 1.1s ease-out infinite, stepBeacon 1.1s ease-out infinite;
 }
 
 .workspaceLayout {
@@ -436,15 +440,14 @@ button:disabled {
 
 .workspaceHero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 84px minmax(300px, 0.7fr);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.7fr);
   align-items: stretch;
   gap: 12px;
   min-width: 0;
 }
 
 .jobMediaCard,
-.jobActionCard,
-.jobActivityCard {
+.jobActionCard {
   display: grid;
   min-width: 0;
   align-content: center;
@@ -454,12 +457,6 @@ button:disabled {
   border-radius: var(--tt-radius-card);
   padding: 14px 16px;
   background: var(--tt-surface-panel-soft);
-}
-
-.jobActivityCard {
-  place-items: center;
-  min-width: 0;
-  padding: 0 14px;
 }
 
 .jobMediaCard {
@@ -500,37 +497,6 @@ button:disabled {
 .stageBadge {
   background: rgba(77, 163, 255, 0.16);
   color: var(--tt-accent);
-}
-
-.activityPulse {
-  display: grid;
-  grid-template-columns: repeat(3, 10px);
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  width: 100%;
-  min-height: 36px;
-}
-
-.activityPulse span {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--tt-border-strong);
-  opacity: 0.42;
-}
-
-.activityPulse.active span {
-  background: var(--tt-accent);
-  animation: activityBeat 1.05s ease-in-out infinite;
-}
-
-.activityPulse.active span:nth-child(2) {
-  animation-delay: 120ms;
-}
-
-.activityPulse.active span:nth-child(3) {
-  animation-delay: 240ms;
 }
 
 .inlineDots {
@@ -576,8 +542,7 @@ button:disabled {
   gap: 8px;
 }
 
-.jobMediaCard small,
-.jobActivityCard small {
+.jobMediaCard small {
   overflow: hidden;
   color: var(--tt-text-muted);
   text-overflow: ellipsis;
@@ -676,8 +641,7 @@ h3 {
   white-space: nowrap;
 }
 
-.jobMediaCard small,
-.jobActivityCard small {
+.jobMediaCard small {
   white-space: normal;
   word-break: break-word;
 }
@@ -1086,6 +1050,10 @@ input[type='checkbox'] {
   background: var(--tt-status-warning);
 }
 
+.signal.error {
+  background: var(--tt-status-error);
+}
+
 .segmented {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1145,7 +1113,11 @@ input[type='checkbox'] {
   color: var(--tt-status-success);
 }
 
-.status.failed,
+.error,
+.status.failed {
+  color: var(--tt-status-error);
+}
+
 .warn {
   color: var(--tt-status-warning);
 }
@@ -1458,6 +1430,18 @@ input[type='checkbox'] {
   }
 }
 
+@keyframes stepBeacon {
+  0% {
+    box-shadow: 0 0 0 0 rgba(77, 163, 255, 0.44);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(77, 163, 255, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(77, 163, 255, 0);
+  }
+}
+
 @keyframes workingScan {
   0% {
     opacity: 0;
@@ -1740,8 +1724,7 @@ input[type='checkbox'] {
   }
 
   .jobMediaCard,
-  .jobActionCard,
-  .jobActivityCard {
+  .jobActionCard {
     min-height: 0;
     padding: 13px 14px;
   }
@@ -1757,11 +1740,6 @@ input[type='checkbox'] {
   .jobActionCard {
     order: 2;
     grid-template-columns: 1fr;
-  }
-
-  .jobActivityCard {
-    order: 3;
-    min-height: 48px;
   }
 
   .panelHeader p {

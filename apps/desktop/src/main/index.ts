@@ -12,6 +12,7 @@ import type {
   SubtitleDocument,
   SubtitleSegment
 } from '@shared/models';
+import { serializeSrt } from '@shared/srt';
 import { JobManager } from './services/jobManager';
 import { NativeBackendClient } from './services/nativeBackendClient';
 import { SettingsStore } from './services/settingsStore';
@@ -94,15 +95,11 @@ function registerIpc(): void {
     variant: ExportVariant;
     bilingualOrder: BilingualOrder;
   }): Promise<void> {
-    const response = await nativeBackend.serializeSrt({
-      segments: payload.document.segments,
+    const srt = serializeSrt(payload.document, {
       variant: payload.variant,
       bilingualOrder: payload.bilingualOrder
     });
-    if (!response.ok || !response.payload?.srt) {
-      throw new Error(response.error?.message ?? 'Native backend failed to serialize SRT.');
-    }
-    await writeFile(payload.path, response.payload.srt, 'utf8');
+    await writeFile(payload.path, srt, 'utf8');
   }
 
   async function selectExportDirectory(): Promise<string | undefined> {
