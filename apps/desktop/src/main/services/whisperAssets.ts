@@ -3,13 +3,15 @@ import { app } from 'electron';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { access, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { AssetEvent, WhisperModelInfo, WhisperRuntimeRequest, WhisperRuntimeStatus } from '@shared/models';
 
 const NVIDIA_CUDA_REDIST_BASE_URL = 'https://developer.download.nvidia.com/compute/cuda/redist/';
 const NVIDIA_CUDA_11_8_REDIST_MANIFEST_URL = `${NVIDIA_CUDA_REDIST_BASE_URL}redistrib_11.8.0.json`;
 const WINDOWS_CUBLAS_DLLS = ['cublas64_11.dll', 'cublasLt64_11.dll'];
+const MULTI_THREAD_DOWNLOAD_PARTS = 4;
+const MULTI_THREAD_MIN_BYTES = 8 * 1024 * 1024;
 
 type WhisperManifest = {
   manifestVersion: number;
@@ -79,7 +81,7 @@ export class WhisperAssetManager extends EventEmitter {
     const cudaHardwareSupported = detectCudaHardwareSupport();
     let cudaSupported = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest));
     if (request.preferCuda && cudaHardwareSupported && !cudaSupported && canDownloadCudaRuntime) {
-      await this.ensureWindowsCudaRuntimeDependencies(manifest);
+      await this.ensureWindowsCudaRuntimeDependencies(manifest, Boolean(request.useMultiThreadDownload));
       cudaSupported = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest));
     }
     const { runtime, platformKey } = this.selectRuntime(manifest, request.preferCuda, cudaSupported);
@@ -164,10 +166,22 @@ export class WhisperAssetManager extends EventEmitter {
     }
 
     if (!binaryVerified && canDownloadRuntime) {
-      await this.downloadAndInstall('runtime', runtime.url, managedBinaryPath, runtime.sha256);
+      await this.downloadAndInstall(
+        'runtime',
+        runtime.url,
+        managedBinaryPath,
+        runtime.sha256,
+        Boolean(request.useMultiThreadDownload)
+      );
     }
     if (!modelVerified && canDownloadModel) {
-      await this.downloadAndInstall('model', model.url, modelPath, model.sha256);
+      await this.downloadAndInstall(
+        'model',
+        model.url,
+        modelPath,
+        model.sha256,
+        Boolean(request.useMultiThreadDownload)
+      );
     }
 
     const resolvedSystemBinaryPath = systemBinaryPath ?? (await this.findSystemWhisperBinary(runtime.binary));
@@ -227,7 +241,13 @@ export class WhisperAssetManager extends EventEmitter {
     return runtime ? [dirname(join(this.cacheDir(), runtime.binary))] : [];
   }
 
-  private async downloadAndInstall(scope: 'runtime' | 'model', url: string | null, destination: string, sha256: string): Promise<void> {
+  private async downloadAndInstall(
+    scope: 'runtime' | 'model',
+    url: string | null,
+    destination: string,
+    sha256: string,
+    useMultiThreadDownload: boolean
+  ): Promise<void> {
     if (!url || url.startsWith('disabled://')) return;
     if (!isPinnedSha256(sha256)) {
       throw new Error('Refusing to download whisper asset without a pinned SHA-256 hash.');
@@ -247,7 +267,7 @@ export class WhisperAssetManager extends EventEmitter {
       const sourcePath = url.slice('file://'.length);
       await copyFile(sourcePath, tmpPath);
     } else if (url.startsWith('https://')) {
-      await this.downloadHttp(scope, url, tmpPath);
+      await this.downloadHttp(scope, url, tmpPath, useMultiThreadDownload);
     } else {
       throw new Error(`Unsupported whisper asset URL scheme: ${url}`);
     }
@@ -274,7 +294,25 @@ export class WhisperAssetManager extends EventEmitter {
     this.emitAsset({ type: 'ready', scope, message: scope === 'runtime' ? 'Runtime download complete.' : 'Model download complete.' });
   }
 
-  private async downloadHttp(scope: 'runtime' | 'model', url: string, destination: string): Promise<void> {
+  private async downloadHttp(
+    scope: 'runtime' | 'model',
+    url: string,
+    destination: string,
+    useMultiThreadDownload = false
+  ): Promise<void> {
+    if (useMultiThreadDownload) {
+      try {
+        const downloaded = await this.downloadHttpSegmented(scope, url, destination);
+        if (downloaded) return;
+      } catch {
+        await rm(destination, { force: true });
+      }
+    }
+
+    await this.downloadHttpSingle(scope, url, destination);
+  }
+
+  private async downloadHttpSingle(scope: 'runtime' | 'model', url: string, destination: string): Promise<void> {
     const response = await fetch(url);
     if (!response.ok || !response.body) {
       this.emitAsset({ type: 'error', scope, message: `Download failed with HTTP ${response.status}.` });
@@ -318,6 +356,74 @@ export class WhisperAssetManager extends EventEmitter {
       };
       pump();
     });
+  }
+
+  private async downloadHttpSegmented(scope: 'runtime' | 'model', url: string, destination: string): Promise<boolean> {
+    const plan = await this.segmentedDownloadPlan(url);
+    if (!plan) return false;
+
+    const file = await open(destination, 'w');
+    try {
+      await file.truncate(plan.totalBytes);
+      let receivedBytes = 0;
+      const emitProgress = (delta: number): void => {
+        receivedBytes += delta;
+        this.emitAsset({
+          type: 'download-progress',
+          scope,
+          message: scope === 'runtime' ? 'Downloading whisper runtime...' : 'Downloading whisper model...',
+          receivedBytes,
+          totalBytes: plan.totalBytes
+        });
+      };
+
+      await Promise.all(
+        plan.ranges.map(async (range) => {
+          const response = await fetch(url, {
+            headers: {
+              Range: `bytes=${range.start}-${range.end}`
+            }
+          });
+          if (response.status !== 206 || !response.body) {
+            throw new Error(`Segmented download range failed with HTTP ${response.status}.`);
+          }
+
+          const reader = response.body.getReader();
+          let offset = range.start;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = Buffer.from(value);
+            await file.write(chunk, 0, chunk.length, offset);
+            offset += chunk.length;
+            emitProgress(chunk.length);
+          }
+        })
+      );
+      return true;
+    } finally {
+      await file.close();
+    }
+  }
+
+  private async segmentedDownloadPlan(url: string): Promise<{ totalBytes: number; ranges: Array<{ start: number; end: number }> } | undefined> {
+    const response = await fetch(url, { method: 'HEAD' });
+    if (!response.ok) return undefined;
+    const totalBytes = Number.parseInt(response.headers.get('content-length') ?? '', 10);
+    const acceptsRanges = response.headers.get('accept-ranges')?.toLowerCase().includes('bytes') ?? false;
+    if (!acceptsRanges || !Number.isFinite(totalBytes) || totalBytes < MULTI_THREAD_MIN_BYTES) return undefined;
+
+    const partCount = Math.min(MULTI_THREAD_DOWNLOAD_PARTS, Math.max(2, Math.ceil(totalBytes / MULTI_THREAD_MIN_BYTES)));
+    const partSize = Math.ceil(totalBytes / partCount);
+    const ranges = Array.from({ length: partCount }, (_, index) => {
+      const start = index * partSize;
+      return {
+        start,
+        end: Math.min(totalBytes - 1, start + partSize - 1)
+      };
+    }).filter((range) => range.start <= range.end);
+
+    return { totalBytes, ranges };
   }
 
   private status(
@@ -542,7 +648,10 @@ export class WhisperAssetManager extends EventEmitter {
     }
   }
 
-  private async ensureWindowsCudaRuntimeDependencies(manifest: WhisperManifest): Promise<void> {
+  private async ensureWindowsCudaRuntimeDependencies(
+    manifest: WhisperManifest,
+    useMultiThreadDownload: boolean
+  ): Promise<void> {
     if (process.platform !== 'win32') return;
     const runtime = manifest.runtime.platforms[`${this.platformKey()}-cuda`];
     if (!runtime) return;
@@ -564,7 +673,12 @@ export class WhisperAssetManager extends EventEmitter {
     await rm(extractDir, { force: true, recursive: true });
 
     this.emitAsset({ type: 'download-start', scope: 'runtime', message: 'Downloading CUDA cuBLAS runtime.' });
-    await this.downloadHttp('runtime', `${NVIDIA_CUDA_REDIST_BASE_URL}${packageInfo.relative_path}`, archivePath);
+    await this.downloadHttp(
+      'runtime',
+      `${NVIDIA_CUDA_REDIST_BASE_URL}${packageInfo.relative_path}`,
+      archivePath,
+      useMultiThreadDownload
+    );
 
     this.emitAsset({ type: 'verify', scope: 'runtime', message: 'Verifying CUDA cuBLAS runtime checksum.' });
     const verified = await this.verifySha256(archivePath, packageInfo.sha256);

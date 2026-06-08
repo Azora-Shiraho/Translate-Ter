@@ -52,6 +52,7 @@ export type AppSettingsPublic = {
   whisperModelId: string;
   localWhisperUseCuda: boolean;
   allowWhisperAssetDownload: boolean;
+  enableMultiThreadDownload: boolean;
   allowCloudAsrUpload: boolean;
   translationProviderPriority: string[];
   translationConcurrency: number;
@@ -90,6 +91,7 @@ export type WhisperRuntimeRequest = {
   modelId: string;
   allowDownload: boolean;
   preferCuda: boolean;
+  useMultiThreadDownload?: boolean;
   downloadScope?: 'all' | 'runtime' | 'cuda-runtime' | 'model' | 'none';
 };
 

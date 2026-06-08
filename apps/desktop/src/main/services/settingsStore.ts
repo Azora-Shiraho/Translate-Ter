@@ -14,6 +14,7 @@ const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = 
   asrProviderId: 'local.whisper.cpp',
   whisperModelId: 'ggml-base',
   allowWhisperAssetDownload: true,
+  enableMultiThreadDownload: false,
   allowCloudAsrUpload: false,
   translationProviderPriority: ['openai.compatible'],
   translationConcurrency: 2,

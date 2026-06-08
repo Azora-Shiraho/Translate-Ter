@@ -151,6 +151,7 @@ function registerIpc(): void {
         modelId: settings.whisperModelId,
         allowDownload: settings.allowWhisperAssetDownload,
         preferCuda: settings.localWhisperUseCuda,
+        useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'runtime'
       });
       return {
@@ -175,7 +176,13 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('assets:list-whisper-models', async () => whisperAssets.listModels());
-  ipcMain.handle('assets:ensure-whisper-runtime', async (_event, request) => whisperAssets.ensureRuntime(request));
+  ipcMain.handle('assets:ensure-whisper-runtime', async (_event, request) => {
+    const settings = await settingsStore.get();
+    return whisperAssets.ensureRuntime({
+      ...request,
+      useMultiThreadDownload: request.useMultiThreadDownload ?? settings.enableMultiThreadDownload
+    });
+  });
   ipcMain.handle('assets:delete-model', async (_event, modelId: string) => whisperAssets.deleteModel(modelId));
   ipcMain.handle('native:health', async () => nativeBackend.health());
 }

@@ -231,6 +231,7 @@ function App(): JSX.Element {
         modelId: settings.whisperModelId,
         allowDownload: settings.allowWhisperAssetDownload,
         preferCuda: true,
+        useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'cuda-runtime'
       });
       setRuntimeStatus(status);
@@ -263,6 +264,7 @@ function App(): JSX.Element {
         modelId: settings.whisperModelId,
         allowDownload: settings.allowWhisperAssetDownload,
         preferCuda: settings.localWhisperUseCuda,
+        useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'model'
       });
       setRuntimeStatus(status);
@@ -577,44 +579,42 @@ function App(): JSX.Element {
             )}
 
             <section className="workspaceMain">
-              <section className="jobOverview" aria-label={t('currentJob')}>
-                <div className="workspaceHero">
-                  <div className="jobMediaCard">
-                    <span className="fieldLabel">{t('mediaFile')}</span>
-                    <strong title={jobTitle}>{jobTitle}</strong>
-                    <div className="jobMediaMeta">
-                      <span className="stageBadge">{t(stageLabel(job?.stage ?? 'idle'))}</span>
-                      <span className="metaPill">{`${sourceLabel} -> ${targetLabel}`}</span>
-                    </div>
+              <section className="workspaceHero" aria-label={t('currentJob')}>
+                <div className="jobMediaCard">
+                  <span className="fieldLabel">{t('mediaFile')}</span>
+                  <strong title={jobTitle}>{jobTitle}</strong>
+                  <div className="jobMediaMeta">
+                    <span className="stageBadge">{t(stageLabel(job?.stage ?? 'idle'))}</span>
+                    <span className="metaPill">{`${sourceLabel} -> ${targetLabel}`}</span>
                   </div>
+                </div>
 
-                  <div className="jobActionCard">
-                    <span className="fieldLabel">{t('currentJob')}</span>
-                    <button className="secondary" onClick={() => void pickMedia()}>
-                      <FileVideo size={16} />
-                      {t('chooseMedia')}
-                    </button>
-                    <button
-                      className="primary"
-                      disabled={busy || !mediaPath.trim()}
-                      onClick={() => void createAndStart()}
-                    >
-                      <Play size={16} />
-                      {t('startTranscription')}
-                    </button>
-                    <button
-                      className="secondary"
-                      disabled={busy || !job?.subtitleDocument}
-                      onClick={() => void translateJob()}
-                    >
-                      <Languages size={16} />
-                      {t('translateSubtitles')}
-                    </button>
-                  </div>
+                <div className="jobActivityCard">
+                  <ActivityPulse active={appWorking} />
+                </div>
 
-                  <div className="jobActivityCard">
-                    <ActivityPulse active={appWorking} />
-                  </div>
+                <div className="jobActionCard">
+                  <span className="fieldLabel">{t('currentJob')}</span>
+                  <button className="secondary" onClick={() => void pickMedia()}>
+                    <FileVideo size={16} />
+                    {t('chooseMedia')}
+                  </button>
+                  <button
+                    className="primary"
+                    disabled={busy || !mediaPath.trim()}
+                    onClick={() => void createAndStart()}
+                  >
+                    <Play size={16} />
+                    {t('startTranscription')}
+                  </button>
+                  <button
+                    className="secondary"
+                    disabled={busy || !job?.subtitleDocument}
+                    onClick={() => void translateJob()}
+                  >
+                    <Languages size={16} />
+                    {t('translateSubtitles')}
+                  </button>
                 </div>
               </section>
 
@@ -825,6 +825,12 @@ function App(): JSX.Element {
                       <option value="zh-CN">中文</option>
                     </select>
                   </label>
+                  <ToggleField
+                    label={t('multiThreadDownload')}
+                    detail={t('multiThreadDownloadDetail')}
+                    checked={settings.enableMultiThreadDownload}
+                    onChange={(checked) => void updateSettings({ enableMultiThreadDownload: checked })}
+                  />
                   </InspectorSection>
                 </section>
 

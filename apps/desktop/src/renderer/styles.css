@@ -360,7 +360,6 @@ button:disabled {
 }
 
 .statsRail,
-.jobOverview,
 .subtitleWorkbench,
 .exportPanel,
 .settingsIntro,
@@ -439,15 +438,9 @@ button:disabled {
   overflow: hidden;
 }
 
-.jobOverview {
-  display: grid;
-  gap: 0;
-  padding: 16px;
-}
-
 .workspaceHero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(250px, 0.42fr) 92px;
+  grid-template-columns: minmax(0, 1fr) 84px minmax(300px, 0.7fr);
   align-items: stretch;
   gap: 12px;
   min-width: 0;
@@ -469,6 +462,7 @@ button:disabled {
 
 .jobActivityCard {
   place-items: center;
+  min-width: 0;
   padding: 0 14px;
 }
 
@@ -1524,6 +1518,48 @@ input[type='checkbox'] {
     grid-column: 1;
   }
 
+  .statsRail {
+    padding: 10px;
+  }
+
+  .railContent {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 0 2px;
+    scroll-snap-type: x proximity;
+  }
+
+  .railHeader,
+  .railMetrics,
+  .railStatusStack {
+    flex: 0 0 auto;
+  }
+
+  .railHeader {
+    min-width: 118px;
+    align-content: center;
+    border: 1px solid var(--tt-border-soft);
+    border-radius: var(--tt-radius-card);
+    padding: 12px;
+    background: var(--tt-surface-panel-soft);
+    scroll-snap-align: start;
+  }
+
+  .railMetrics,
+  .railStatusStack {
+    display: flex;
+    gap: 10px;
+  }
+
+  .railMetrics .metricCard,
+  .railNote {
+    width: clamp(154px, 24vw, 196px);
+    min-height: 76px;
+    scroll-snap-align: start;
+  }
+
   .subtitleWorkspace {
     display: flex;
     min-height: auto;
@@ -1710,7 +1746,6 @@ input[type='checkbox'] {
     gap: 12px;
   }
 
-  .jobOverview,
   .exportPanel {
     padding: 14px;
   }
@@ -1726,8 +1761,18 @@ input[type='checkbox'] {
     grid-template-columns: 1fr;
   }
 
+  .jobMediaCard {
+    order: 1;
+  }
+
   .jobActionCard {
+    order: 2;
     grid-template-columns: 1fr;
+  }
+
+  .jobActivityCard {
+    order: 3;
+    min-height: 48px;
   }
 
   .panelHeader p {
@@ -1755,7 +1800,6 @@ input[type='checkbox'] {
     grid-template-columns: 1fr;
   }
 
-  .jobOverview,
   .subtitleWorkbench,
   .exportPanel,
   .statsRail {
