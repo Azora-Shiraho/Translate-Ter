@@ -795,6 +795,39 @@ h3 {
   gap: 14px;
 }
 
+.settingsSubsection {
+  display: grid;
+  gap: 12px;
+}
+
+.settingsSubsection + .settingsSubsection {
+  padding-top: 4px;
+}
+
+.sectionTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  min-height: 28px;
+  border-radius: var(--tt-radius-pill);
+  padding: 0 10px;
+  color: var(--tt-text-muted);
+  background: var(--tt-surface-panel-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sectionTitle svg {
+  color: var(--tt-accent);
+}
+
+.settingsFieldGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -1474,6 +1507,10 @@ input[type='checkbox'] {
   .editorGrid {
     grid-template-rows: repeat(2, minmax(180px, 1fr));
     padding: 12px;
+  }
+
+  .settingsFieldGrid {
+    grid-template-columns: 1fr;
   }
 
   .systemStrip {

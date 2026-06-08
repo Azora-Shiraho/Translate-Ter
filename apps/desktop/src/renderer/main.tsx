@@ -9,7 +9,9 @@ import {
   FileVideo,
   Gauge,
   HardDriveDownload,
+  KeyRound,
   Languages,
+  ListChecks,
   MonitorCog,
   PanelLeftClose,
   PanelLeftOpen,
@@ -17,7 +19,8 @@ import {
   RotateCcw,
   Save,
   Settings,
-  ShieldCheck
+  ShieldCheck,
+  SlidersHorizontal
 } from 'lucide-react';
 import './i18n';
 import './styles.css';
@@ -982,125 +985,123 @@ function App(): JSX.Element {
 
                 <section className="settingsPanel">
                   <InspectorSection icon={<Languages size={16} />} title={t('translate')}>
-                <label>
-                  {t('translationProvider')}
-                  <select
-                    value={translationProviderId}
-                    onChange={(event) =>
-                      void updateSettings({
-                        translationProviderPriority: [event.target.value]
-                      })
-                    }
-                  >
-                    {translationProviders.map((provider) => (
-                      <option key={provider} value={provider}>
-                        {providerLabel(provider, t)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <ProviderCard
-                  activeId={translationProviderId}
-                  detail={t('translationProviderDetail')}
-                  health={llmHealth}
-                  loading={checkingProvider === translationProviderId}
-                  onTest={() => void testProvider(translationProviderId)}
-                />
-                {translationProviderId === 'openai.compatible' && (
-                  <>
-                    <div className="providerCard">
-                      <div>
-                        <strong>{t('llmProviderSettings')}</strong>
-                        <small>{t('translationProviderDetail')}</small>
-                      </div>
+                    <div className="settingsSubsection">
+                      <SectionTitle icon={<Languages size={15} />} title={t('translationProvider')} />
+                      <label>
+                        {t('translationProvider')}
+                        <select
+                          value={translationProviderId}
+                          onChange={(event) =>
+                            void updateSettings({
+                              translationProviderPriority: [event.target.value]
+                            })
+                          }
+                        >
+                          {translationProviders.map((provider) => (
+                            <option key={provider} value={provider}>
+                              {providerLabel(provider, t)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <ProviderCard
+                        activeId={translationProviderId}
+                        detail={t('translationProviderDetail')}
+                        health={llmHealth}
+                        loading={checkingProvider === translationProviderId}
+                        onTest={() => void testProvider(translationProviderId)}
+                      />
                     </div>
-                    <TextField
-                      label={t('baseUrl')}
-                      value={llmSecret.baseUrl ?? ''}
-                      placeholder="https://api.openai.com/v1"
-                      onChange={(value) => updateProviderSecret('openai.compatible', { baseUrl: value })}
-                    />
-                    <TextField
-                      label={t('apiKey')}
-                      value={llmSecret.apiKey ?? ''}
-                      placeholder="sk-..."
-                      type="password"
-                      onChange={(value) => updateProviderSecret('openai.compatible', { apiKey: value })}
-                    />
-                    <TextField
-                      label={t('model')}
-                      value={llmSecret.model ?? ''}
-                      placeholder="gpt-4o-mini"
-                      onChange={(value) => updateProviderSecret('openai.compatible', { model: value })}
-                    />
-                    <TextField
-                      label={t('organization')}
-                      value={llmSecret.organization ?? ''}
-                      placeholder={t('optional')}
-                      onChange={(value) => updateProviderSecret('openai.compatible', { organization: value })}
-                    />
-                    <div className="providerCard">
-                      <div>
-                        <strong>{t('translationRateLimits')}</strong>
-                        <small>{t('translationRateLimitsDetail')}</small>
-                      </div>
-                    </div>
-                    <NumberField
-                      label={t('concurrency')}
-                      min={1}
-                      max={6}
-                      value={settings.translationConcurrency}
-                      onChange={(value) => void updateSettings({ translationConcurrency: value })}
-                    />
-                    <NumberField
-                      label={t('requestsPerMinute')}
-                      min={1}
-                      max={600}
-                      value={settings.translationRequestsPerMinute}
-                      onChange={(value) => void updateSettings({ translationRequestsPerMinute: value })}
-                    />
-                    <NumberField
-                      label={t('tokenBudgetPerMinute')}
-                      min={1000}
-                      max={1000000}
-                      step={1000}
-                      value={settings.translationTokenBudgetPerMinute}
-                      onChange={(value) => void updateSettings({ translationTokenBudgetPerMinute: value })}
-                    />
-                    <div className="providerCard">
-                      <div>
-                        <strong>{t('translationBatching')}</strong>
-                        <small>{t('translationBatchingDetail')}</small>
-                      </div>
-                    </div>
-                    <NumberField
-                      label={t('linesPerRequest')}
-                      min={1}
-                      max={32}
-                      value={settings.translationLinesPerRequest}
-                      onChange={(value) =>
-                        void updateSettings({
-                          translationLinesPerRequest: value,
-                          translationBatchStride: Math.min(settings.translationBatchStride, value)
-                        })
-                      }
-                    />
-                    <NumberField
-                      label={t('batchStride')}
-                      min={1}
-                      max={settings.translationLinesPerRequest}
-                      value={settings.translationBatchStride}
-                      onChange={(value) => void updateSettings({ translationBatchStride: value })}
-                    />
-                    <ProviderActionRow
-                      savingLabel={t('saveProvider')}
-                      testingLabel={checkingProvider === 'openai.compatible' ? t('checking') : t('test')}
-                      onSave={() => void saveProviderSecret('openai.compatible')}
-                      onTest={() => void testProvider('openai.compatible')}
-                      testDisabled={checkingProvider === 'openai.compatible'}
-                    />
-                  </>
-                )}
+                    {translationProviderId === 'openai.compatible' && (
+                      <>
+                        <div className="settingsSubsection">
+                          <SectionTitle icon={<KeyRound size={15} />} title={t('providerConfig')} />
+                          <TextField
+                            label={t('baseUrl')}
+                            value={llmSecret.baseUrl ?? ''}
+                            placeholder="https://api.openai.com/v1"
+                            onChange={(value) => updateProviderSecret('openai.compatible', { baseUrl: value })}
+                          />
+                          <TextField
+                            label={t('apiKey')}
+                            value={llmSecret.apiKey ?? ''}
+                            placeholder="sk-..."
+                            type="password"
+                            onChange={(value) => updateProviderSecret('openai.compatible', { apiKey: value })}
+                          />
+                          <TextField
+                            label={t('model')}
+                            value={llmSecret.model ?? ''}
+                            placeholder="gpt-4o-mini"
+                            onChange={(value) => updateProviderSecret('openai.compatible', { model: value })}
+                          />
+                          <TextField
+                            label={t('organization')}
+                            value={llmSecret.organization ?? ''}
+                            placeholder={t('optional')}
+                            onChange={(value) => updateProviderSecret('openai.compatible', { organization: value })}
+                          />
+                        </div>
+                        <div className="settingsSubsection">
+                          <SectionTitle icon={<SlidersHorizontal size={15} />} title={t('translationRateLimits')} />
+                          <div className="settingsFieldGrid">
+                            <NumberField
+                              label={t('concurrency')}
+                              min={1}
+                              max={6}
+                              value={settings.translationConcurrency}
+                              onChange={(value) => void updateSettings({ translationConcurrency: value })}
+                            />
+                            <NumberField
+                              label={t('requestsPerMinute')}
+                              min={1}
+                              max={600}
+                              value={settings.translationRequestsPerMinute}
+                              onChange={(value) => void updateSettings({ translationRequestsPerMinute: value })}
+                            />
+                            <NumberField
+                              label={t('tokenBudgetPerMinute')}
+                              min={1000}
+                              max={1000000}
+                              step={1000}
+                              value={settings.translationTokenBudgetPerMinute}
+                              onChange={(value) => void updateSettings({ translationTokenBudgetPerMinute: value })}
+                            />
+                          </div>
+                        </div>
+                        <div className="settingsSubsection">
+                          <SectionTitle icon={<ListChecks size={15} />} title={t('translationBatching')} />
+                          <div className="settingsFieldGrid">
+                            <NumberField
+                              label={t('linesPerRequest')}
+                              min={1}
+                              max={32}
+                              value={settings.translationLinesPerRequest}
+                              onChange={(value) =>
+                                void updateSettings({
+                                  translationLinesPerRequest: value,
+                                  translationBatchStride: Math.min(settings.translationBatchStride, value)
+                                })
+                              }
+                            />
+                            <NumberField
+                              label={t('batchStride')}
+                              min={1}
+                              max={settings.translationLinesPerRequest}
+                              value={settings.translationBatchStride}
+                              onChange={(value) => void updateSettings({ translationBatchStride: value })}
+                            />
+                          </div>
+                        </div>
+                        <ProviderActionRow
+                          savingLabel={t('saveProvider')}
+                          testingLabel={checkingProvider === 'openai.compatible' ? t('checking') : t('test')}
+                          onSave={() => void saveProviderSecret('openai.compatible')}
+                          onTest={() => void testProvider('openai.compatible')}
+                          testDisabled={checkingProvider === 'openai.compatible'}
+                        />
+                      </>
+                    )}
                   </InspectorSection>
                 </section>
               </section>
@@ -1199,6 +1200,15 @@ function InspectorSection(props: { icon: React.ReactNode; title: string; childre
       </h3>
       {props.children}
     </section>
+  );
+}
+
+function SectionTitle(props: { icon: React.ReactNode; title: string }): JSX.Element {
+  return (
+    <div className="sectionTitle">
+      {props.icon}
+      <strong>{props.title}</strong>
+    </div>
   );
 }
 
