@@ -356,6 +356,11 @@ function App(): JSX.Element {
     job?.fileName ?? selectedMediaPath.split(/[\\/]/).filter(Boolean).at(-1) ?? t('chooseMedia');
   const jobTitle = selectedMediaFileName;
   const exportDockVisible = job?.step === 'export';
+  const jobIsRunning = Boolean(
+    job && !['idle', 'completed', 'failed', 'cancelled'].includes(job.stage)
+  );
+  const appWorking = busy || checkingRuntime || Boolean(checkingProvider) || jobIsRunning;
+  const workingMessage = runtimeActivity ?? message;
 
   async function forceStop(): Promise<void> {
     if (!job) return;
@@ -399,7 +404,7 @@ function App(): JSX.Element {
   if (!settings) return <div className="boot">Translate-Ter</div>;
 
   return (
-    <div className="appShell">
+    <div className={`appShell${appWorking ? ' isWorking' : ''}`}>
       <header className="topChrome">
         <div className="brand">
           <FileVideo size={18} />
@@ -543,9 +548,10 @@ function App(): JSX.Element {
                     </button>
                   </div>
                 </div>
-                <div className="track">
+                <div className={`track${appWorking ? ' active' : ''}`}>
                   <span style={{ width: `${completion}%` }} />
                 </div>
+                {appWorking && <WorkingRibbon message={workingMessage} />}
                 <div className="jobOverviewFooter">
                   <div className="heroField mediaSummary">
                     <span className="fieldLabel">{t('mediaFile')}</span>
@@ -1098,6 +1104,15 @@ function App(): JSX.Element {
       </footer>
       <ToastStack toasts={toasts} copyTitle={t('copyErrorToast')} onCopyError={(toast) => void copyToastMessage(toast)} />
       <BottomBubble message={copyBubble} />
+    </div>
+  );
+}
+
+function WorkingRibbon(props: { message: string }): JSX.Element {
+  return (
+    <div className="workingRibbon" role="status" aria-live="polite">
+      <span className="workingOrb" />
+      <span title={props.message}>{props.message}</span>
     </div>
   );
 }
