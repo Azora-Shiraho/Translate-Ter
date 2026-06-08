@@ -56,14 +56,17 @@ export class WhisperAssetManager extends EventEmitter {
   async listModels(): Promise<WhisperModelInfo[]> {
     const manifest = await this.manifest();
     return Promise.all(
-      manifest.models.map(async (model) => ({
-        id: model.id,
-        displayName: model.displayName,
-        languageScope: model.languageScope,
-        sizeBytes: model.sizeBytes,
-        sha256: model.sha256,
-        installed: await this.exists(join(this.cacheDir(), model.path))
-      }))
+      manifest.models.map(async (model) => {
+        const modelPath = await this.findExistingModelPath(model.path);
+        return {
+          id: model.id,
+          displayName: model.displayName,
+          languageScope: model.languageScope,
+          sizeBytes: model.sizeBytes,
+          sha256: model.sha256,
+          installed: Boolean(modelPath)
+        };
+      })
     );
   }
 
@@ -133,7 +136,9 @@ export class WhisperAssetManager extends EventEmitter {
     const managedBinaryPath = join(this.cacheDir(), runtime.binary);
     const systemBinaryPath = await this.findSystemWhisperBinary(runtime.binary);
     const binaryPath = systemBinaryPath ?? managedBinaryPath;
-    const modelPath = join(this.cacheDir(), model.path);
+    const managedModelPath = join(this.cacheDir(), model.path);
+    const existingModelPath = await this.findExistingModelPath(model.path);
+    const modelPath = existingModelPath ?? managedModelPath;
     const hashesPinned = isPinnedSha256(runtime.sha256) && isPinnedSha256(model.sha256);
     const binaryExists = await this.exists(binaryPath);
     const modelExists = await this.exists(modelPath);
@@ -178,7 +183,7 @@ export class WhisperAssetManager extends EventEmitter {
       await this.downloadAndInstall(
         'model',
         model.url,
-        modelPath,
+        managedModelPath,
         model.sha256,
         Boolean(request.useMultiThreadDownload)
       );
@@ -186,17 +191,18 @@ export class WhisperAssetManager extends EventEmitter {
 
     const resolvedSystemBinaryPath = systemBinaryPath ?? (await this.findSystemWhisperBinary(runtime.binary));
     const resolvedBinaryPath = resolvedSystemBinaryPath ?? managedBinaryPath;
+    const resolvedModelPath = (await this.findExistingModelPath(model.path)) ?? managedModelPath;
     const resolvedBinaryInstalled = await this.exists(resolvedBinaryPath);
-    const resolvedModelInstalled = await this.exists(modelPath);
+    const resolvedModelInstalled = await this.exists(resolvedModelPath);
     const resolvedBinaryVerified = resolvedSystemBinaryPath
       ? true
       : await this.verifyRuntime(resolvedBinaryPath, runtime.url, runtime.sha256);
-    const resolvedModelVerified = await this.verifyIfPresent(modelPath, model.sha256);
+    const resolvedModelVerified = await this.verifyIfPresent(resolvedModelPath, model.sha256);
 
     return this.status(
       platformKey,
       resolvedBinaryPath,
-      model.path,
+      resolvedModelPath,
       model.id,
       runtime.acceleration,
       request.preferCuda,
@@ -464,7 +470,7 @@ export class WhisperAssetManager extends EventEmitter {
       },
       model: {
         id: modelId,
-        expectedPath: join(this.cacheDir(), modelPath),
+        expectedPath: isAbsolute(modelPath) ? modelPath : join(this.cacheDir(), modelPath),
         installed: modelInstalled,
         verified: modelVerified
       },
@@ -550,6 +556,50 @@ export class WhisperAssetManager extends EventEmitter {
       if (!existsSync(candidate)) continue;
       if (canRunWhisperBinary(candidate)) return candidate;
     }
+    return undefined;
+  }
+
+  private async findExistingModelPath(manifestModelPath: string): Promise<string | undefined> {
+    const configuredPath = process.env.WHISPER_MODEL_PATH?.trim();
+    if (configuredPath && existsSync(configuredPath)) {
+      return configuredPath;
+    }
+
+    const fileName = basename(manifestModelPath);
+    const candidateDirs = [
+      process.env.WHISPER_MODEL_DIR?.trim(),
+      join(this.cacheDir(), dirname(manifestModelPath)),
+      join(this.legacyCacheDir(), dirname(manifestModelPath)),
+      join(dirname(process.execPath), 'runtime', 'whisper', dirname(manifestModelPath)),
+      join(dirname(process.execPath), dirname(manifestModelPath)),
+      join(dirname(process.execPath), 'models'),
+      resolve(dirname(manifestModelPath)),
+      resolve('models'),
+      resolve('.runtime', 'whisper', dirname(manifestModelPath))
+    ].filter((entry): entry is string => Boolean(entry));
+
+    for (const dir of uniquePaths(candidateDirs)) {
+      const directCandidate = join(dir, fileName);
+      if (existsSync(directCandidate)) {
+        return directCandidate;
+      }
+    }
+
+    const searchRoots = uniquePaths([
+      process.env.WHISPER_MODEL_DIR?.trim(),
+      dirname(process.execPath),
+      this.cacheDir(),
+      this.legacyCacheDir(),
+      resolve('.')
+    ].filter((entry): entry is string => Boolean(entry)));
+
+    for (const root of searchRoots) {
+      const matched = await findFileByName(root, fileName, 3);
+      if (matched) {
+        return matched;
+      }
+    }
+
     return undefined;
   }
 
@@ -790,6 +840,39 @@ function canRunWhisperBinary(path: string): boolean {
     timeout: 5_000
   });
   return probe.status === 0;
+}
+
+function uniquePaths(paths: string[]): string[] {
+  return [...new Set(paths.map((entry) => resolve(entry)))];
+}
+
+async function findFileByName(root: string, fileName: string, maxDepth: number): Promise<string | undefined> {
+  if (!existsSync(root)) return undefined;
+
+  const stack: Array<{ path: string; depth: number }> = [{ path: root, depth: 0 }];
+  const target = fileName.toLowerCase();
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    let entries;
+    try {
+      entries = await readdir(current.path, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const nextPath = join(current.path, entry.name);
+      if (entry.isFile() && entry.name.toLowerCase() === target) {
+        return nextPath;
+      }
+      if (entry.isDirectory() && current.depth < maxDepth) {
+        stack.push({ path: nextPath, depth: current.depth + 1 });
+      }
+    }
+  }
+
+  return undefined;
 }
 
 async function findFilesByName(root: string, names: string[]): Promise<Map<string, string>> {
