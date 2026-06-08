@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useTranslation } from 'react-i18next';
 import {
@@ -98,6 +98,7 @@ function App(): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [checkingRuntime, setCheckingRuntime] = useState(false);
   const [checkingProvider, setCheckingProvider] = useState<string>();
+  const actionTokenRef = useRef(0);
 
   const translateStage = useCallback((stage: JobStage) => i18n.t(stageLabel(stage)), [i18n]);
 
@@ -276,6 +277,7 @@ function App(): JSX.Element {
         downloadScope: 'model'
       });
       setRuntimeStatus(status);
+      syncLocalWhisperHealth(status);
       const nextMessage = status.model.verified ? t('modelReady') : (status.message ?? t('runtimeError'));
       setModelActivity(nextMessage);
       pushStatus(nextMessage, status.model.verified ? 'success' : 'warning');
@@ -299,6 +301,16 @@ function App(): JSX.Element {
         await window.translateTer.settings.setSecret(providerId, draftSecret);
       }
       const health = await window.translateTer.settings.testProvider(providerId);
+      if (providerId === 'local.whisper.cpp' && settings) {
+        const nextRuntimeStatus = await window.translateTer.assets.ensureWhisperRuntime({
+          modelId: settings.whisperModelId,
+          allowDownload: false,
+          preferCuda: settings.localWhisperUseCuda,
+          useMultiThreadDownload: settings.enableMultiThreadDownload,
+          downloadScope: 'none'
+        });
+        setRuntimeStatus(nextRuntimeStatus);
+      }
       setProviderHealth((current) => ({ ...current, [providerId]: health }));
       const healthMessage =
         providerId === 'local.whisper.cpp' && !health.ok
@@ -319,8 +331,7 @@ function App(): JSX.Element {
 
   async function createAndStart(): Promise<void> {
     if (!settings || !mediaPath.trim()) return;
-    setBusy(true);
-    setRunningAction('transcribe');
+    const token = beginAction('transcribe');
     try {
       const nextJob = await window.translateTer.startTranscription({
         mediaPath: mediaPath.trim(),
@@ -338,43 +349,37 @@ function App(): JSX.Element {
         translationLinesPerRequest: settings.translationLinesPerRequest,
         translationBatchStride: settings.translationBatchStride
       });
-      setJob(nextJob);
+      if (isCurrentAction(token)) setJob(nextJob);
     } catch (error) {
-      pushStatus(error instanceof Error ? error.message : String(error), 'error');
+      if (isCurrentAction(token)) pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
-      setRunningAction(undefined);
-      setBusy(false);
+      endAction(token);
     }
   }
 
   async function translateJob(): Promise<void> {
     if (!job) return;
-    setBusy(true);
-    setRunningAction('translate');
+    const token = beginAction('translate');
     try {
-      setJob(await window.translateTer.startTranslation(job.id));
+      const nextJob = await window.translateTer.startTranslation(job.id);
+      if (isCurrentAction(token)) setJob(nextJob);
     } catch (error) {
-      pushStatus(error instanceof Error ? error.message : String(error), 'error');
+      if (isCurrentAction(token)) pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
-      setRunningAction(undefined);
-      setBusy(false);
+      endAction(token);
     }
   }
 
   async function exportSrt(variant: ExportVariant): Promise<void> {
     if (!job?.subtitleDocument) return;
-    setBusy(true);
-    setRunningAction('export');
-    setExportingVariant(variant);
+    const token = beginAction('export', variant);
     try {
       const result = await window.translateTer.exportConfiguredSrt(job.subtitleDocument, job.mediaPath, variant);
-      if (!result.cancelled) pushStatus(t('exported'), 'success');
+      if (isCurrentAction(token) && !result.cancelled) pushStatus(t('exported'), 'success');
     } catch (error) {
-      pushStatus(error instanceof Error ? error.message : String(error), 'error');
+      if (isCurrentAction(token)) pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
-      setExportingVariant(undefined);
-      setRunningAction(undefined);
-      setBusy(false);
+      endAction(token);
     }
   }
 
@@ -450,8 +455,8 @@ function App(): JSX.Element {
   const appWorking = busy || checkingRuntime || Boolean(checkingProvider) || jobIsRunning;
   const hasRecognizedSubtitles = Boolean(job?.subtitleDocument?.segments.length);
   const translationComplete = hasRecognizedSubtitles && translatedCount === segments.length && segments.length > 0;
-  const canExportTranslated = hasRecognizedSubtitles && !busy;
-  const canExportSource = translationComplete && !busy;
+  const canExportTranslated = translationComplete && !busy;
+  const canExportSource = hasRecognizedSubtitles && !busy;
   const canExportBilingual = translationComplete && !busy;
   const downloadPercent =
     activeDownload?.totalBytes && activeDownload.totalBytes > 0
@@ -478,10 +483,51 @@ function App(): JSX.Element {
 
   async function forceStop(): Promise<void> {
     if (!job) return;
-    setBusy(false);
+    invalidateActiveAction();
+    setActiveDownload(undefined);
     await window.translateTer.jobs.cancel(job.id);
     setJob(await window.translateTer.jobs.get(job.id));
     pushStatus(t('stopped'), 'warning');
+  }
+
+  function beginAction(action: RunningAction, exporting?: ExportVariant): number {
+    const token = actionTokenRef.current + 1;
+    actionTokenRef.current = token;
+    setBusy(true);
+    setRunningAction(action);
+    setExportingVariant(exporting);
+    return token;
+  }
+
+  function endAction(token: number): void {
+    if (!isCurrentAction(token)) return;
+    setExportingVariant(undefined);
+    setRunningAction(undefined);
+    setBusy(false);
+  }
+
+  function isCurrentAction(token: number): boolean {
+    return actionTokenRef.current === token;
+  }
+
+  function invalidateActiveAction(): void {
+    actionTokenRef.current += 1;
+    setExportingVariant(undefined);
+    setRunningAction(undefined);
+    setBusy(false);
+  }
+
+  function syncLocalWhisperHealth(status: WhisperRuntimeStatus): void {
+    const ok = status.binary.verified && status.model.verified;
+    setProviderHealth((current) => ({
+      ...current,
+      'local.whisper.cpp': {
+        providerId: 'local.whisper.cpp',
+        ok,
+        status: ok ? 'healthy' : 'degraded',
+        message: status.message
+      }
+    }));
   }
 
   function pushStatus(nextMessage: string, tone: ToastTone = 'neutral'): void {

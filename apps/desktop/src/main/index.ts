@@ -10,7 +10,8 @@ import type {
   JobEvent,
   JobSnapshot,
   SubtitleDocument,
-  SubtitleSegment
+  SubtitleSegment,
+  WhisperRuntimeStatus
 } from '@shared/models';
 import { serializeSrt } from '@shared/srt';
 import { JobManager } from './services/jobManager';
@@ -87,6 +88,47 @@ function registerIpc(): void {
     const job = jobManager.create(request);
     await jobManager.start(job.id);
     return jobManager.get(job.id);
+  }
+
+  async function testLocalWhisperProvider(): Promise<{
+    providerId: string;
+    ok: boolean;
+    status: 'healthy' | 'degraded';
+    message: string;
+  }> {
+    const settings = await settingsStore.get();
+    let runtime = await whisperAssets.ensureRuntime({
+      modelId: settings.whisperModelId,
+      allowDownload: false,
+      preferCuda: settings.localWhisperUseCuda,
+      useMultiThreadDownload: settings.enableMultiThreadDownload,
+      downloadScope: 'none'
+    });
+
+    if (runtime.actionRequired === 'download-runtime') {
+      await whisperAssets.ensureRuntime({
+        modelId: settings.whisperModelId,
+        allowDownload: true,
+        preferCuda: false,
+        useMultiThreadDownload: settings.enableMultiThreadDownload,
+        downloadScope: 'runtime'
+      });
+      runtime = await whisperAssets.ensureRuntime({
+        modelId: settings.whisperModelId,
+        allowDownload: false,
+        preferCuda: settings.localWhisperUseCuda,
+        useMultiThreadDownload: settings.enableMultiThreadDownload,
+        downloadScope: 'none'
+      });
+    }
+
+    const runnable = runtime.binary.verified && runtime.model.verified;
+    return {
+      providerId: 'local.whisper.cpp',
+      ok: runnable,
+      status: runnable ? 'healthy' : 'degraded',
+      message: localWhisperRuntimeMessage(runtime)
+    };
   }
 
   async function exportSrt(payload: {
@@ -223,22 +265,7 @@ function registerIpc(): void {
   ipcMain.handle('settings:set-secret', async (_event, providerId, secret) => settingsStore.setSecret(providerId, secret));
   ipcMain.handle('settings:test-provider', async (_event, providerId: string) => {
     if (providerId === 'local.whisper.cpp') {
-      const settings = await settingsStore.get();
-      const runtime = await whisperAssets.ensureRuntime({
-        modelId: settings.whisperModelId,
-        allowDownload: settings.allowWhisperAssetDownload,
-        preferCuda: settings.localWhisperUseCuda,
-        useMultiThreadDownload: settings.enableMultiThreadDownload,
-        downloadScope: 'runtime'
-      });
-      return {
-        providerId,
-        ok: runtime.binary.verified,
-        status: runtime.binary.verified ? 'healthy' : 'degraded',
-        message: runtime.binary.verified
-          ? 'whisper.cpp runtime is ready.'
-          : (runtime.message ?? 'whisper.cpp binary is missing or cannot run.')
-      };
+      return testLocalWhisperProvider();
     }
 
     const asrProvider = asrProviders.find((provider) => provider.id === providerId);
@@ -262,4 +289,17 @@ function registerIpc(): void {
   });
   ipcMain.handle('assets:delete-model', async (_event, modelId: string) => whisperAssets.deleteModel(modelId));
   ipcMain.handle('native:health', async () => nativeBackend.health());
+}
+
+function localWhisperRuntimeMessage(runtime: WhisperRuntimeStatus): string {
+  if (runtime.binary.verified && runtime.model.verified) {
+    return runtime.message ?? 'whisper.cpp is ready.';
+  }
+  if (!runtime.binary.verified) {
+    return runtime.message ?? 'whisper.cpp runtime binary is missing or cannot run.';
+  }
+  if (!runtime.model.verified) {
+    return runtime.message ?? 'Selected whisper model is missing.';
+  }
+  return runtime.message ?? 'Local whisper check failed.';
 }

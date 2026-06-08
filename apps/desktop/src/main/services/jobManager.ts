@@ -1,7 +1,15 @@
 import { EventEmitter } from 'node:events';
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
-import type { CreateJobRequest, JobEvent, JobSnapshot, JobStage, SubtitleDocument, SubtitleSegment } from '@shared/models';
+import type {
+  CreateJobRequest,
+  JobEvent,
+  JobSnapshot,
+  JobStage,
+  SubtitleDocument,
+  SubtitleSegment,
+  WorkflowStep
+} from '@shared/models';
 import { TranslationScheduler } from '@shared/translation/scheduler';
 import { MockTranslationProvider, OpenAICompatibleTranslationProvider } from '@shared/translation/providers';
 import { validateAsrRequest } from './asrProviders';
@@ -12,6 +20,7 @@ import type { WhisperAssetManager } from './whisperAssets';
 export class JobManager extends EventEmitter {
   private jobs = new Map<string, JobSnapshot>();
   private cancelledJobs = new Set<string>();
+  private translationControllers = new Map<string, AbortController>();
 
   constructor(
     private readonly settings: SettingsStore,
@@ -189,60 +198,85 @@ export class JobManager extends EventEmitter {
 
   async translate(jobId: string): Promise<JobSnapshot> {
     const job = this.get(jobId);
+    this.translationControllers.get(job.id)?.abort();
+    const controller = new AbortController();
+    this.translationControllers.set(job.id, controller);
     this.cancelledJobs.delete(job.id);
-    if (!job.subtitleDocument) throw new Error('No subtitle document is available to translate.');
-    await this.setProgress(job, 'translating', 35, 'Translating subtitle batches.');
-    const secret = this.settings.getSecret('openai.compatible');
-    const scheduler = new TranslationScheduler(
-      [
-        new MockTranslationProvider(),
-        new OpenAICompatibleTranslationProvider({
-          id: 'openai.compatible',
-          baseUrl: secret?.baseUrl ?? 'https://api.openai.com/v1',
-          apiKey: secret?.apiKey,
-          model: secret?.model ?? 'gpt-4o-mini',
-          priority: 10
-        })
-      ],
-      {
-        concurrency: job.translationConcurrency,
-        rpm: job.translationRequestsPerMinute,
-        tokenBudgetPerMinute: job.translationTokenBudgetPerMinute
+    try {
+      if (!job.subtitleDocument) throw new Error('No subtitle document is available to translate.');
+      await this.setProgress(job, 'translating', 35, 'Translating subtitle batches.');
+      const secret = this.settings.getSecret('openai.compatible');
+      const scheduler = new TranslationScheduler(
+        [
+          new MockTranslationProvider(),
+          new OpenAICompatibleTranslationProvider({
+            id: 'openai.compatible',
+            baseUrl: secret?.baseUrl ?? 'https://api.openai.com/v1',
+            apiKey: secret?.apiKey,
+            model: secret?.model ?? 'gpt-4o-mini',
+            priority: 10
+          })
+        ],
+        {
+          concurrency: job.translationConcurrency,
+          rpm: job.translationRequestsPerMinute,
+          tokenBudgetPerMinute: job.translationTokenBudgetPerMinute
+        }
+      );
+      const result = await scheduler.translateDocument(job.subtitleDocument, {
+        sourceLanguage: job.sourceLanguage === 'auto' ? 'en' : job.sourceLanguage,
+        targetLanguage: job.targetLanguage,
+        providerPriority: job.translationProviderPriority,
+        batchSize: job.translationLinesPerRequest,
+        batchStride: job.translationBatchStride,
+        signal: controller.signal,
+        onProgress: ({ completedBatches, totalBatches }) => {
+          if (controller.signal.aborted || this.isCancelled(job.id)) return;
+          const progress = 35 + Math.round((completedBatches / Math.max(1, totalBatches)) * 60);
+          void this.setProgress(job, 'translating', Math.min(95, progress), `Translating ${completedBatches}/${totalBatches} batches.`);
+        }
+      });
+      if (controller.signal.aborted || this.isCancelled(job.id)) {
+        return this.get(job.id);
       }
-    );
-    const result = await scheduler.translateDocument(job.subtitleDocument, {
-      sourceLanguage: job.sourceLanguage === 'auto' ? 'en' : job.sourceLanguage,
-      targetLanguage: job.targetLanguage,
-      providerPriority: job.translationProviderPriority,
-      batchSize: job.translationLinesPerRequest,
-      batchStride: job.translationBatchStride,
-      onProgress: ({ completedBatches, totalBatches }) => {
-        const progress = 35 + Math.round((completedBatches / Math.max(1, totalBatches)) * 60);
-        void this.setProgress(job, 'translating', Math.min(95, progress), `Translating ${completedBatches}/${totalBatches} batches.`);
+      job.subtitleDocument = normalizeDocumentForSubtitleDisplay(result.document);
+      job.step = 'export';
+      job.warnings = [
+        ...job.warnings,
+        ...result.checkpoints
+          .filter((checkpoint) => checkpoint.status === 'failed')
+          .map((checkpoint) => ({
+            code: 'TranslationBatchFailed',
+            message: `Batch ${checkpoint.batchId} failed.`,
+            segmentId: checkpoint.segmentIds[0]
+          }))
+      ];
+      await this.setProgress(job, 'completed', 100, 'Translation complete.');
+      return this.get(job.id);
+    } catch (error) {
+      if (controller.signal.aborted || this.isCancelled(job.id) || isAbortError(error)) {
+        return this.get(job.id);
       }
-    });
-    job.subtitleDocument = normalizeDocumentForSubtitleDisplay(result.document);
-    job.step = 'export';
-    job.warnings = [
-      ...job.warnings,
-      ...result.checkpoints
-        .filter((checkpoint) => checkpoint.status === 'failed')
-        .map((checkpoint) => ({
-          code: 'TranslationBatchFailed',
-          message: `Batch ${checkpoint.batchId} failed.`,
-          segmentId: checkpoint.segmentIds[0]
-        }))
-    ];
-    await this.setProgress(job, 'completed', 100, 'Translation complete.');
-    return job;
+      const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code ?? 'TranslationFailed') : 'TranslationFailed';
+      const retryable =
+        typeof error === 'object' && error && 'retryable' in error ? Boolean((error as { retryable?: unknown }).retryable) : true;
+      const message = error instanceof Error ? error.message : String(error);
+      this.fail(job, code, message, retryable);
+      return this.get(job.id);
+    } finally {
+      if (this.translationControllers.get(job.id) === controller) {
+        this.translationControllers.delete(job.id);
+      }
+    }
   }
 
   async cancel(jobId: string): Promise<void> {
     const job = this.get(jobId);
     this.cancelledJobs.add(job.id);
+    this.translationControllers.get(job.id)?.abort();
     await this.nativeBackend.cancelRunningWork();
     job.stage = 'cancelled';
-    job.step = 'asr';
+    job.step = cancelledStep(job);
     job.progress = 0;
     job.error = undefined;
     job.updatedAt = new Date().toISOString();
@@ -261,6 +295,9 @@ export class JobManager extends EventEmitter {
   }
 
   private async setProgress(job: JobSnapshot, stage: JobStage, progress: number, message: string): Promise<void> {
+    if (this.isCancelled(job.id)) {
+      return;
+    }
     job.stage = stage;
     job.progress = progress;
     job.updatedAt = new Date().toISOString();
@@ -393,6 +430,18 @@ function nativePayloadToDocument(payload: unknown, job: JobSnapshot): SubtitleDo
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function cancelledStep(job: JobSnapshot): WorkflowStep {
+  if (job.stage === 'translating') return 'translate';
+  if (job.subtitleDocument?.segments.length) return 'subtitles';
+  return 'asr';
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException
+    ? error.name === 'AbortError'
+    : error instanceof Error && error.name === 'AbortError';
 }
 
 function normalizeDocumentForSubtitleDisplay(document: SubtitleDocument): SubtitleDocument {
