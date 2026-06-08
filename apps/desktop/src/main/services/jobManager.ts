@@ -314,8 +314,10 @@ export class JobManager extends EventEmitter {
     if (this.isCancelled(job.id)) {
       return;
     }
+    const failedStep = failureStepFor(job);
     this.cancelledJobs.delete(job.id);
     job.stage = 'failed';
+    job.step = failedStep;
     job.error = { code, message, retryable };
     job.updatedAt = new Date().toISOString();
     this.save(job);
@@ -514,6 +516,22 @@ function cancelledStep(job: JobSnapshot): WorkflowStep {
   if (job.stage === 'translating') return 'translate';
   if (job.subtitleDocument?.segments.length) return 'subtitles';
   return 'asr';
+}
+
+function failureStepFor(job: JobSnapshot): WorkflowStep {
+  switch (job.stage) {
+    case 'checking-runtime':
+    case 'probing':
+    case 'extracting-audio':
+    case 'transcribing':
+      return 'asr';
+    case 'translating':
+      return 'translate';
+    case 'completed':
+      return 'export';
+    default:
+      return job.step;
+  }
 }
 
 function isAbortError(error: unknown): boolean {

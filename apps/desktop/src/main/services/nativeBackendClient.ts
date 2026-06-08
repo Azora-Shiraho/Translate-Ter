@@ -43,6 +43,7 @@ export class NativeBackendClient {
     }
   >();
   private stdoutBuffer = '';
+  private stderrBuffer = '';
 
   async health(): Promise<NativeHealth> {
     const response = await this.request<NativeHealth>('runtime.health', {});
@@ -101,6 +102,7 @@ export class NativeBackendClient {
     this.processPromise = undefined;
     this.childProcess = undefined;
     this.stdoutBuffer = '';
+    this.stderrBuffer = '';
     if (!child) {
       return;
     }
@@ -276,8 +278,8 @@ export class NativeBackendClient {
         this.flushStdoutBuffer();
       });
 
-      child.stderr.on('data', () => {
-        // Protocol is stdout-only for now.
+      child.stderr.on('data', (chunk: Buffer | string) => {
+        this.stderrBuffer += chunkToString(chunk);
       });
 
       child.once('spawn', () => finalize(child));
@@ -285,7 +287,8 @@ export class NativeBackendClient {
         this.childProcess = child;
       });
       child.once('error', () => finalize(undefined));
-      child.once('close', () => {
+      child.once('close', (code, signal) => {
+        const stderrMessage = formatNativeBackendCloseDetail(this.stderrBuffer, code, signal);
         if (this.childProcess === child) {
           this.childProcess = undefined;
         }
@@ -293,12 +296,13 @@ export class NativeBackendClient {
           this.processPromise = undefined;
         }
         this.stdoutBuffer = '';
+        this.stderrBuffer = '';
         for (const [requestId, pending] of this.pending) {
           clearTimeout(pending.timeout);
           pending.resolve(
             this.errorResponse(pending.type, requestId, {
               code: 'MissingRuntime',
-              message: 'Native backend process exited unexpectedly.',
+              message: stderrMessage,
               retryable: true
             })
           );
@@ -326,4 +330,24 @@ export class NativeBackendClient {
       }
     }
   }
+}
+
+function chunkToString(chunk: unknown): string {
+  if (typeof chunk === 'string') return chunk;
+  if (chunk instanceof Buffer) return chunk.toString('utf8');
+  return String(chunk ?? '');
+}
+
+function formatNativeBackendCloseDetail(stderr: string, code: number | null, signal: NodeJS.Signals | null): string {
+  const trimmed = stderr.replace(/\s+/g, ' ').trim();
+  const suffixParts = [
+    code !== null ? `exit code ${code}` : undefined,
+    signal ? `signal ${signal}` : undefined
+  ].filter(Boolean);
+  const suffix = suffixParts.length > 0 ? ` (${suffixParts.join(', ')})` : '';
+  if (!trimmed) {
+    return `Native backend process exited unexpectedly${suffix}.`;
+  }
+  const excerpt = trimmed.length > 240 ? `${trimmed.slice(0, 240)}...` : trimmed;
+  return `Native backend process exited unexpectedly${suffix}: ${excerpt}`;
 }

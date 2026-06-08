@@ -347,6 +347,19 @@ button:disabled {
   animation: workingPulse 1.1s ease-out infinite, stepBeacon 1.1s ease-out infinite;
 }
 
+.workflowStep.failed {
+  border-color: rgba(255, 141, 122, 0.34);
+  background: linear-gradient(180deg, rgba(255, 141, 122, 0.14), rgba(255, 141, 122, 0.08));
+  color: var(--tt-text-strong);
+  box-shadow: inset 0 0 0 1px rgba(255, 141, 122, 0.12);
+}
+
+.workflowStep.failed .workflowStepDot {
+  background: var(--tt-status-error);
+  box-shadow: none;
+  animation: none;
+}
+
 .workspaceLayout {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);

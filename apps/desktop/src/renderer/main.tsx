@@ -470,6 +470,7 @@ function App(): JSX.Element {
   const isTranscribing = runningAction === 'transcribe' || Boolean(job && transcribingStages.includes(job.stage));
   const isTranslating = runningAction === 'translate' || job?.stage === 'translating';
   const runningStep = isTranscribing ? 'asr' : isTranslating ? 'translate' : undefined;
+  const failedStep = job?.stage === 'failed' ? job.step : undefined;
   const appWorking = busy || checkingRuntime || Boolean(checkingProvider) || jobIsRunning;
   const hasRecognizedSubtitles = Boolean(job?.subtitleDocument?.segments.length);
   const translationComplete = hasRecognizedSubtitles && translatedCount === segments.length && segments.length > 0;
@@ -625,7 +626,8 @@ function App(): JSX.Element {
                     'workflowStep',
                     index < currentStepIndex ? 'done' : '',
                     index === currentStepIndex ? 'active' : '',
-                    runningStep === step ? 'running' : ''
+                    runningStep === step ? 'running' : '',
+                    failedStep === step ? 'failed' : ''
                   ]
                     .filter(Boolean)
                     .join(' ')
