@@ -1112,10 +1112,18 @@ function App(): JSX.Element {
       )}
 
       <footer className="systemStrip">
-        <span>
-          {t('progress')}: {completion}%
-        </span>
-        <span title={message}>{message}</span>
+        <div className="systemProgress">
+          <span className={appWorking ? 'systemPulse active' : 'systemPulse'} />
+          <div className="systemProgressCopy">
+            <strong>
+              {t('progress')} {completion}%
+            </strong>
+            <span title={message}>{message}</span>
+          </div>
+          <div className="systemMiniTrack" aria-hidden="true">
+            <span style={{ width: `${completion}%` }} />
+          </div>
+        </div>
         <div className="systemActions">
           {canForceStop && (
             <button className="textButton" onClick={() => void forceStop()}>

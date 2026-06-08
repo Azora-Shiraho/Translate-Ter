@@ -145,7 +145,7 @@ button:disabled {
   height: 100vh;
   min-width: 0;
   overflow: hidden;
-  grid-template-rows: 60px minmax(0, 1fr) 38px;
+  grid-template-rows: 60px minmax(0, 1fr) 52px;
   background:
     radial-gradient(circle at top left, rgba(77, 163, 255, 0.12), transparent 28%),
     var(--tt-surface-app);
@@ -1113,6 +1113,74 @@ input[type='checkbox'] {
   font-size: 12px;
 }
 
+.systemProgress {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) minmax(120px, 220px);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: min(760px, 100%);
+  min-height: 34px;
+  border: 1px solid var(--tt-border-soft);
+  border-radius: var(--tt-radius-pill);
+  padding: 4px 10px;
+  background: var(--tt-surface-panel-soft);
+}
+
+.systemPulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tt-border-strong);
+}
+
+.systemPulse.active {
+  background: var(--tt-accent);
+  animation: workingPulse 1.1s ease-out infinite;
+}
+
+.systemProgressCopy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.systemProgressCopy strong,
+.systemProgressCopy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemProgressCopy strong {
+  color: var(--tt-text-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.systemMiniTrack {
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--tt-radius-pill);
+  background: var(--tt-track);
+}
+
+.systemMiniTrack span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--tt-accent), var(--tt-accent-strong));
+}
+
+.appShell.isWorking .systemMiniTrack span {
+  background:
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.28) 0 8px, transparent 8px 16px),
+    linear-gradient(90deg, var(--tt-accent), var(--tt-accent-strong));
+  background-blend-mode: screen;
+  background-size: 24px 24px, 100% 100%;
+  animation: progressFlow 760ms linear infinite;
+}
+
 .toastStack {
   position: fixed;
   left: 18px;
@@ -1518,5 +1586,15 @@ input[type='checkbox'] {
     flex-direction: column;
     gap: 6px;
     padding: 8px 12px;
+  }
+
+  .systemProgress {
+    width: 100%;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .systemMiniTrack {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 }
