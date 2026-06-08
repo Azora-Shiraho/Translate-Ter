@@ -150,7 +150,7 @@ function registerIpc(): void {
       const runtime = await whisperAssets.ensureRuntime({
         modelId: settings.whisperModelId,
         allowDownload: settings.allowWhisperAssetDownload,
-        preferCuda: false,
+        preferCuda: settings.localWhisperUseCuda,
         downloadScope: 'runtime'
       });
       return {
