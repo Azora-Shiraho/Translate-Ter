@@ -90,6 +90,7 @@ export type WhisperRuntimeRequest = {
   modelId: string;
   allowDownload: boolean;
   preferCuda: boolean;
+  downloadScope?: 'all' | 'runtime' | 'cuda-runtime' | 'model' | 'none';
 };
 
 export type WhisperRuntimeStatus = {

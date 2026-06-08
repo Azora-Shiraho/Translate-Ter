@@ -194,7 +194,7 @@ function App(): JSX.Element {
     setModels(await window.translateTer.assets.listWhisperModels());
   }
 
-  async function checkRuntime(): Promise<void> {
+  async function checkCudaRuntime(): Promise<void> {
     if (!settings) return;
     setCheckingRuntime(true);
     setRuntimeActivity(t('runtimeChecking'));
@@ -203,12 +203,41 @@ function App(): JSX.Element {
       const status = await window.translateTer.assets.ensureWhisperRuntime({
         modelId: settings.whisperModelId,
         allowDownload: settings.allowWhisperAssetDownload,
-        preferCuda: settings.localWhisperUseCuda
+        preferCuda: true,
+        downloadScope: 'cuda-runtime'
       });
       setRuntimeStatus(status);
-      const nextMessage = status.message ?? t(runtimeActionLabel(status.actionRequired));
+      const nextMessage = status.acceleration.cudaSupported ? t('cudaDetected') : t('cudaUnavailable');
       setRuntimeActivity(nextMessage);
-      pushStatus(nextMessage, status.actionRequired === 'none' ? 'success' : 'warning');
+      pushStatus(nextMessage, status.acceleration.cudaSupported ? 'success' : 'warning');
+      if (status.acceleration.cudaSupported && !settings.localWhisperUseCuda) {
+        await updateSettings({ localWhisperUseCuda: true });
+      }
+    } catch (error) {
+      const nextMessage = error instanceof Error ? error.message : String(error);
+      setRuntimeActivity(nextMessage);
+      pushStatus(nextMessage, 'error');
+    } finally {
+      setCheckingRuntime(false);
+    }
+  }
+
+  async function downloadSelectedModel(): Promise<void> {
+    if (!settings) return;
+    setCheckingRuntime(true);
+    setRuntimeActivity(t('runtimeDownloading'));
+    pushStatus(t('runtimeDownloading'));
+    try {
+      const status = await window.translateTer.assets.ensureWhisperRuntime({
+        modelId: settings.whisperModelId,
+        allowDownload: settings.allowWhisperAssetDownload,
+        preferCuda: settings.localWhisperUseCuda,
+        downloadScope: 'model'
+      });
+      setRuntimeStatus(status);
+      const nextMessage = status.model.verified ? t('modelReady') : (status.message ?? t('runtimeError'));
+      setRuntimeActivity(nextMessage);
+      pushStatus(nextMessage, status.model.verified ? 'success' : 'warning');
       await refreshModels();
     } catch (error) {
       const nextMessage = error instanceof Error ? error.message : String(error);
@@ -228,7 +257,11 @@ function App(): JSX.Element {
       }
       const health = await window.translateTer.settings.testProvider(providerId);
       setProviderHealth((current) => ({ ...current, [providerId]: health }));
-      pushStatus(health.message ?? t(providerStatusLabel(health.status)), health.ok ? 'success' : 'warning');
+      const healthMessage =
+        providerId === 'local.whisper.cpp' && !health.ok
+          ? t('downloadWhisperPrompt')
+          : health.message ?? t(providerStatusLabel(health.status));
+      pushStatus(healthMessage, health.ok ? 'success' : 'warning');
     } catch (error) {
       pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
@@ -839,18 +872,38 @@ function App(): JSX.Element {
                         ))}
                       </select>
                     </label>
+                    <div className="modelCard accentCard">
+                      <div>
+                        <span className={supportsCuda ? 'signal good' : 'signal'} />
+                        <strong>{t('cudaAcceleration')}</strong>
+                        <small>{supportsCuda ? t('cudaDetected') : t('cudaUnavailable')}</small>
+                      </div>
+                      <button
+                        className="secondary compact"
+                        disabled={checkingRuntime || !settings.allowWhisperAssetDownload}
+                        onClick={() => void checkCudaRuntime()}
+                      >
+                        <HardDriveDownload size={16} />
+                        {checkingRuntime ? t('checking') : t('checkCudaRuntime')}
+                      </button>
+                      <ToggleField
+                        label={t('useCudaAcceleration')}
+                        detail={t('useCudaAccelerationDetail')}
+                        checked={settings.localWhisperUseCuda}
+                        disabled={!supportsCuda}
+                        onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
+                      />
+                      {runtimeStatus?.acceleration.fallbackReason && (
+                        <p title={runtimeStatus.acceleration.fallbackReason}>
+                          {runtimeStatus.acceleration.fallbackReason}
+                        </p>
+                      )}
+                    </div>
                     <ToggleField
                       label={t('allowWhisperDownloads')}
                       detail={t('allowWhisperDownloadsDetail')}
                       checked={settings.allowWhisperAssetDownload}
                       onChange={(checked) => void updateSettings({ allowWhisperAssetDownload: checked })}
-                    />
-                    <ToggleField
-                      label={t('cudaAcceleration')}
-                      detail={supportsCuda ? t('cudaDetected') : t('cudaUnavailable')}
-                      checked={settings.localWhisperUseCuda}
-                      disabled={!supportsCuda}
-                      onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
                     />
                     <div className="modelCard">
                       <div>
@@ -858,21 +911,21 @@ function App(): JSX.Element {
                         <strong>{selectedModel?.displayName ?? t('whisperModel')}</strong>
                         <small>{selectedModel ? formatBytes(selectedModel.sizeBytes) : t('missing')}</small>
                       </div>
-                      <button
-                        className="secondary compact"
-                        disabled={checkingRuntime}
-                        onClick={() => void checkRuntime()}
-                      >
-                        <HardDriveDownload size={16} />
-                        {checkingRuntime ? t('checking') : t('checkRuntime')}
-                      </button>
+                      {!selectedModel?.installed && (
+                        <button
+                          className="secondary compact"
+                          disabled={checkingRuntime || !settings.allowWhisperAssetDownload}
+                          onClick={() => void downloadSelectedModel()}
+                        >
+                          <HardDriveDownload size={16} />
+                          {checkingRuntime ? t('checking') : t('downloadModel')}
+                        </button>
+                      )}
                       {runtimeStatus && (
                         <p title={runtimeStatus.acceleration.fallbackReason}>
                           {t(runtimeActionLabel(runtimeStatus.actionRequired))}
                           {' · '}
-                          {runtimeStatus.acceleration.selected.toUpperCase()}
-                          {' · '}
-                          {t('runtimeVariant')}: {runtimeStatus.acceleration.runtimeVariant.toUpperCase()}
+                          {t('runtimeModel')}: {runtimeStatus.model.verified ? t('installed') : t('missing')}
                         </p>
                       )}
                       {runtimeActivity && <p title={runtimeActivity}>{runtimeActivity}</p>}

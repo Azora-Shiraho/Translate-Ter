@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { access, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { AssetEvent, WhisperModelInfo, WhisperRuntimeRequest, WhisperRuntimeStatus } from '@shared/models';
 
 const NVIDIA_CUDA_REDIST_BASE_URL = 'https://developer.download.nvidia.com/compute/cuda/redist/';
@@ -69,9 +69,16 @@ export class WhisperAssetManager extends EventEmitter {
     await this.migrateLegacyCacheIfNeeded();
     const manifest = await this.manifest();
     const model = manifest.models.find((item) => item.id === request.modelId) ?? manifest.models[0];
+    const downloadScope = request.downloadScope ?? 'all';
+    const canDownloadRuntime =
+      request.allowDownload && (downloadScope === 'all' || downloadScope === 'runtime');
+    const canDownloadCudaRuntime =
+      request.allowDownload &&
+      (downloadScope === 'all' || downloadScope === 'runtime' || downloadScope === 'cuda-runtime');
+    const canDownloadModel = request.allowDownload && (downloadScope === 'all' || downloadScope === 'model');
     const cudaHardwareSupported = detectCudaHardwareSupport();
     let cudaSupported = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest));
-    if (request.preferCuda && cudaHardwareSupported && !cudaSupported && request.allowDownload) {
+    if (request.preferCuda && cudaHardwareSupported && !cudaSupported && canDownloadCudaRuntime) {
       await this.ensureWindowsCudaRuntimeDependencies(manifest);
       cudaSupported = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest));
     }
@@ -121,12 +128,18 @@ export class WhisperAssetManager extends EventEmitter {
       );
     }
 
-    const binaryPath = join(this.cacheDir(), runtime.binary);
+    const managedBinaryPath = join(this.cacheDir(), runtime.binary);
+    const systemBinaryPath = await this.findSystemWhisperBinary(runtime.binary);
+    const binaryPath = systemBinaryPath ?? managedBinaryPath;
     const modelPath = join(this.cacheDir(), model.path);
     const hashesPinned = isPinnedSha256(runtime.sha256) && isPinnedSha256(model.sha256);
     const binaryExists = await this.exists(binaryPath);
     const modelExists = await this.exists(modelPath);
-    const binaryVerified = hashesPinned && binaryExists ? await this.verifyRuntime(binaryPath, runtime.url, runtime.sha256) : false;
+    const binaryVerified = systemBinaryPath
+      ? true
+      : hashesPinned && binaryExists
+        ? await this.verifyRuntime(binaryPath, runtime.url, runtime.sha256)
+        : false;
     const modelVerified = hashesPinned && modelExists ? await this.verifySha256(modelPath, model.sha256) : false;
 
     if (!hashesPinned) {
@@ -150,19 +163,25 @@ export class WhisperAssetManager extends EventEmitter {
       );
     }
 
-    if (request.allowDownload && (!binaryVerified || !modelVerified)) {
-      if (!binaryVerified) await this.downloadAndInstall('runtime', runtime.url, binaryPath, runtime.sha256);
-      if (!modelVerified) await this.downloadAndInstall('model', model.url, modelPath, model.sha256);
+    if (!binaryVerified && canDownloadRuntime) {
+      await this.downloadAndInstall('runtime', runtime.url, managedBinaryPath, runtime.sha256);
+    }
+    if (!modelVerified && canDownloadModel) {
+      await this.downloadAndInstall('model', model.url, modelPath, model.sha256);
     }
 
-    const resolvedBinaryInstalled = await this.exists(binaryPath);
+    const resolvedSystemBinaryPath = systemBinaryPath ?? (await this.findSystemWhisperBinary(runtime.binary));
+    const resolvedBinaryPath = resolvedSystemBinaryPath ?? managedBinaryPath;
+    const resolvedBinaryInstalled = await this.exists(resolvedBinaryPath);
     const resolvedModelInstalled = await this.exists(modelPath);
-    const resolvedBinaryVerified = await this.verifyRuntime(binaryPath, runtime.url, runtime.sha256);
+    const resolvedBinaryVerified = resolvedSystemBinaryPath
+      ? true
+      : await this.verifyRuntime(resolvedBinaryPath, runtime.url, runtime.sha256);
     const resolvedModelVerified = await this.verifyIfPresent(modelPath, model.sha256);
 
     return this.status(
       platformKey,
-      runtime.binary,
+      resolvedBinaryPath,
       model.path,
       model.id,
       runtime.acceleration,
@@ -175,7 +194,12 @@ export class WhisperAssetManager extends EventEmitter {
       resolvedModelVerified,
       {
         actionRequired: !resolvedBinaryVerified ? 'download-runtime' : !resolvedModelVerified ? 'download-model' : 'none',
-        message: resolvedBinaryVerified && resolvedModelVerified ? 'whisper.cpp runtime is ready.' : 'Runtime or model is missing.'
+        message:
+          resolvedBinaryVerified && resolvedModelVerified
+            ? 'whisper.cpp runtime is ready.'
+            : !resolvedBinaryVerified
+              ? 'whisper.cpp binary is missing or cannot run. Download whisper runtime before testing local transcription.'
+              : 'Selected whisper model is missing. Download the model before transcription.'
       }
     );
   }
@@ -326,7 +350,7 @@ export class WhisperAssetManager extends EventEmitter {
       platformKey,
       cacheDir: this.cacheDir(),
       binary: {
-        expectedPath: join(this.cacheDir(), runtimeBinary),
+        expectedPath: isAbsolute(runtimeBinary) ? runtimeBinary : join(this.cacheDir(), runtimeBinary),
         installed: binaryInstalled,
         verified: binaryVerified
       },
@@ -401,6 +425,24 @@ export class WhisperAssetManager extends EventEmitter {
     } catch {
       return false;
     }
+  }
+
+  private async findSystemWhisperBinary(manifestBinaryPath: string): Promise<string | undefined> {
+    const names = new Set([
+      basename(manifestBinaryPath),
+      process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli'
+    ]);
+    const candidates = String(process.env.PATH ?? '')
+      .split(delimiter)
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .flatMap((root) => [...names].map((name) => join(root, name)));
+
+    for (const candidate of candidates) {
+      if (!existsSync(candidate)) continue;
+      if (canRunWhisperBinary(candidate)) return candidate;
+    }
+    return undefined;
   }
 
   private async verifyIfPresent(path: string, sha256: string): Promise<boolean> {
@@ -623,6 +665,15 @@ function hasWindowsCudaRuntime(extraSearchRoots: string[] = []): boolean {
   ].filter((entry): entry is string => Boolean(entry));
 
   return WINDOWS_CUBLAS_DLLS.every((dllName) => searchRoots.some((root) => existsSync(join(root, dllName))));
+}
+
+function canRunWhisperBinary(path: string): boolean {
+  const probe = spawnSync(path, ['--help'], {
+    windowsHide: true,
+    stdio: 'ignore',
+    timeout: 5_000
+  });
+  return probe.status === 0;
 }
 
 async function findFilesByName(root: string, names: string[]): Promise<Map<string, string>> {
