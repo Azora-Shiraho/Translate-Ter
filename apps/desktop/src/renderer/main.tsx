@@ -507,6 +507,13 @@ function App(): JSX.Element {
       {activeView === 'workspace' ? (
         <section className="viewFrame workspaceFrame">
           <nav className="workflowRail">
+            <button
+              className="summaryToggle"
+              title={statsCollapsed ? t('expandSummary') : t('collapseSummary')}
+              onClick={() => setStatsCollapsed((current) => !current)}
+            >
+              {statsCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            </button>
             {steps.map((step, index) => (
               <span
                 className={
@@ -530,15 +537,8 @@ function App(): JSX.Element {
               exportDockVisible ? ' exportVisible' : ''
             }`}
           >
-            <aside className={`statsRail${statsCollapsed ? ' collapsed' : ''}`}>
-              <button
-                className="railToggle"
-                title={statsCollapsed ? t('expandSummary') : t('collapseSummary')}
-                onClick={() => setStatsCollapsed((current) => !current)}
-              >
-                {statsCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-              </button>
-              {!statsCollapsed && (
+            {!statsCollapsed && (
+              <aside className="statsRail">
                 <div className="railContent">
                   <div className="railHeader">
                     <strong>{t('workflowSummary')}</strong>
@@ -579,16 +579,20 @@ function App(): JSX.Element {
                     </div>
                   </div>
                 </div>
-              )}
-            </aside>
+              </aside>
+            )}
 
             <section className="workspaceMain">
               <section className="jobOverview" aria-label={t('currentJob')}>
-                <div className="jobOverviewMain">
-                  <div className="jobTitleBlock">
+                <div className="jobOverviewGrid">
+                  <div className="jobMediaCard">
+                    <span className="fieldLabel">{t('mediaFile')}</span>
                     <strong title={jobTitle}>{jobTitle}</strong>
+                    <small title={selectedMediaPath}>{selectedMediaPath || t('placeholderPath')}</small>
                   </div>
-                  <div className="jobPrimaryActions">
+
+                  <div className="jobActionCard">
+                    <span className="fieldLabel">{t('currentJob')}</span>
                     <button className="secondary" onClick={() => void pickMedia()}>
                       <FileVideo size={16} />
                       {t('chooseMedia')}
@@ -610,16 +614,20 @@ function App(): JSX.Element {
                       {t('translateSubtitles')}
                     </button>
                   </div>
-                </div>
-                <div className={`track${appWorking ? ' active' : ''}`}>
-                  <span style={{ width: `${completion}%` }} />
-                </div>
-                {appWorking && <WorkingRibbon message={workingMessage} />}
-                <div className="jobOverviewFooter">
-                  <div className="heroField mediaSummary">
-                    <span className="fieldLabel">{t('mediaFile')}</span>
-                    <strong title={jobTitle}>{jobTitle}</strong>
-                    <small title={selectedMediaPath}>{selectedMediaPath || t('placeholderPath')}</small>
+
+                  <div className="jobProgressCard">
+                    <div className="progressHeader">
+                      <span className="stageBadge">{t(stageLabel(job?.stage ?? 'idle'))}</span>
+                      <strong>{completion}%</strong>
+                    </div>
+                    <div className={`track${appWorking ? ' active' : ''}`}>
+                      <span style={{ width: `${completion}%` }} />
+                    </div>
+                    {appWorking ? (
+                      <WorkingRibbon message={workingMessage} />
+                    ) : (
+                      <small title={message}>{message}</small>
+                    )}
                   </div>
                 </div>
               </section>
@@ -719,42 +727,51 @@ function App(): JSX.Element {
                     </h3>
                   </div>
                 </div>
-                <div className="segmented">
-                  {[
-                    ['translated', t('translatedOnly')],
-                    ['source', t('sourceOnly')],
-                    ['bilingual', t('bilingual')]
-                  ].map(([value, label]) => (
-                    <button
-                      className={exportVariant === value ? 'selected' : ''}
-                      key={value}
-                      onClick={() => setExportVariant(value as ExportVariant)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {exportVariant === 'bilingual' && (
-                  <div className="segmented two">
+                <div className="exportGroup">
+                  <span className="fieldLabel">{t('export')}</span>
+                  <div className="segmented">
                     {[
-                      ['source-first', t('sourceFirst')],
-                      ['target-first', t('targetFirst')]
+                      ['translated', t('translatedOnly')],
+                      ['source', t('sourceOnly')],
+                      ['bilingual', t('bilingual')]
                     ].map(([value, label]) => (
                       <button
-                        className={bilingualOrder === value ? 'selected' : ''}
+                        className={exportVariant === value ? 'selected' : ''}
                         key={value}
-                        onClick={() => setBilingualOrder(value as BilingualOrder)}
+                        onClick={() => setExportVariant(value as ExportVariant)}
                       >
                         {label}
                       </button>
                     ))}
                   </div>
+                </div>
+                {exportVariant === 'bilingual' && (
+                  <div className="exportGroup">
+                    <span className="fieldLabel">{t('bilingual')}</span>
+                    <div className="segmented two">
+                      {[
+                        ['source-first', t('sourceFirst')],
+                        ['target-first', t('targetFirst')]
+                      ].map(([value, label]) => (
+                        <button
+                          className={bilingualOrder === value ? 'selected' : ''}
+                          key={value}
+                          onClick={() => setBilingualOrder(value as BilingualOrder)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
-                <input
-                  value={exportPath}
-                  placeholder={t('exportPath')}
-                  onChange={(event) => setExportPath(event.target.value)}
-                />
+                <label className="exportGroup">
+                  {t('exportPath')}
+                  <input
+                    value={exportPath}
+                    placeholder={t('exportPath')}
+                    onChange={(event) => setExportPath(event.target.value)}
+                  />
+                </label>
                 <button
                   className="primary wideButton"
                   disabled={busy || !job?.subtitleDocument || !exportPath.trim()}
