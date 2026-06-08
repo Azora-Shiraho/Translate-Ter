@@ -109,7 +109,7 @@ function registerIpc(): void {
       await whisperAssets.ensureRuntime({
         modelId: settings.whisperModelId,
         allowDownload: true,
-        preferCuda: false,
+        preferCuda: settings.localWhisperUseCuda,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'runtime'
       });
