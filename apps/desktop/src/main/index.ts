@@ -155,9 +155,11 @@ function registerIpc(): void {
       });
       return {
         providerId,
-        ok: runtime.actionRequired === 'none',
-        status: runtime.actionRequired === 'none' ? 'healthy' : 'degraded',
-        message: runtime.message
+        ok: runtime.binary.verified,
+        status: runtime.binary.verified ? 'healthy' : 'degraded',
+        message: runtime.binary.verified
+          ? 'whisper.cpp runtime is ready.'
+          : (runtime.message ?? 'whisper.cpp binary is missing or cannot run.')
       };
     }
 

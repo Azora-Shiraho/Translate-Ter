@@ -62,104 +62,129 @@ export class JobManager extends EventEmitter {
 
   async start(jobId: string): Promise<void> {
     const job = this.get(jobId);
-    await this.setProgress(job, 'checking-runtime', 8, 'Checking ASR runtime.');
-    const nativeHealth = await this.nativeBackend.health();
-    if (this.isCancelled(job.id)) return;
-    if (!nativeHealth.capabilities.includes('asr.transcribe')) {
-      job.warnings.push({
-        code: 'NativeCapabilityUnavailable',
-        message: 'Native backend does not currently advertise asr.transcribe.'
-      });
-    }
-
-    const isLocalWhisper = job.asrProviderId === 'local.whisper.cpp';
-    const runtime = isLocalWhisper
-      ? await this.whisperAssets.ensureRuntime({
-          modelId: job.whisperModelId,
-          allowDownload: job.allowWhisperAssetDownload,
-          preferCuda: job.localWhisperUseCuda
-        })
-      : undefined;
-    if (this.isCancelled(job.id)) return;
-
-    if (runtime?.actionRequired && runtime.actionRequired !== 'none') {
-      job.warnings.push({
-        code: runtime.actionRequired,
-        message: runtime.message ?? 'Local runtime needs setup before real transcription.'
-      });
-      this.fail(
-        job,
-        runtimeActionToErrorCode(runtime.actionRequired),
-        runtime.message ?? 'Local runtime needs setup before real transcription.',
-        runtime.actionRequired !== 'manifest-not-configured'
-      );
-      return;
-    }
-
-    await this.setProgress(job, 'probing', 18, 'Probing media.');
-    const probe = await this.nativeBackend.probeMedia({ mediaPath: job.mediaPath });
-    if (this.isCancelled(job.id)) return;
-    if (!probe.ok) {
-      this.fail(job, probe.error?.code ?? 'ProbeFailed', probe.error?.message ?? 'Native backend failed to probe media.', true);
-      return;
-    }
-
-    await this.setProgress(job, 'extracting-audio', 38, 'Extracting audio.');
-    const extraction = await this.nativeBackend.extractAudio({
-      mediaPath: job.mediaPath
-    });
-    if (this.isCancelled(job.id)) return;
-    if (!extraction.ok) {
-      this.fail(job, extraction.error?.code ?? 'AudioExtractFailed', extraction.error?.message ?? 'Native backend failed to extract audio.', true);
-      return;
-    }
-
-    await this.setProgress(job, 'transcribing', 72, 'Transcribing through native backend.');
-
-    if (job.asrProviderId === 'cloud.openai') {
-      const cloudDocument = await this.transcribeWithCloudAsr(job, extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path);
+    try {
+      await this.setProgress(job, 'checking-runtime', 8, 'Checking ASR runtime.');
+      const nativeHealth = await this.nativeBackend.health();
       if (this.isCancelled(job.id)) return;
-      if (!cloudDocument) return;
-      job.subtitleDocument = normalizeDocumentForSubtitleDisplay(cloudDocument);
+      if (!nativeHealth.capabilities.includes('asr.transcribe')) {
+        job.warnings.push({
+          code: 'NativeCapabilityUnavailable',
+          message: 'Native backend does not currently advertise asr.transcribe.'
+        });
+      }
+
+      const isLocalWhisper = job.asrProviderId === 'local.whisper.cpp';
+      const runtime = isLocalWhisper
+        ? await this.whisperAssets.ensureRuntime({
+            modelId: job.whisperModelId,
+            allowDownload: false,
+            preferCuda: job.localWhisperUseCuda,
+            downloadScope: 'none'
+          })
+        : undefined;
+      if (this.isCancelled(job.id)) return;
+
+      if (runtime?.actionRequired && runtime.actionRequired !== 'none') {
+        job.warnings.push({
+          code: runtime.actionRequired,
+          message: runtime.message ?? 'Local runtime needs setup before real transcription.'
+        });
+        this.fail(
+          job,
+          runtimeActionToErrorCode(runtime.actionRequired),
+          runtime.message ?? 'Local runtime needs setup before real transcription.',
+          runtime.actionRequired !== 'manifest-not-configured'
+        );
+        return;
+      }
+
+      await this.setProgress(job, 'probing', 18, 'Probing media.');
+      const probe = await this.nativeBackend.probeMedia({ mediaPath: job.mediaPath });
+      if (this.isCancelled(job.id)) return;
+      if (!probe.ok) {
+        this.fail(
+          job,
+          probe.error?.code ?? 'ProbeFailed',
+          probe.error?.message ?? 'Native backend failed to probe media.',
+          true
+        );
+        return;
+      }
+
+      await this.setProgress(job, 'extracting-audio', 38, 'Extracting audio.');
+      const extraction = await this.nativeBackend.extractAudio({
+        mediaPath: job.mediaPath
+      });
+      if (this.isCancelled(job.id)) return;
+      if (!extraction.ok) {
+        this.fail(
+          job,
+          extraction.error?.code ?? 'AudioExtractFailed',
+          extraction.error?.message ?? 'Native backend failed to extract audio.',
+          true
+        );
+        return;
+      }
+
+      await this.setProgress(job, 'transcribing', 72, 'Transcribing through native backend.');
+
+      if (job.asrProviderId === 'cloud.openai') {
+        const cloudDocument = await this.transcribeWithCloudAsr(
+          job,
+          extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path
+        );
+        if (this.isCancelled(job.id)) return;
+        if (!cloudDocument) return;
+        job.subtitleDocument = normalizeDocumentForSubtitleDisplay(cloudDocument);
+        job.step = 'subtitles';
+        await this.setProgress(job, 'completed', 100, 'Cloud transcription complete.');
+        return;
+      }
+
+      const response = await this.nativeBackend.transcribe({
+        jobId: job.id,
+        mediaPath: job.mediaPath,
+        audioPath: extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path,
+        modelId: job.whisperModelId,
+        sourceLanguage: job.sourceLanguage,
+        targetLanguage: job.targetLanguage,
+        asrProviderId: job.asrProviderId,
+        preferCuda: job.localWhisperUseCuda,
+        runtime: runtime
+          ? {
+              binaryPath: runtime.binary.expectedPath,
+              modelPath: runtime.model.expectedPath
+            }
+          : undefined
+      });
+      if (this.isCancelled(job.id)) return;
+
+      if (!response.ok) {
+        this.fail(
+          job,
+          response.error?.code ?? 'NativeBackendError',
+          response.error?.message ?? 'Native backend failed.',
+          Boolean(response.error?.retryable)
+        );
+        return;
+      }
+
+      const document = nativePayloadToDocument(response.payload, job);
+      if (this.isCancelled(job.id)) return;
+      if (!document) {
+        this.fail(job, 'MalformedNativeResponse', 'Native backend did not return a subtitle document.', true);
+        return;
+      }
+
+      job.subtitleDocument = normalizeDocumentForSubtitleDisplay(document);
       job.step = 'subtitles';
-      await this.setProgress(job, 'completed', 100, 'Cloud transcription complete.');
-      return;
+      this.cancelledJobs.delete(job.id);
+      await this.setProgress(job, 'completed', 100, 'Transcription complete.');
+    } catch (error) {
+      if (this.isCancelled(job.id)) return;
+      const message = error instanceof Error ? error.message : String(error);
+      this.fail(job, 'DownloadRequired', message, true);
     }
-
-    const response = await this.nativeBackend.transcribe({
-      jobId: job.id,
-      mediaPath: job.mediaPath,
-      audioPath: extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path,
-      modelId: job.whisperModelId,
-      sourceLanguage: job.sourceLanguage,
-      targetLanguage: job.targetLanguage,
-      asrProviderId: job.asrProviderId,
-      preferCuda: job.localWhisperUseCuda,
-      runtime: runtime
-        ? {
-            binaryPath: runtime.binary.expectedPath,
-            modelPath: runtime.model.expectedPath
-          }
-        : undefined
-    });
-    if (this.isCancelled(job.id)) return;
-
-    if (!response.ok) {
-      this.fail(job, response.error?.code ?? 'NativeBackendError', response.error?.message ?? 'Native backend failed.', Boolean(response.error?.retryable));
-      return;
-    }
-
-    const document = nativePayloadToDocument(response.payload, job);
-    if (this.isCancelled(job.id)) return;
-    if (!document) {
-      this.fail(job, 'MalformedNativeResponse', 'Native backend did not return a subtitle document.', true);
-      return;
-    }
-
-    job.subtitleDocument = normalizeDocumentForSubtitleDisplay(document);
-    job.step = 'subtitles';
-    this.cancelledJobs.delete(job.id);
-    await this.setProgress(job, 'completed', 100, 'Transcription complete.');
   }
 
   async translate(jobId: string): Promise<JobSnapshot> {
