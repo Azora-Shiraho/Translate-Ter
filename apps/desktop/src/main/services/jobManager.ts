@@ -215,7 +215,11 @@ export class JobManager extends EventEmitter {
       targetLanguage: job.targetLanguage,
       providerPriority: job.translationProviderPriority,
       batchSize: job.translationLinesPerRequest,
-      batchStride: job.translationBatchStride
+      batchStride: job.translationBatchStride,
+      onProgress: ({ completedBatches, totalBatches }) => {
+        const progress = 35 + Math.round((completedBatches / Math.max(1, totalBatches)) * 60);
+        void this.setProgress(job, 'translating', Math.min(95, progress), `Translating ${completedBatches}/${totalBatches} batches.`);
+      }
     });
     job.subtitleDocument = normalizeDocumentForSubtitleDisplay(result.document);
     job.step = 'export';

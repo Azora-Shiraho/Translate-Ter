@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AppSettingsPatch,
   AppSettingsPublic,
+  ExportVariant,
   CreateJobRequest,
   JobEvent,
   JobSnapshot,
@@ -18,6 +19,7 @@ import type {
 
 const api = {
   selectVideo: () => ipcRenderer.invoke('selectVideo') as Promise<string | undefined>,
+  selectDirectory: () => ipcRenderer.invoke('selectDirectory') as Promise<string | undefined>,
   startTranscription: (input: CreateJobRequest) =>
     ipcRenderer.invoke('startTranscription', input) as Promise<JobSnapshot>,
   startTranslation: (jobId: string) => ipcRenderer.invoke('startTranslation', jobId) as Promise<JobSnapshot>,
@@ -27,6 +29,8 @@ const api = {
     variant: 'source' | 'translated' | 'bilingual',
     bilingualOrder: 'source-first' | 'target-first'
   ) => ipcRenderer.invoke('exportSrt', { document, path, variant, bilingualOrder }) as Promise<void>,
+  exportConfiguredSrt: (document: SubtitleDocument, mediaPath: string, variant: ExportVariant) =>
+    ipcRenderer.invoke('exportConfiguredSrt', { document, mediaPath, variant }) as Promise<{ path?: string; cancelled: boolean }>,
   getSettings: () => ipcRenderer.invoke('getSettings') as Promise<AppSettingsPublic>,
   saveSettings: (patch: AppSettingsPatch) => ipcRenderer.invoke('saveSettings', patch) as Promise<AppSettingsPublic>,
   desktop: {

@@ -47,6 +47,7 @@ export class TranslationScheduler {
       batchSize?: number;
       batchStride?: number;
       signal?: AbortSignal;
+      onProgress?: (progress: { completedBatches: number; totalBatches: number }) => void;
     }
   ): Promise<TranslationRunResult> {
     const orderedProviders = this.orderProviders(request.providerPriority);
@@ -73,6 +74,11 @@ export class TranslationScheduler {
       providerAttempts: []
     }));
     const output: SubtitleDocument = structuredClone(document);
+    let completedBatches = 0;
+    const reportBatchProgress = (): void => {
+      completedBatches += 1;
+      request.onProgress?.({ completedBatches, totalBatches: batches.length });
+    };
 
     await runPool(batches, this.options.concurrency, async (batch, batchIndex) => {
       const checkpoint = checkpoints[batchIndex];
@@ -150,6 +156,7 @@ export class TranslationScheduler {
           output.metadata.translationProvider = result.providerId;
           checkpoint.status = 'completed';
           breaker.recordSuccess();
+          reportBatchProgress();
           return;
         } catch (error) {
           lastError = error;
@@ -165,6 +172,7 @@ export class TranslationScheduler {
           segment.notes = [...(segment.notes ?? []), lastError instanceof Error ? lastError.message : 'Translation failed.'];
         }
       }
+      reportBatchProgress();
     });
 
     return { document: output, checkpoints };

@@ -27,6 +27,8 @@ export const i18nResources = {
       startTranscription: 'Start transcription',
       translateSubtitles: 'Translate subtitles',
       exportSrt: 'Export SRT',
+      exportSettings: 'Export settings',
+      chooseFolder: 'Choose folder',
       sourceLanguage: 'Source language',
       targetLanguage: 'Target language',
       asrProvider: 'ASR provider',
@@ -147,6 +149,11 @@ export const i18nResources = {
       noSubtitlesTitle: 'Timeline is waiting',
       noSubtitles: 'No subtitles yet. Start ASR to generate subtitle rows.',
       previewTime: '00:00 / 00:10',
+      exportDestination: {
+        'source-directory': 'Source folder',
+        'selected-directory': 'Selected folder',
+        'ask-each-time': 'Ask each time'
+      },
       stage: {
         idle: 'Idle',
         imported: 'Imported',
@@ -212,6 +219,8 @@ export const i18nResources = {
       startTranscription: '开始识别',
       translateSubtitles: '翻译字幕',
       exportSrt: '导出 SRT',
+      exportSettings: '导出设置',
+      chooseFolder: '选择文件夹',
       sourceLanguage: '源语言',
       targetLanguage: '目标语言',
       asrProvider: '识别提供方',
@@ -332,6 +341,11 @@ export const i18nResources = {
       noSubtitlesTitle: '时间线等待中',
       noSubtitles: '还没有字幕。先开始识别以生成字幕行。',
       previewTime: '00:00 / 00:10',
+      exportDestination: {
+        'source-directory': '原视频目录',
+        'selected-directory': '指定目录',
+        'ask-each-time': '每次选择'
+      },
       stage: {
         idle: '空闲',
         imported: '已导入',

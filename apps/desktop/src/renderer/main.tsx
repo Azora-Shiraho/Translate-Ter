@@ -6,7 +6,9 @@ import {
   ArrowRightLeft,
   CheckCircle2,
   Clock3,
+  Download,
   FileVideo,
+  FolderOpen,
   Gauge,
   HardDriveDownload,
   KeyRound,
@@ -26,6 +28,8 @@ import './i18n';
 import './styles.css';
 import type {
   AppSettingsPublic,
+  ExportDestinationMode,
+  ExportVariant,
   JobSnapshot,
   NativeHealth,
   ProviderHealth,
@@ -42,9 +46,8 @@ import { languageLabel, languageRegistry } from '@shared/languages';
 const steps = ['import', 'asr', 'subtitles', 'translate', 'export'] as const;
 const translationProviders = ['openai.compatible'] as const;
 
-type ExportVariant = 'source' | 'translated' | 'bilingual';
-type BilingualOrder = 'source-first' | 'target-first';
 type AppView = 'workspace' | 'settings';
+type RunningAction = 'transcribe' | 'translate' | 'export';
 type ToastTone = 'neutral' | 'warning' | 'error' | 'success';
 type ToastMessage = {
   id: string;
@@ -77,9 +80,6 @@ function App(): JSX.Element {
   const [providerSecrets, setProviderSecrets] = useState<Record<string, ProviderSecretInput>>({});
   const [job, setJob] = useState<JobSnapshot>();
   const [mediaPath, setMediaPath] = useState('');
-  const [exportPath, setExportPath] = useState('');
-  const [exportVariant, setExportVariant] = useState<ExportVariant>('translated');
-  const [bilingualOrder, setBilingualOrder] = useState<BilingualOrder>('source-first');
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>();
   const [message, setMessage] = useState(t('ready'));
   const [runtimeActivity, setRuntimeActivity] = useState<string>();
@@ -87,6 +87,8 @@ function App(): JSX.Element {
   const [activeDownload, setActiveDownload] = useState<ActiveDownload>();
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [copyBubble, setCopyBubble] = useState<string>();
+  const [runningAction, setRunningAction] = useState<RunningAction>();
+  const [exportingVariant, setExportingVariant] = useState<ExportVariant>();
   const [busy, setBusy] = useState(false);
   const [checkingRuntime, setCheckingRuntime] = useState(false);
   const [checkingProvider, setCheckingProvider] = useState<string>();
@@ -312,6 +314,7 @@ function App(): JSX.Element {
   async function createAndStart(): Promise<void> {
     if (!settings || !mediaPath.trim()) return;
     setBusy(true);
+    setRunningAction('transcribe');
     try {
       const nextJob = await window.translateTer.startTranscription({
         mediaPath: mediaPath.trim(),
@@ -333,6 +336,7 @@ function App(): JSX.Element {
     } catch (error) {
       pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
+      setRunningAction(undefined);
       setBusy(false);
     }
   }
@@ -340,26 +344,37 @@ function App(): JSX.Element {
   async function translateJob(): Promise<void> {
     if (!job) return;
     setBusy(true);
+    setRunningAction('translate');
     try {
       setJob(await window.translateTer.startTranslation(job.id));
     } catch (error) {
       pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
+      setRunningAction(undefined);
       setBusy(false);
     }
   }
 
-  async function exportSrt(): Promise<void> {
-    if (!job?.subtitleDocument || !exportPath.trim()) return;
+  async function exportSrt(variant: ExportVariant): Promise<void> {
+    if (!job?.subtitleDocument) return;
     setBusy(true);
+    setRunningAction('export');
+    setExportingVariant(variant);
     try {
-      await window.translateTer.exportSrt(job.subtitleDocument, exportPath.trim(), exportVariant, bilingualOrder);
-      pushStatus(t('exported'), 'success');
+      const result = await window.translateTer.exportConfiguredSrt(job.subtitleDocument, job.mediaPath, variant);
+      if (!result.cancelled) pushStatus(t('exported'), 'success');
     } catch (error) {
       pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
+      setExportingVariant(undefined);
+      setRunningAction(undefined);
       setBusy(false);
     }
+  }
+
+  async function pickExportDirectory(): Promise<void> {
+    const selected = await window.translateTer.selectDirectory();
+    if (selected) await updateSettings({ exportDirectory: selected, exportDestinationMode: 'selected-directory' });
   }
 
   async function updateSegment(segment: SubtitleSegment, patch: Partial<SubtitleSegment>): Promise<void> {
@@ -422,11 +437,19 @@ function App(): JSX.Element {
   const selectedMediaFileName =
     job?.fileName ?? selectedMediaPath.split(/[\\/]/).filter(Boolean).at(-1) ?? t('chooseMedia');
   const jobTitle = selectedMediaFileName;
-  const exportDockVisible = job?.step === 'export';
   const jobIsRunning = Boolean(
     job && !['idle', 'completed', 'failed', 'cancelled'].includes(job.stage)
   );
+  const transcribingStages: JobStage[] = ['checking-runtime', 'probing', 'extracting-audio', 'transcribing'];
+  const isTranscribing = runningAction === 'transcribe' || Boolean(job && transcribingStages.includes(job.stage));
+  const isTranslating = runningAction === 'translate' || job?.stage === 'translating';
+  const runningStep = isTranscribing ? 'asr' : isTranslating ? 'translate' : undefined;
   const appWorking = busy || checkingRuntime || Boolean(checkingProvider) || jobIsRunning;
+  const hasRecognizedSubtitles = Boolean(job?.subtitleDocument?.segments.length);
+  const translationComplete = hasRecognizedSubtitles && translatedCount === segments.length && segments.length > 0;
+  const canExportTranslated = hasRecognizedSubtitles && !busy;
+  const canExportSource = translationComplete && !busy;
+  const canExportBilingual = translationComplete && !busy;
   const downloadPercent =
     activeDownload?.totalBytes && activeDownload.totalBytes > 0
       ? Math.min(100, Math.round((activeDownload.receivedBytes / activeDownload.totalBytes) * 100))
@@ -518,11 +541,14 @@ function App(): JSX.Element {
             {steps.map((step, index) => (
               <span
                 className={
-                  index < currentStepIndex
-                    ? 'workflowStep done'
-                    : index === currentStepIndex
-                      ? 'workflowStep active'
-                      : 'workflowStep'
+                  [
+                    'workflowStep',
+                    index < currentStepIndex ? 'done' : '',
+                    index === currentStepIndex ? 'active' : '',
+                    runningStep === step ? 'running' : ''
+                  ]
+                    .filter(Boolean)
+                    .join(' ')
                 }
                 key={step}
               >
@@ -534,9 +560,7 @@ function App(): JSX.Element {
           </nav>
 
           <main
-            className={`workspaceLayout${statsCollapsed ? ' statsCollapsed' : ''}${
-              exportDockVisible ? ' exportVisible' : ''
-            }`}
+            className={`workspaceLayout${statsCollapsed ? ' statsCollapsed' : ''}`}
           >
             {!statsCollapsed && (
               <aside className="statsRail">
@@ -600,20 +624,32 @@ function App(): JSX.Element {
                     {t('chooseMedia')}
                   </button>
                   <button
-                    className="primary"
+                    className={hasRecognizedSubtitles ? 'secondary' : 'primary'}
                     disabled={busy || !mediaPath.trim()}
                     onClick={() => void createAndStart()}
                   >
-                    <Play size={16} />
-                    {t('startTranscription')}
+                    {runningAction === 'transcribe' ? (
+                      <InlineDots />
+                    ) : (
+                      <>
+                        <Play size={16} />
+                        {t('startTranscription')}
+                      </>
+                    )}
                   </button>
                   <button
-                    className="secondary"
+                    className={hasRecognizedSubtitles && !translationComplete ? 'primary' : 'secondary'}
                     disabled={busy || !job?.subtitleDocument}
                     onClick={() => void translateJob()}
                   >
-                    <Languages size={16} />
-                    {t('translateSubtitles')}
+                    {runningAction === 'translate' ? (
+                      <InlineDots />
+                    ) : (
+                      <>
+                        <Languages size={16} />
+                        {t('translateSubtitles')}
+                      </>
+                    )}
                   </button>
                 </div>
               </section>
@@ -718,72 +754,6 @@ function App(): JSX.Element {
                 )}
               </section>
             </section>
-
-            <aside className="exportDock">
-              <section className="exportPanel">
-                <div className="panelHeader exportHeader">
-                  <div>
-                    <h3>
-                      <Save size={16} />
-                      {t('export')}
-                    </h3>
-                  </div>
-                </div>
-                <div className="exportGroup">
-                  <span className="fieldLabel">{t('export')}</span>
-                  <div className="segmented">
-                    {[
-                      ['translated', t('translatedOnly')],
-                      ['source', t('sourceOnly')],
-                      ['bilingual', t('bilingual')]
-                    ].map(([value, label]) => (
-                      <button
-                        className={exportVariant === value ? 'selected' : ''}
-                        key={value}
-                        onClick={() => setExportVariant(value as ExportVariant)}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {exportVariant === 'bilingual' && (
-                  <div className="exportGroup">
-                    <span className="fieldLabel">{t('bilingual')}</span>
-                    <div className="segmented two">
-                      {[
-                        ['source-first', t('sourceFirst')],
-                        ['target-first', t('targetFirst')]
-                      ].map(([value, label]) => (
-                        <button
-                          className={bilingualOrder === value ? 'selected' : ''}
-                          key={value}
-                          onClick={() => setBilingualOrder(value as BilingualOrder)}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <label className="exportGroup">
-                  {t('exportPath')}
-                  <input
-                    value={exportPath}
-                    placeholder={t('exportPath')}
-                    onChange={(event) => setExportPath(event.target.value)}
-                  />
-                </label>
-                <button
-                  className="primary wideButton"
-                  disabled={busy || !job?.subtitleDocument || !exportPath.trim()}
-                  onClick={() => void exportSrt()}
-                >
-                  <Save size={16} />
-                  {t('exportSrt')}
-                </button>
-              </section>
-            </aside>
           </main>
         </section>
       ) : (
@@ -892,6 +862,39 @@ function App(): JSX.Element {
                         targetOnly
                         onChange={(value) => void updateSettings({ targetLanguage: value })}
                       />
+                    </div>
+                    <div className="settingsSubsection">
+                      <SectionTitle icon={<Download size={15} />} title={t('exportSettings')} />
+                      <div className="segmented three">
+                        {(['source-directory', 'selected-directory', 'ask-each-time'] as ExportDestinationMode[]).map(
+                          (mode) => (
+                            <button
+                              className={settings.exportDestinationMode === mode ? 'selected' : ''}
+                              key={mode}
+                              onClick={() => void updateSettings({ exportDestinationMode: mode })}
+                            >
+                              {t(exportDestinationModeLabel(mode))}
+                            </button>
+                          )
+                        )}
+                      </div>
+                      {settings.exportDestinationMode === 'selected-directory' && (
+                        <button className="secondary" onClick={() => void pickExportDirectory()}>
+                          <FolderOpen size={16} />
+                          {settings.exportDirectory || t('chooseFolder')}
+                        </button>
+                      )}
+                      <div className="segmented two">
+                        {(['source-first', 'target-first'] as const).map((order) => (
+                          <button
+                            className={settings.exportBilingualOrder === order ? 'selected' : ''}
+                            key={order}
+                            onClick={() => void updateSettings({ exportBilingualOrder: order })}
+                          >
+                            {t(order === 'source-first' ? 'sourceFirst' : 'targetFirst')}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </InspectorSection>
                 </section>
@@ -1179,6 +1182,25 @@ function App(): JSX.Element {
             <span style={{ width: `${footerProgress}%` }} />
           </div>
         </div>
+        <div className="exportActions">
+          <button
+            className="exportButton"
+            disabled={!canExportTranslated}
+            onClick={() => void exportSrt('translated')}
+          >
+            {exportingVariant === 'translated' ? <InlineDots /> : `${t('export')} ${t('translated')}`}
+          </button>
+          <button className="exportButton" disabled={!canExportSource} onClick={() => void exportSrt('source')}>
+            {exportingVariant === 'source' ? <InlineDots /> : `${t('export')} ${t('original')}`}
+          </button>
+          <button
+            className="exportButton"
+            disabled={!canExportBilingual}
+            onClick={() => void exportSrt('bilingual')}
+          >
+            {exportingVariant === 'bilingual' ? <InlineDots /> : `${t('export')} ${t('bilingual')}`}
+          </button>
+        </div>
         <div className="systemActions">
           {canForceStop && (
             <button className="textButton" onClick={() => void forceStop()}>
@@ -1207,6 +1229,16 @@ function ActivityPulse(props: { active: boolean }): JSX.Element {
       <span />
       <span />
     </div>
+  );
+}
+
+function InlineDots(): JSX.Element {
+  return (
+    <span className="inlineDots" aria-label="Working">
+      <span />
+      <span />
+      <span />
+    </span>
   );
 }
 
@@ -1448,6 +1480,10 @@ function providerStatusLabel(status: ProviderHealth['status']): string {
 
 function runtimeActionLabel(action: WhisperRuntimeStatus['actionRequired'] = 'none'): string {
   return `runtimeAction.${action}`;
+}
+
+function exportDestinationModeLabel(mode: ExportDestinationMode): string {
+  return `exportDestination.${mode}`;
 }
 
 function assetEventLabel(event: AssetEvent, t: (key: string, options?: Record<string, unknown>) => string): string {

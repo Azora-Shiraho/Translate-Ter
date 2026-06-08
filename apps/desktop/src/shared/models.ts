@@ -41,6 +41,9 @@ export type SubtitleDocument = {
 };
 
 export type WorkflowStep = 'import' | 'asr' | 'subtitles' | 'translate' | 'export';
+export type ExportDestinationMode = 'source-directory' | 'selected-directory' | 'ask-each-time';
+export type ExportVariant = 'source' | 'translated' | 'bilingual';
+export type BilingualOrder = 'source-first' | 'target-first';
 
 export type AppSettingsPublic = {
   schemaVersion: 1;
@@ -60,6 +63,9 @@ export type AppSettingsPublic = {
   translationTokenBudgetPerMinute: number;
   translationLinesPerRequest: number;
   translationBatchStride: number;
+  exportDestinationMode: ExportDestinationMode;
+  exportDirectory: string;
+  exportBilingualOrder: BilingualOrder;
 };
 
 export type AppSettingsPatch = Partial<AppSettingsPublic>;

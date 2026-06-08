@@ -1,7 +1,10 @@
 import type {
   AppSettingsPatch,
   AppSettingsPublic,
+  BilingualOrder,
   CreateJobRequest,
+  ExportDestinationMode,
+  ExportVariant,
   JobEvent,
   JobSnapshot,
   NativeHealth,
@@ -38,7 +41,10 @@ export type { SubtitleDocument, SubtitleSegment, SubtitleStatus, SubtitleWarning
 export type {
   AppSettingsPatch,
   AppSettingsPublic,
+  BilingualOrder,
   CreateJobRequest,
+  ExportDestinationMode,
+  ExportVariant,
   JobEvent,
   JobSnapshot,
   NativeHealth,

@@ -21,7 +21,10 @@ const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = 
   translationRequestsPerMinute: 60,
   translationTokenBudgetPerMinute: 60_000,
   translationLinesPerRequest: 8,
-  translationBatchStride: 4
+  translationBatchStride: 4,
+  exportDestinationMode: 'source-directory',
+  exportDirectory: '',
+  exportBilingualOrder: 'source-first'
 };
 
 export class SettingsStore {

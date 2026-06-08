@@ -1,7 +1,17 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import type { AssetEvent, CreateJobRequest, JobEvent, JobSnapshot, SubtitleDocument, SubtitleSegment } from '@shared/models';
+import { basename, dirname, extname, join } from 'node:path';
+import type {
+  AssetEvent,
+  BilingualOrder,
+  CreateJobRequest,
+  ExportVariant,
+  JobEvent,
+  JobSnapshot,
+  SubtitleDocument,
+  SubtitleSegment
+} from '@shared/models';
 import { JobManager } from './services/jobManager';
 import { NativeBackendClient } from './services/nativeBackendClient';
 import { SettingsStore } from './services/settingsStore';
@@ -81,8 +91,8 @@ function registerIpc(): void {
   async function exportSrt(payload: {
     document: SubtitleDocument;
     path: string;
-    variant: 'source' | 'translated' | 'bilingual';
-    bilingualOrder: 'source-first' | 'target-first';
+    variant: ExportVariant;
+    bilingualOrder: BilingualOrder;
   }): Promise<void> {
     const response = await nativeBackend.serializeSrt({
       segments: payload.document.segments,
@@ -95,10 +105,80 @@ function registerIpc(): void {
     await writeFile(payload.path, response.payload.srt, 'utf8');
   }
 
+  async function selectExportDirectory(): Promise<string | undefined> {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Select subtitle export folder',
+      properties: ['openDirectory', 'createDirectory']
+    });
+    return result.canceled ? undefined : result.filePaths[0];
+  }
+
+  async function exportConfiguredSrt(payload: {
+    document: SubtitleDocument;
+    mediaPath: string;
+    variant: ExportVariant;
+  }): Promise<{ path?: string; cancelled: boolean }> {
+    const settings = await settingsStore.get();
+    const path = await resolveExportPath(payload.mediaPath, payload.variant, settings);
+    if (!path) return { cancelled: true };
+
+    if (existsSync(path)) {
+      const result = await dialog.showMessageBox(mainWindow!, {
+        type: 'warning',
+        buttons: ['Overwrite', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        title: 'Overwrite subtitle file?',
+        message: 'The target subtitle file already exists.',
+        detail: path
+      });
+      if (result.response !== 0) return { cancelled: true };
+    }
+
+    await exportSrt({
+      document: payload.document,
+      path,
+      variant: payload.variant,
+      bilingualOrder: settings.exportBilingualOrder
+    });
+    return { path, cancelled: false };
+  }
+
+  async function resolveExportPath(
+    mediaPath: string,
+    variant: ExportVariant,
+    settings: Awaited<ReturnType<SettingsStore['get']>>
+  ): Promise<string | undefined> {
+    const defaultName = defaultSubtitleFileName(mediaPath, variant);
+    if (settings.exportDestinationMode === 'ask-each-time') {
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: 'Export subtitle',
+        defaultPath: join(dirname(mediaPath), defaultName),
+        filters: [{ name: 'SubRip Subtitle', extensions: ['srt'] }]
+      });
+      return result.canceled ? undefined : result.filePath;
+    }
+
+    const targetDir =
+      settings.exportDestinationMode === 'selected-directory' && settings.exportDirectory
+        ? settings.exportDirectory
+        : dirname(mediaPath);
+    return join(targetDir, defaultName);
+  }
+
+  function defaultSubtitleFileName(mediaPath: string, variant: ExportVariant): string {
+    const extension = extname(mediaPath);
+    const name = basename(mediaPath, extension);
+    const suffix = variant === 'source' ? 'source' : variant === 'bilingual' ? 'bilingual' : 'translated';
+    return `${name}.${suffix}.srt`;
+  }
+
   ipcMain.handle('selectVideo', async () => selectMedia());
+  ipcMain.handle('selectDirectory', async () => selectExportDirectory());
   ipcMain.handle('startTranscription', async (_event, request: CreateJobRequest) => startTranscription(request));
   ipcMain.handle('startTranslation', async (_event, jobId: string) => jobManager.translate(jobId));
   ipcMain.handle('exportSrt', async (_event, payload) => exportSrt(payload));
+  ipcMain.handle('exportConfiguredSrt', async (_event, payload) => exportConfiguredSrt(payload));
   ipcMain.handle('getSettings', async () => settingsStore.get());
   ipcMain.handle('saveSettings', async (_event, patch) => settingsStore.update(patch));
 
@@ -128,8 +208,8 @@ function registerIpc(): void {
       payload: {
         document: SubtitleDocument;
         path: string;
-        variant: 'source' | 'translated' | 'bilingual';
-        bilingualOrder: 'source-first' | 'target-first';
+        variant: ExportVariant;
+        bilingualOrder: BilingualOrder;
       }
     ) => {
       await exportSrt(payload);
