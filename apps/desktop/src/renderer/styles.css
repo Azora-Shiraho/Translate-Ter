@@ -764,24 +764,89 @@ h3 {
 
 .segmentDetail {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  background: var(--tt-surface-panel-muted);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 16px;
+  background:
+    linear-gradient(180deg, rgba(77, 163, 255, 0.08), transparent 22%),
+    var(--tt-surface-panel-muted);
 }
 
-.compactHeader {
-  padding: 14px 18px;
+.segmentDetailHero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.segmentTitleStack {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.segmentTitleStack h3 {
+  font-size: 24px;
+}
+
+.segmentTitleStack p {
+  margin: 0;
+  color: var(--tt-text-muted);
+  font-size: 12px;
+}
+
+.segmentDetailMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .editorGrid {
   display: grid;
-  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   min-height: 0;
-  padding: 16px 18px 18px;
 }
 
-.editorGrid label {
+.editorGrid label,
+.editorPane {
   min-height: 0;
+}
+
+.editorPane {
+  display: grid;
+  min-width: 0;
+  border: 1px solid var(--tt-border-soft);
+  border-radius: var(--tt-radius-card);
+  padding: 12px;
+  background: var(--tt-surface-panel);
+}
+
+.editorPane label {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+}
+
+.editorPaneHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.editorPaneHeader small {
+  color: var(--tt-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.editorPane textarea {
+  min-height: 220px;
+}
+
+.translatedPane {
+  background: linear-gradient(180deg, rgba(77, 163, 255, 0.08), transparent 30%), var(--tt-surface-panel);
 }
 
 .translatedField {
@@ -1744,7 +1809,7 @@ input[type='checkbox'] {
   }
 
   .panelHeader,
-  .compactHeader {
+  .segmentDetailHero {
     align-items: flex-start;
     flex-direction: column;
   }

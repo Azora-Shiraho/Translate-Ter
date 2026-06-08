@@ -679,9 +679,10 @@ function App(): JSX.Element {
                     </div>
                     {selectedSegment && (
                       <div className="segmentDetail">
-                        <div className="panelHeader compactHeader">
-                          <div>
-                            <h3>{t('segmentDetails')} #{selectedSegment.index}</h3>
+                        <div className="segmentDetailHero">
+                          <div className="segmentTitleStack">
+                            <span className="fieldLabel">{t('segmentDetails')}</span>
+                            <h3>#{selectedSegment.index}</h3>
                             <p>
                               {formatTimestamp(selectedSegment.startMs)} - {formatTimestamp(selectedSegment.endMs)}
                             </p>
@@ -690,29 +691,47 @@ function App(): JSX.Element {
                             {t(statusLabel(selectedSegment.status))}
                           </span>
                         </div>
+                        <div className="segmentDetailMeta">
+                          <span className="metaPill">
+                            {t('start')} {formatTimestamp(selectedSegment.startMs)}
+                          </span>
+                          <span className="metaPill">
+                            {t('end')} {formatTimestamp(selectedSegment.endMs)}
+                          </span>
+                        </div>
                         <div className="editorGrid">
-                          <label>
-                            {t('original')}
-                            <textarea
-                              aria-label={`${t('original')} ${selectedSegment.index}`}
-                              value={selectedSegment.sourceText}
-                              onChange={(event) =>
-                                void updateSegment(selectedSegment, { sourceText: event.target.value })
-                              }
-                            />
-                          </label>
-                          <label>
-                            {t('translated')}
-                            <textarea
-                              className="translatedField"
-                              aria-label={`${t('translated')} ${selectedSegment.index}`}
-                              value={selectedSegment.translatedText ?? ''}
-                              placeholder={t('translated')}
-                              onChange={(event) =>
-                                void updateSegment(selectedSegment, { translatedText: event.target.value })
-                              }
-                            />
-                          </label>
+                          <div className="editorPane">
+                            <label>
+                              <div className="editorPaneHeader">
+                                <span>{t('original')}</span>
+                                <small>{selectedSegment.sourceText.length}</small>
+                              </div>
+                              <textarea
+                                aria-label={`${t('original')} ${selectedSegment.index}`}
+                                value={selectedSegment.sourceText}
+                                onChange={(event) =>
+                                  void updateSegment(selectedSegment, { sourceText: event.target.value })
+                                }
+                              />
+                            </label>
+                          </div>
+                          <div className="editorPane translatedPane">
+                            <label>
+                              <div className="editorPaneHeader">
+                                <span>{t('translated')}</span>
+                                <small>{(selectedSegment.translatedText ?? '').length}</small>
+                              </div>
+                              <textarea
+                                className="translatedField"
+                                aria-label={`${t('translated')} ${selectedSegment.index}`}
+                                value={selectedSegment.translatedText ?? ''}
+                                placeholder={t('translated')}
+                                onChange={(event) =>
+                                  void updateSegment(selectedSegment, { translatedText: event.target.value })
+                                }
+                              />
+                            </label>
+                          </div>
                         </div>
                       </div>
                     )}
