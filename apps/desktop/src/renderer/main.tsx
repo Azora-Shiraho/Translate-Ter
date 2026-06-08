@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client';
 import { useTranslation } from 'react-i18next';
 import {
   AlertCircle,
-  ArrowRight,
   ArrowRightLeft,
   CheckCircle2,
   Clock3,
@@ -513,17 +512,6 @@ function App(): JSX.Element {
                 <div className="jobOverviewMain">
                   <div className="jobTitleBlock">
                     <strong title={jobTitle}>{jobTitle}</strong>
-                    <div className="jobOverviewMeta">
-                      <span className="stageBadge">{t(stageLabel(job?.stage ?? 'idle'))}</span>
-                      <span className="metaPill">
-                        <Languages size={14} />
-                        {sourceLabel} <ArrowRight size={12} /> {targetLabel}
-                      </span>
-                      <span className="metaPill">
-                        <Gauge size={14} />
-                        {completion}%
-                      </span>
-                    </div>
                   </div>
                   <div className="jobPrimaryActions">
                     <button className="secondary" onClick={() => void pickMedia()}>
@@ -557,23 +545,6 @@ function App(): JSX.Element {
                     <span className="fieldLabel">{t('mediaFile')}</span>
                     <strong title={jobTitle}>{jobTitle}</strong>
                     <small title={selectedMediaPath}>{selectedMediaPath || t('placeholderPath')}</small>
-                  </div>
-                  <div className="overviewMetaGrid">
-                    <MetricCard
-                      icon={<Gauge size={16} />}
-                      label={t('jobStage')}
-                      value={t(stageLabel(job?.stage ?? 'idle'))}
-                    />
-                    <MetricCard
-                      icon={<ShieldCheck size={16} />}
-                      label={t('translatedRows')}
-                      value={`${translatedCount}/${segments.length}`}
-                    />
-                    <MetricCard
-                      icon={<AlertCircle size={16} />}
-                      label={t('warnings')}
-                      value={String(warningCount)}
-                    />
                   </div>
                 </div>
               </section>
