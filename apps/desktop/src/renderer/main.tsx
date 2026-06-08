@@ -840,146 +840,147 @@ function App(): JSX.Element {
                 </section>
 
                 <section className="settingsPanel">
-                  <InspectorSection icon={<Settings size={16} />} title={t('asr')}>
-                <label>
-                  {t('asrProvider')}
-                  <select
-                    value={settings.asrProviderId}
-                    onChange={(event) => void updateSettings({ asrProviderId: event.target.value })}
-                  >
-                    {asrProviders.map((provider) => (
-                    <option key={provider.id} value={provider.id}>
-                        {providerLabel(provider.id, t)}
-                    </option>
-                    ))}
-                  </select>
-                </label>
-                <ProviderCard
-                  activeId={settings.asrProviderId}
-                  detail={t(asrProviders.find((provider) => provider.id === settings.asrProviderId)?.descriptionKey ?? 'providerReady')}
-                  health={asrHealth}
-                  loading={checkingProvider === settings.asrProviderId}
-                  onTest={() => void testProvider(settings.asrProviderId)}
-                  showMessage={settings.asrProviderId !== 'local.whisper.cpp'}
-                />
-                {settings.asrProviderId === 'local.whisper.cpp' && (
-                  <>
-                    <div className="providerCard">
-                      <div>
-                        <strong>{t('localRuntimeSettings')}</strong>
-                        <small>{t('localProviderDetail')}</small>
-                      </div>
-                    </div>
-                    <label>
-                      {t('whisperModel')}
-                      <select
-                        value={settings.whisperModelId}
-                        onChange={(event) => void updateSettings({ whisperModelId: event.target.value })}
-                      >
-                        {models.map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.displayName} · {model.installed ? t('installed') : t('missing')}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <div className="modelCard accentCard">
-                      <div>
-                        <span className={supportsCuda ? 'signal good' : 'signal'} />
-                        <strong>{t('cudaAcceleration')}</strong>
-                        <small>{supportsCuda ? t('cudaDetected') : t('cudaUnavailable')}</small>
-                      </div>
-                      <button
-                        className="secondary compact"
-                        disabled={checkingRuntime || !settings.allowWhisperAssetDownload}
-                        onClick={() => void checkCudaRuntime()}
-                      >
-                        <HardDriveDownload size={16} />
-                        {checkingRuntime ? t('checking') : t('checkCudaRuntime')}
-                      </button>
-                      <ToggleField
-                        label={t('useCudaAcceleration')}
-                        detail={t('useCudaAccelerationDetail')}
-                        checked={settings.localWhisperUseCuda}
-                        disabled={!supportsCuda}
-                        onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
+                  <InspectorSection icon={<MonitorCog size={16} />} title={t('asr')}>
+                    <div className="settingsSubsection">
+                      <SectionTitle icon={<MonitorCog size={15} />} title={t('asrProvider')} />
+                      <label>
+                        {t('asrProvider')}
+                        <select
+                          value={settings.asrProviderId}
+                          onChange={(event) => void updateSettings({ asrProviderId: event.target.value })}
+                        >
+                          {asrProviders.map((provider) => (
+                            <option key={provider.id} value={provider.id}>
+                              {providerLabel(provider.id, t)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <ProviderCard
+                        activeId={settings.asrProviderId}
+                        detail={t(
+                          asrProviders.find((provider) => provider.id === settings.asrProviderId)?.descriptionKey ??
+                            'providerReady'
+                        )}
+                        health={asrHealth}
+                        loading={checkingProvider === settings.asrProviderId}
+                        onTest={() => void testProvider(settings.asrProviderId)}
+                        showMessage={settings.asrProviderId !== 'local.whisper.cpp'}
                       />
                     </div>
-                    <ToggleField
-                      label={t('allowWhisperDownloads')}
-                      detail={t('allowWhisperDownloadsDetail')}
-                      checked={settings.allowWhisperAssetDownload}
-                      onChange={(checked) => void updateSettings({ allowWhisperAssetDownload: checked })}
-                    />
-                    <div className="modelCard">
-                      <div>
-                        <span className={selectedModel?.installed ? 'signal good' : 'signal'} />
-                        <strong>{selectedModel?.displayName ?? t('whisperModel')}</strong>
-                        <small>{selectedModel ? formatBytes(selectedModel.sizeBytes) : t('missing')}</small>
+                    {settings.asrProviderId === 'local.whisper.cpp' && (
+                      <>
+                        <div className="settingsSubsection">
+                          <SectionTitle icon={<Gauge size={15} />} title={t('cudaAcceleration')} />
+                          <div className="modelCard accentCard">
+                            <div>
+                              <span className={supportsCuda ? 'signal good' : 'signal'} />
+                              <strong>{t('cudaAcceleration')}</strong>
+                              <small>{supportsCuda ? t('cudaDetected') : t('cudaUnavailable')}</small>
+                            </div>
+                            <button
+                              className="secondary compact"
+                              disabled={checkingRuntime || !settings.allowWhisperAssetDownload}
+                              onClick={() => void checkCudaRuntime()}
+                            >
+                              <HardDriveDownload size={16} />
+                              {checkingRuntime ? t('checking') : t('checkCudaRuntime')}
+                            </button>
+                            <ToggleField
+                              label={t('useCudaAcceleration')}
+                              detail={t('useCudaAccelerationDetail')}
+                              checked={settings.localWhisperUseCuda}
+                              disabled={!supportsCuda}
+                              onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
+                            />
+                          </div>
+                        </div>
+                        <div className="settingsSubsection">
+                          <SectionTitle icon={<HardDriveDownload size={15} />} title={t('whisperModel')} />
+                          <ToggleField
+                            label={t('allowWhisperDownloads')}
+                            detail={t('allowWhisperDownloadsDetail')}
+                            checked={settings.allowWhisperAssetDownload}
+                            onChange={(checked) => void updateSettings({ allowWhisperAssetDownload: checked })}
+                          />
+                          <label>
+                            {t('whisperModel')}
+                            <select
+                              value={settings.whisperModelId}
+                              onChange={(event) => void updateSettings({ whisperModelId: event.target.value })}
+                            >
+                              {models.map((model) => (
+                                <option key={model.id} value={model.id}>
+                                  {model.displayName} · {model.installed ? t('installed') : t('missing')}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <div className="modelCard">
+                            <div>
+                              <span className={selectedModel?.installed ? 'signal good' : 'signal'} />
+                              <strong>{selectedModel?.displayName ?? t('whisperModel')}</strong>
+                              <small>{selectedModel ? formatBytes(selectedModel.sizeBytes) : t('missing')}</small>
+                            </div>
+                            {!selectedModel?.installed && (
+                              <button
+                                className="secondary compact"
+                                disabled={checkingRuntime || !settings.allowWhisperAssetDownload}
+                                onClick={() => void downloadSelectedModel()}
+                              >
+                                <HardDriveDownload size={16} />
+                                {checkingRuntime ? t('checking') : t('downloadModel')}
+                              </button>
+                            )}
+                            {runtimeStatus && (
+                              <p title={runtimeStatus.acceleration.fallbackReason}>
+                                {t(runtimeActionLabel(runtimeStatus.actionRequired))}
+                                {' · '}
+                                {t('runtimeModel')}: {runtimeStatus.model.verified ? t('installed') : t('missing')}
+                              </p>
+                            )}
+                            {modelActivity && <p title={modelActivity}>{modelActivity}</p>}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                    {settings.asrProviderId === 'cloud.openai' && (
+                      <div className="settingsSubsection">
+                        <SectionTitle icon={<KeyRound size={15} />} title={t('providerConfig')} />
+                        <TextField
+                          label={t('baseUrl')}
+                          value={cloudAsrSecret.baseUrl ?? ''}
+                          placeholder="https://api.openai.com/v1"
+                          onChange={(value) => updateProviderSecret('cloud.openai', { baseUrl: value })}
+                        />
+                        <TextField
+                          label={t('apiKey')}
+                          value={cloudAsrSecret.apiKey ?? ''}
+                          placeholder="sk-..."
+                          type="password"
+                          onChange={(value) => updateProviderSecret('cloud.openai', { apiKey: value })}
+                        />
+                        <TextField
+                          label={t('model')}
+                          value={cloudAsrSecret.model ?? ''}
+                          placeholder="whisper-1"
+                          onChange={(value) => updateProviderSecret('cloud.openai', { model: value })}
+                        />
+                        <ToggleField
+                          label={t('uploadConsent')}
+                          detail={t('uploadConsentDetail')}
+                          checked={settings.allowCloudAsrUpload}
+                          onChange={(checked) => void updateSettings({ allowCloudAsrUpload: checked })}
+                        />
+                        <ProviderActionRow
+                          savingLabel={t('saveProvider')}
+                          testingLabel={checkingProvider === 'cloud.openai' ? t('checking') : t('test')}
+                          onSave={() => void saveProviderSecret('cloud.openai')}
+                          onTest={() => void testProvider('cloud.openai')}
+                          testDisabled={checkingProvider === 'cloud.openai'}
+                        />
                       </div>
-                      {!selectedModel?.installed && (
-                        <button
-                          className="secondary compact"
-                          disabled={checkingRuntime || !settings.allowWhisperAssetDownload}
-                          onClick={() => void downloadSelectedModel()}
-                        >
-                          <HardDriveDownload size={16} />
-                          {checkingRuntime ? t('checking') : t('downloadModel')}
-                        </button>
-                      )}
-                      {runtimeStatus && (
-                        <p title={runtimeStatus.acceleration.fallbackReason}>
-                          {t(runtimeActionLabel(runtimeStatus.actionRequired))}
-                          {' · '}
-                          {t('runtimeModel')}: {runtimeStatus.model.verified ? t('installed') : t('missing')}
-                        </p>
-                      )}
-                      {modelActivity && <p title={modelActivity}>{modelActivity}</p>}
-                    </div>
-                  </>
-                )}
-                {settings.asrProviderId === 'cloud.openai' && (
-                  <>
-                    <div className="providerCard">
-                      <div>
-                        <strong>{t('cloudProviderSettings')}</strong>
-                        <small>{t('cloudProviderDetail')}</small>
-                      </div>
-                    </div>
-                    <TextField
-                      label={t('baseUrl')}
-                      value={cloudAsrSecret.baseUrl ?? ''}
-                      placeholder="https://api.openai.com/v1"
-                      onChange={(value) => updateProviderSecret('cloud.openai', { baseUrl: value })}
-                    />
-                    <TextField
-                      label={t('apiKey')}
-                      value={cloudAsrSecret.apiKey ?? ''}
-                      placeholder="sk-..."
-                      type="password"
-                      onChange={(value) => updateProviderSecret('cloud.openai', { apiKey: value })}
-                    />
-                    <TextField
-                      label={t('model')}
-                      value={cloudAsrSecret.model ?? ''}
-                      placeholder="whisper-1"
-                      onChange={(value) => updateProviderSecret('cloud.openai', { model: value })}
-                    />
-                    <ToggleField
-                      label={t('uploadConsent')}
-                      detail={t('uploadConsentDetail')}
-                      checked={settings.allowCloudAsrUpload}
-                      onChange={(checked) => void updateSettings({ allowCloudAsrUpload: checked })}
-                    />
-                    <ProviderActionRow
-                      savingLabel={t('saveProvider')}
-                      testingLabel={checkingProvider === 'cloud.openai' ? t('checking') : t('test')}
-                      onSave={() => void saveProviderSecret('cloud.openai')}
-                      onTest={() => void testProvider('cloud.openai')}
-                      testDisabled={checkingProvider === 'cloud.openai'}
-                    />
-                  </>
-                )}
+                    )}
                   </InspectorSection>
                 </section>
 
