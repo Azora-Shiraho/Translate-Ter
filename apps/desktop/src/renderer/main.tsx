@@ -134,6 +134,8 @@ function App(): JSX.Element {
           totalBytes: event.type === 'download-progress' ? event.totalBytes : undefined,
           message: nextMessage
         });
+      } else {
+        setActiveDownload(undefined);
       }
       if (event.scope === 'model') {
         setModelActivity(nextMessage);
@@ -145,7 +147,6 @@ function App(): JSX.Element {
         pushToast(nextMessage, toastToneForAssetEvent(event));
       }
       if (event.type === 'ready' || event.type === 'error') {
-        setActiveDownload(undefined);
         void refreshModels();
       }
     });
@@ -221,6 +222,7 @@ function App(): JSX.Element {
   async function checkCudaRuntime(): Promise<void> {
     if (!settings) return;
     setCheckingRuntime(true);
+    setActiveDownload(undefined);
     setRuntimeActivity(t('runtimeChecking'));
     setModelActivity(undefined);
     pushStatus(t('runtimeChecking'));
@@ -240,9 +242,11 @@ function App(): JSX.Element {
       }
     } catch (error) {
       const nextMessage = error instanceof Error ? error.message : String(error);
+      setActiveDownload(undefined);
       setRuntimeActivity(nextMessage);
       pushStatus(nextMessage, 'error');
     } finally {
+      setActiveDownload(undefined);
       setCheckingRuntime(false);
     }
   }
@@ -250,6 +254,7 @@ function App(): JSX.Element {
   async function downloadSelectedModel(): Promise<void> {
     if (!settings) return;
     setCheckingRuntime(true);
+    setActiveDownload(undefined);
     setRuntimeActivity(undefined);
     setModelActivity(t('runtimeDownloading'));
     pushStatus(t('runtimeDownloading'));
@@ -267,9 +272,11 @@ function App(): JSX.Element {
       await refreshModels();
     } catch (error) {
       const nextMessage = error instanceof Error ? error.message : String(error);
+      setActiveDownload(undefined);
       setModelActivity(nextMessage);
       pushStatus(nextMessage, 'error');
     } finally {
+      setActiveDownload(undefined);
       setCheckingRuntime(false);
     }
   }
