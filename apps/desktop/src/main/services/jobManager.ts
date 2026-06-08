@@ -7,9 +7,11 @@ import type {
   JobSnapshot,
   JobStage,
   SubtitleDocument,
+  SubtitleWarning,
   SubtitleSegment,
   WorkflowStep
 } from '@shared/models';
+import { normalizeAsrLanguageCode, whisperPromptForLanguage } from '@shared/languages';
 import { TranslationScheduler } from '@shared/translation/scheduler';
 import { MockTranslationProvider, OpenAICompatibleTranslationProvider } from '@shared/translation/providers';
 import { validateAsrRequest } from './asrProviders';
@@ -156,6 +158,7 @@ export class JobManager extends EventEmitter {
         audioPath: extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path,
         modelId: job.whisperModelId,
         sourceLanguage: job.sourceLanguage,
+        whisperPrompt: whisperPromptForLanguage(job.sourceLanguage),
         targetLanguage: job.targetLanguage,
         asrProviderId: job.asrProviderId,
         preferCuda: job.localWhisperUseCuda,
@@ -239,18 +242,19 @@ export class JobManager extends EventEmitter {
       if (controller.signal.aborted || this.isCancelled(job.id)) {
         return this.get(job.id);
       }
-      job.subtitleDocument = normalizeDocumentForSubtitleDisplay(result.document);
+      const translationWarnings = buildTranslationWarnings(
+        job.subtitleDocument,
+        result.checkpoints,
+        translationProviderIdFromPriority(job.translationProviderPriority)
+      );
+      job.subtitleDocument = normalizeDocumentForSubtitleDisplay({
+        ...result.document,
+        metadata: {
+          ...result.document.metadata,
+          warnings: dedupeWarnings([...(result.document.metadata.warnings ?? []), ...translationWarnings])
+        }
+      });
       job.step = 'export';
-      job.warnings = [
-        ...job.warnings,
-        ...result.checkpoints
-          .filter((checkpoint) => checkpoint.status === 'failed')
-          .map((checkpoint) => ({
-            code: 'TranslationBatchFailed',
-            message: `Batch ${checkpoint.batchId} failed.`,
-            segmentId: checkpoint.segmentIds[0]
-          }))
-      ];
       await this.setProgress(job, 'completed', 100, 'Translation complete.');
       return this.get(job.id);
     } catch (error) {
@@ -342,7 +346,11 @@ export class JobManager extends EventEmitter {
     form.append('model', secret.model ?? 'whisper-1');
     form.append('response_format', 'verbose_json');
     if (job.sourceLanguage !== 'auto') {
-      form.append('language', job.sourceLanguage);
+      form.append('language', normalizeAsrLanguageCode(job.sourceLanguage));
+    }
+    const asrPrompt = whisperPromptForLanguage(job.sourceLanguage);
+    if (asrPrompt) {
+      form.append('prompt', asrPrompt);
     }
 
     const response = await fetch(`${(secret.baseUrl ?? 'https://api.openai.com/v1').replace(/\/$/, '')}/audio/transcriptions`, {
@@ -430,6 +438,76 @@ function nativePayloadToDocument(payload: unknown, job: JobSnapshot): SubtitleDo
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildTranslationWarnings(
+  document: SubtitleDocument,
+  checkpoints: Array<{
+    batchId: string;
+    segmentIds: string[];
+    status: 'queued' | 'running' | 'completed' | 'failed';
+    providerAttempts: Array<{
+      providerId: string;
+      attempt: number;
+      startedAt: string;
+      completedAt?: string;
+      errorCode?: string;
+      message?: string;
+    }>;
+  }>,
+  providerId: string
+): SubtitleWarning[] {
+  return checkpoints
+    .filter((checkpoint) => checkpoint.status === 'failed')
+    .map((checkpoint) => {
+      const matchedSegments = checkpoint.segmentIds
+        .map((id) => document.segments.find((segment) => segment.id === id))
+        .filter((segment): segment is SubtitleSegment => Boolean(segment))
+        .sort((left, right) => left.index - right.index);
+      const first = matchedSegments[0];
+      const last = matchedSegments[matchedSegments.length - 1];
+      const attempt = [...checkpoint.providerAttempts]
+        .reverse()
+        .find((record) => Boolean(record.message || record.errorCode));
+
+      return {
+        id: `warning-${checkpoint.batchId}`,
+        code: attempt?.errorCode ?? 'TranslationBatchFailed',
+        message: attempt?.message ?? `Batch ${checkpoint.batchId} failed. Original text was kept.`,
+        stage: 'translate',
+        createdAt: attempt?.completedAt ?? attempt?.startedAt ?? new Date().toISOString(),
+        providerId: attempt?.providerId ?? providerId,
+        batchId: checkpoint.batchId,
+        segmentId: first?.id,
+        startIndex: first?.index,
+        endIndex: last?.index ?? first?.index,
+        startMs: first?.startMs,
+        endMs: last?.endMs ?? first?.endMs
+      } satisfies SubtitleWarning;
+    });
+}
+
+function dedupeWarnings(warnings: SubtitleWarning[]): SubtitleWarning[] {
+  const seen = new Set<string>();
+  return warnings.filter((warning) => {
+    const key = [
+      warning.id ?? '',
+      warning.code,
+      warning.message,
+      warning.segmentId ?? '',
+      warning.startIndex ?? '',
+      warning.endIndex ?? '',
+      warning.startMs ?? '',
+      warning.endMs ?? ''
+    ].join('|');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function translationProviderIdFromPriority(priority: string[]): string {
+  return priority[0] ?? 'openai.compatible';
 }
 
 function cancelledStep(job: JobSnapshot): WorkflowStep {

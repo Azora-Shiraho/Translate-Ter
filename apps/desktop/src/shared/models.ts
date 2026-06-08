@@ -7,9 +7,18 @@ export type SubtitleStatus =
   | 'failed';
 
 export type SubtitleWarning = {
+  id?: string;
   code: string;
   message: string;
   segmentId?: string;
+  stage?: 'asr' | 'translate' | 'export' | 'subtitle';
+  createdAt?: string;
+  providerId?: string;
+  batchId?: string;
+  startIndex?: number;
+  endIndex?: number;
+  startMs?: number;
+  endMs?: number;
 };
 
 export type SubtitleSegment = {

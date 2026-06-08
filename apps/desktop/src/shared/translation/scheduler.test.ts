@@ -261,6 +261,32 @@ describe('translation resilience primitives', () => {
     });
     expect(result.document.segments[0].translatedText).toBe('[fallback.llm] Long enough');
   });
+
+  it('keeps original text and marks warnings when all providers fail', async () => {
+    const failingProvider = createStaticProvider('down.llm', 1, [], {
+      translateBatch: async () => {
+        throw new ProviderError('gateway timeout', { code: 'ProviderUnavailable', retryable: true });
+      }
+    });
+    const scheduler = new TranslationScheduler([failingProvider], {
+      maxRetries: 0,
+      initialBackoffMs: 1,
+      maxBackoffMs: 1,
+      jitterRatio: 0
+    });
+
+    const result = await scheduler.translateDocument(parseSrt('1\n00:00:01,000 --> 00:00:02,000\nOriginal line\n'), {
+      sourceLanguage: 'en',
+      targetLanguage: 'zh-CN'
+    });
+
+    expect(result.checkpoints[0].status).toBe('failed');
+    expect(result.document.segments[0]).toMatchObject({
+      translatedText: 'Original line',
+      status: 'warning'
+    });
+    expect(result.document.segments[0].notes).toContain('gateway timeout');
+  });
 });
 
 function createStaticProvider(

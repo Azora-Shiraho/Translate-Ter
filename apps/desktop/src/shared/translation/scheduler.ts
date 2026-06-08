@@ -168,7 +168,8 @@ export class TranslationScheduler {
       for (const id of checkpoint.segmentIds) {
         const segment = output.segments.find((item) => item.id === id);
         if (segment) {
-          segment.status = 'failed';
+          segment.translatedText = segment.sourceText;
+          segment.status = 'warning';
           segment.notes = [...(segment.notes ?? []), lastError instanceof Error ? lastError.message : 'Translation failed.'];
         }
       }

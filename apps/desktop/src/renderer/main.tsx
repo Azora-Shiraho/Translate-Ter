@@ -36,6 +36,7 @@ import type {
   ProviderSecretInput,
   SubtitleSegment,
   SubtitleStatus,
+  SubtitleWarning,
   WhisperModelInfo,
   WhisperRuntimeStatus
 } from '@shared/types';
@@ -87,6 +88,7 @@ function App(): JSX.Element {
   const [job, setJob] = useState<JobSnapshot>();
   const [mediaPath, setMediaPath] = useState('');
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>();
+  const [selectedWarningId, setSelectedWarningId] = useState<string>();
   const [message, setMessage] = useState(t('ready'));
   const [runtimeActivity, setRuntimeActivity] = useState<string>();
   const [modelActivity, setModelActivity] = useState<string>();
@@ -179,6 +181,21 @@ function App(): JSX.Element {
         : job.subtitleDocument?.segments[0]?.id
     );
   }, [job?.subtitleDocument]);
+
+  const workflowWarnings = useMemo(() => deriveWorkflowWarnings(job), [job]);
+
+  useEffect(() => {
+    if (!workflowWarnings.length) {
+      setSelectedWarningId(undefined);
+      return;
+    }
+
+    setSelectedWarningId((current) =>
+      current && workflowWarnings.some((warning) => warning.id === current)
+        ? current
+        : workflowWarnings[0]?.id
+    );
+  }, [workflowWarnings]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -430,7 +447,7 @@ function App(): JSX.Element {
   const completion = job?.progress ?? 0;
   const segments = job?.subtitleDocument?.segments ?? [];
   const translatedCount = segments.filter((segment) => Boolean(segment.translatedText?.trim())).length;
-  const warningCount = (job?.warnings.length ?? 0) + (job?.subtitleDocument?.metadata.warnings.length ?? 0);
+  const warningCount = workflowWarnings.length;
   const sourceLabel = settings ? languageLabel(settings.sourceLanguage, settings.uiLanguage) : '';
   const targetLabel = settings ? languageLabel(settings.targetLanguage, settings.uiLanguage) : '';
   const translationProviderId = settings?.translationProviderPriority[0] ?? 'openai.compatible';
@@ -441,6 +458,7 @@ function App(): JSX.Element {
   const llmSecret = providerSecrets['openai.compatible'] ?? {};
   const canForceStop = Boolean(job && !['completed', 'failed', 'cancelled'].includes(job.stage));
   const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) ?? segments[0];
+  const selectedWarning = workflowWarnings.find((warning) => warning.id === selectedWarningId) ?? workflowWarnings[0];
   const selectedMediaPath = job?.mediaPath ?? mediaPath.trim();
   const selectedMediaFileName =
     job?.fileName ?? selectedMediaPath.split(/[\\/]/).filter(Boolean).at(-1) ?? t('chooseMedia');
@@ -640,8 +658,67 @@ function App(): JSX.Element {
                       icon={<AlertCircle size={16} />}
                       label={t('warnings')}
                       value={String(warningCount)}
+                      active={warningCount > 0}
+                      onClick={
+                        warningCount > 0
+                          ? () => setSelectedWarningId((current) => current ?? workflowWarnings[0]?.id)
+                          : undefined
+                      }
                     />
                   </div>
+                  {workflowWarnings.length > 0 && selectedWarning && (
+                    <div className="warningPanel">
+                      <div className="warningPanelHeader">
+                        <strong>{t('warningDetails')}</strong>
+                        <small>{t('warningFallbackHint')}</small>
+                      </div>
+                      <div className="warningList" role="list">
+                        {workflowWarnings.map((warning) => (
+                          <button
+                            className={`warningItem${selectedWarning.id === warning.id ? ' active' : ''}`}
+                            key={warning.id}
+                            onClick={() => setSelectedWarningId(warning.id)}
+                            type="button"
+                          >
+                            <span className="signal warn" />
+                            <div>
+                              <strong>{warningSummaryLabel(warning, t)}</strong>
+                              <small>{warning.message}</small>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="warningDetailCard">
+                        <div className="warningDetailTitle">
+                          <span className="signal warn" />
+                          <div>
+                            <strong>{warningSummaryLabel(selectedWarning, t)}</strong>
+                            <small>{selectedWarning.message}</small>
+                          </div>
+                        </div>
+                        <StatusLine
+                          label={t('warningSegmentRange')}
+                          tone="warn"
+                          value={formatWarningSegmentRange(selectedWarning)}
+                        />
+                        <StatusLine
+                          label={t('warningTimeline')}
+                          tone="warn"
+                          value={formatWarningTimeline(selectedWarning)}
+                        />
+                        <StatusLine
+                          label={t('warningGeneratedAt')}
+                          tone="muted"
+                          value={formatWarningDate(selectedWarning.createdAt)}
+                        />
+                        <StatusLine
+                          label={t('warningProvider')}
+                          tone="muted"
+                          value={providerLabel(selectedWarning.providerId ?? translationProviderId, t)}
+                        />
+                      </div>
+                    </div>
+                  )}
                   <div className="railStatusStack">
                     <div className="railNote">
                       <span className={`signal ${translationState.tone}`} />
@@ -1349,14 +1426,28 @@ function ExportActionGroup(props: {
   );
 }
 
-function MetricCard(props: { icon: React.ReactNode; label: string; value: string }): JSX.Element {
-  return (
-    <div className="metricCard">
+function MetricCard(props: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  active?: boolean;
+  onClick?: () => void;
+}): JSX.Element {
+  const content = (
+    <>
       {props.icon}
       <span>{props.label}</span>
       <strong title={props.value}>{props.value}</strong>
-    </div>
+    </>
   );
+  if (props.onClick) {
+    return (
+      <button className={`metricCard metricButton${props.active ? ' active' : ''}`} onClick={props.onClick} type="button">
+        {content}
+      </button>
+    );
+  }
+  return <div className="metricCard">{content}</div>;
 }
 
 function InspectorSection(props: { icon: React.ReactNode; title: string; children: React.ReactNode }): JSX.Element {
@@ -1605,6 +1696,80 @@ function providerLabel(providerId: string, t: (key: string) => string): string {
     default:
       return providerId;
   }
+}
+
+function deriveWorkflowWarnings(job?: JobSnapshot): SubtitleWarning[] {
+  if (!job) return [];
+
+  const segments = job.subtitleDocument?.segments ?? [];
+  const warnings = [...(job.warnings ?? []), ...(job.subtitleDocument?.metadata.warnings ?? [])];
+  const seen = new Set<string>();
+
+  return warnings
+    .map((warning, index) => enrichWarning(warning, segments, index))
+    .filter((warning) => {
+      const key = [
+        warning.id ?? '',
+        warning.code,
+        warning.message,
+        warning.segmentId ?? '',
+        warning.startIndex ?? '',
+        warning.endIndex ?? '',
+        warning.startMs ?? '',
+        warning.endMs ?? ''
+      ].join('|');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function enrichWarning(warning: SubtitleWarning, segments: SubtitleSegment[], index: number): SubtitleWarning {
+  if (warning.startIndex && warning.endIndex && warning.startMs !== undefined && warning.endMs !== undefined) {
+    return { ...warning, id: warning.id ?? `warning-${index}` };
+  }
+
+  const segment = warning.segmentId ? segments.find((item) => item.id === warning.segmentId) : undefined;
+  return {
+    ...warning,
+    id: warning.id ?? `warning-${index}`,
+    startIndex: warning.startIndex ?? segment?.index,
+    endIndex: warning.endIndex ?? segment?.index,
+    startMs: warning.startMs ?? segment?.startMs,
+    endMs: warning.endMs ?? segment?.endMs
+  };
+}
+
+function warningSummaryLabel(warning: SubtitleWarning, t: (key: string) => string): string {
+  if (warning.stage === 'translate') return t('warningFallbackSummary');
+  return warning.code;
+}
+
+function formatWarningSegmentRange(warning: SubtitleWarning): string {
+  if (warning.startIndex && warning.endIndex) {
+    return warning.startIndex === warning.endIndex
+      ? `#${warning.startIndex}`
+      : `#${warning.startIndex} - #${warning.endIndex}`;
+  }
+  return '--';
+}
+
+function formatWarningTimeline(warning: SubtitleWarning): string {
+  if (warning.startMs !== undefined && warning.endMs !== undefined) {
+    return `${formatTimestamp(warning.startMs)} - ${formatTimestamp(warning.endMs)}`;
+  }
+  return '--';
+}
+
+function formatWarningDate(value?: string): string {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())} ${padNumber(date.getHours())}:${padNumber(date.getMinutes())}`;
+}
+
+function padNumber(value: number): string {
+  return String(value).padStart(2, '0');
 }
 
 function deriveTranslationState(input: {
