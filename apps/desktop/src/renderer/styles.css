@@ -442,12 +442,18 @@ button:disabled {
 .jobOverview {
   display: grid;
   gap: 0;
-  padding: 14px;
+  padding: 16px;
 }
 
-.jobOverviewGrid {
+.workspaceHero {
   display: grid;
-  grid-template-columns: minmax(280px, 1.1fr) minmax(260px, 0.9fr) minmax(260px, 0.9fr);
+  grid-template-columns: minmax(0, 1.14fr) minmax(280px, 0.86fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+.jobFocusPanel {
+  display: grid;
   gap: 12px;
   min-width: 0;
 }
@@ -467,20 +473,18 @@ button:disabled {
 }
 
 .jobActionCard {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   align-content: start;
+  gap: 12px;
 }
 
 .jobActionCard .fieldLabel {
-  grid-column: 1 / -1;
-}
-
-.jobActionCard .primary {
-  grid-column: 1 / -1;
+  margin-bottom: 2px;
 }
 
 .jobProgressCard {
   align-content: space-between;
+  min-height: 0;
 }
 
 .jobActionCard button,
@@ -734,6 +738,12 @@ h3 {
 .rowStart,
 .rowEnd {
   white-space: nowrap;
+}
+
+.jobMediaCard small,
+.jobProgressCard small {
+  white-space: normal;
+  word-break: break-word;
 }
 
 .rowStatus {
@@ -1441,7 +1451,7 @@ input[type='checkbox'] {
   }
 
   .workspaceLayout {
-    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-columns: 236px minmax(0, 1fr);
     gap: 14px;
   }
 
@@ -1450,19 +1460,27 @@ input[type='checkbox'] {
   }
 
   .workspaceLayout.exportVisible {
-    grid-template-columns: 220px minmax(0, 1fr) 286px;
+    grid-template-columns: 236px minmax(0, 1fr);
   }
 
   .workspaceLayout.statsCollapsed.exportVisible {
-    grid-template-columns: minmax(0, 1fr) 286px;
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .jobOverviewGrid {
-    grid-template-columns: minmax(240px, 1fr) minmax(240px, 0.82fr);
+  .exportDock {
+    grid-column: 2;
   }
 
-  .jobProgressCard {
-    grid-column: 1 / -1;
+  .workspaceLayout.statsCollapsed.exportVisible .exportDock {
+    grid-column: 1;
+  }
+
+  .workspaceLayout.exportVisible .exportDock {
+    display: block;
+  }
+
+  .workspaceHero {
+    grid-template-columns: minmax(0, 1fr) minmax(256px, 0.78fr);
   }
 
   .overviewMetaGrid {
@@ -1477,7 +1495,7 @@ input[type='checkbox'] {
   }
 
   .workspaceLayout {
-    grid-template-columns: 196px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
   }
 
@@ -1486,15 +1504,16 @@ input[type='checkbox'] {
   }
 
   .workspaceLayout.exportVisible {
-    grid-template-columns: 196px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .workspaceLayout.statsCollapsed.exportVisible {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .workspaceLayout.exportVisible .exportDock {
-    grid-column: 1 / -1;
+  .statsRail,
+  .exportDock {
+    grid-column: 1;
   }
 
   .subtitleWorkspace {
@@ -1528,22 +1547,12 @@ input[type='checkbox'] {
     display: block;
   }
 
-  .jobOverviewGrid {
+  .workspaceHero {
     grid-template-columns: 1fr;
   }
 
-  .jobActionCard {
-    grid-template-columns: 1fr;
-  }
-
-  .jobActionCard .primary {
-    grid-column: auto;
-  }
-
-  .jobMediaCard small,
-  .jobProgressCard small {
-    white-space: normal;
-    word-break: break-word;
+  .jobFocusPanel {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
   .workflowRail {
@@ -1690,8 +1699,9 @@ input[type='checkbox'] {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .statsRail {
-    max-height: 240px;
+  .statsRail,
+  .exportPanel {
+    max-height: none;
   }
 
   .railMetrics {
@@ -1714,8 +1724,8 @@ input[type='checkbox'] {
     padding: 13px 14px;
   }
 
-  .jobTitleBlock strong {
-    font-size: 24px;
+  .jobFocusPanel {
+    grid-template-columns: 1fr;
   }
 
   .overviewMetaGrid {
@@ -1749,7 +1759,8 @@ input[type='checkbox'] {
 
   .jobOverview,
   .subtitleWorkbench,
-  .exportPanel {
+  .exportPanel,
+  .statsRail {
     border-radius: 18px;
   }
 

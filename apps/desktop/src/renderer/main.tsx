@@ -590,11 +590,28 @@ function App(): JSX.Element {
 
             <section className="workspaceMain">
               <section className="jobOverview" aria-label={t('currentJob')}>
-                <div className="jobOverviewGrid">
-                  <div className="jobMediaCard">
-                    <span className="fieldLabel">{t('mediaFile')}</span>
-                    <strong title={jobTitle}>{jobTitle}</strong>
-                    <small title={selectedMediaPath}>{selectedMediaPath || t('placeholderPath')}</small>
+                <div className="workspaceHero">
+                  <div className="jobFocusPanel">
+                    <div className="jobMediaCard">
+                      <span className="fieldLabel">{t('mediaFile')}</span>
+                      <strong title={jobTitle}>{jobTitle}</strong>
+                      <small title={selectedMediaPath}>{selectedMediaPath || t('placeholderPath')}</small>
+                    </div>
+
+                    <div className="jobProgressCard">
+                      <div className="progressHeader">
+                        <span className="stageBadge">{t(stageLabel(job?.stage ?? 'idle'))}</span>
+                        <strong>{completion}%</strong>
+                      </div>
+                      <div className={`track${appWorking ? ' active' : ''}`}>
+                        <span style={{ width: `${completion}%` }} />
+                      </div>
+                      {appWorking ? (
+                        <WorkingRibbon message={workingMessage} />
+                      ) : (
+                        <small title={message}>{message}</small>
+                      )}
+                    </div>
                   </div>
 
                   <div className="jobActionCard">
@@ -619,21 +636,6 @@ function App(): JSX.Element {
                       <Languages size={16} />
                       {t('translateSubtitles')}
                     </button>
-                  </div>
-
-                  <div className="jobProgressCard">
-                    <div className="progressHeader">
-                      <span className="stageBadge">{t(stageLabel(job?.stage ?? 'idle'))}</span>
-                      <strong>{completion}%</strong>
-                    </div>
-                    <div className={`track${appWorking ? ' active' : ''}`}>
-                      <span style={{ width: `${completion}%` }} />
-                    </div>
-                    {appWorking ? (
-                      <WorkingRibbon message={workingMessage} />
-                    ) : (
-                      <small title={message}>{message}</small>
-                    )}
                   </div>
                 </div>
               </section>
