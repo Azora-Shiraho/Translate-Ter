@@ -102,7 +102,7 @@ body,
 
 body {
   margin: 0;
-  min-width: 1100px;
+  min-width: 0;
   overflow: hidden;
   color: var(--tt-text-strong);
   background: var(--tt-surface-app);
@@ -290,6 +290,7 @@ button:disabled {
   gap: 10px;
   padding: 14px 18px 0;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .summaryToggle {
@@ -389,6 +390,16 @@ button:disabled {
   padding-top: 10px;
 }
 
+.railMetrics {
+  display: grid;
+  gap: 12px;
+}
+
+.railStatusStack {
+  display: grid;
+  gap: 12px;
+}
+
 .railHeader {
   display: grid;
   gap: 2px;
@@ -470,6 +481,12 @@ button:disabled {
 
 .jobProgressCard {
   align-content: space-between;
+}
+
+.jobActionCard button,
+.jobProgressCard .track,
+.jobProgressCard .workingRibbon {
+  width: 100%;
 }
 
 .progressHeader,
@@ -712,6 +729,15 @@ h3 {
 .row.selectable.selected {
   background: var(--tt-surface-active);
   box-shadow: inset 3px 0 0 var(--tt-accent);
+}
+
+.rowStart,
+.rowEnd {
+  white-space: nowrap;
+}
+
+.rowStatus {
+  justify-self: end;
 }
 
 .previewText {
@@ -1415,7 +1441,7 @@ input[type='checkbox'] {
   }
 
   .workspaceLayout {
-    grid-template-columns: 236px minmax(0, 1fr);
+    grid-template-columns: 220px minmax(0, 1fr);
     gap: 14px;
   }
 
@@ -1424,15 +1450,15 @@ input[type='checkbox'] {
   }
 
   .workspaceLayout.exportVisible {
-    grid-template-columns: 236px minmax(0, 1fr) 300px;
+    grid-template-columns: 220px minmax(0, 1fr) 286px;
   }
 
   .workspaceLayout.statsCollapsed.exportVisible {
-    grid-template-columns: minmax(0, 1fr) 300px;
+    grid-template-columns: minmax(0, 1fr) 286px;
   }
 
   .jobOverviewGrid {
-    grid-template-columns: minmax(280px, 1fr) minmax(260px, 0.82fr);
+    grid-template-columns: minmax(240px, 1fr) minmax(240px, 0.82fr);
   }
 
   .jobProgressCard {
@@ -1451,7 +1477,8 @@ input[type='checkbox'] {
   }
 
   .workspaceLayout {
-    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-columns: 196px minmax(0, 1fr);
+    gap: 12px;
   }
 
   .workspaceLayout.statsCollapsed {
@@ -1459,7 +1486,7 @@ input[type='checkbox'] {
   }
 
   .workspaceLayout.exportVisible {
-    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-columns: 196px minmax(0, 1fr);
   }
 
   .workspaceLayout.statsCollapsed.exportVisible {
@@ -1477,7 +1504,7 @@ input[type='checkbox'] {
   }
 
   .subtitleTable {
-    flex: 0 0 clamp(220px, 36vh, 360px);
+    flex: 0 0 clamp(240px, 38vh, 380px);
     overflow: auto;
     border-right: 0;
     border-bottom: 1px solid var(--tt-border-soft);
@@ -1485,7 +1512,7 @@ input[type='checkbox'] {
 
   .segmentDetail {
     flex: 0 0 auto;
-    min-height: 460px;
+    min-height: clamp(340px, 42vh, 420px);
   }
 
   .subtitleWorkbench {
@@ -1493,7 +1520,8 @@ input[type='checkbox'] {
   }
 
   .editorGrid {
-    grid-template-rows: repeat(2, minmax(180px, 1fr));
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
   }
 
   .workspaceLayout.exportVisible .exportDock {
@@ -1502,6 +1530,107 @@ input[type='checkbox'] {
 
   .jobOverviewGrid {
     grid-template-columns: 1fr;
+  }
+
+  .jobActionCard {
+    grid-template-columns: 1fr;
+  }
+
+  .jobActionCard .primary {
+    grid-column: auto;
+  }
+
+  .jobMediaCard small,
+  .jobProgressCard small {
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .workflowRail {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+
+  .workflowRail::-webkit-scrollbar {
+    display: none;
+  }
+
+  .summaryToggle,
+  .workflowStep {
+    flex: 0 0 auto;
+  }
+
+  .railContent {
+    padding-top: 0;
+  }
+
+  .railMetrics {
+    gap: 10px;
+  }
+
+  .row.head {
+    display: none;
+  }
+
+  .row {
+    grid-template-columns: repeat(2, minmax(0, auto)) minmax(0, 1fr) auto;
+    grid-template-areas:
+      "start end . status"
+      "original original original original"
+      "translated translated translated translated";
+    gap: 8px;
+    margin: 10px 12px;
+    border: 1px solid var(--tt-border-soft);
+    border-radius: var(--tt-radius-card);
+    padding: 12px;
+    background: var(--tt-surface-panel);
+  }
+
+  .row.selectable.selected {
+    box-shadow: inset 3px 0 0 var(--tt-accent), var(--tt-shadow-soft);
+  }
+
+  .rowStart,
+  .rowEnd {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+    border-radius: var(--tt-radius-pill);
+    padding: 0 9px;
+    background: var(--tt-surface-panel-soft);
+    color: var(--tt-text-muted);
+    font-size: 12px;
+  }
+
+  .rowStart {
+    grid-area: start;
+  }
+
+  .rowEnd {
+    grid-area: end;
+  }
+
+  .rowOriginal {
+    grid-area: original;
+  }
+
+  .rowTranslated {
+    grid-area: translated;
+  }
+
+  .rowStatus {
+    grid-area: status;
+    justify-self: end;
+  }
+
+  .previewText {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
   }
 
   .topChrome,
@@ -1542,7 +1671,6 @@ input[type='checkbox'] {
   }
 
   .workflowRail {
-    gap: 8px;
     padding: 10px 12px 0;
   }
 
@@ -1557,17 +1685,33 @@ input[type='checkbox'] {
     padding: 10px 12px 12px;
   }
 
+  .workspaceLayout,
+  .workspaceLayout.exportVisible {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .statsRail {
+    max-height: 240px;
+  }
+
+  .railMetrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workspaceMain {
+    gap: 12px;
+  }
+
   .jobOverview,
   .exportPanel {
     padding: 14px;
   }
 
-  .jobActionCard {
-    width: 100%;
-  }
-
-  .jobActionCard {
-    grid-template-columns: 1fr;
+  .jobMediaCard,
+  .jobActionCard,
+  .jobProgressCard {
+    min-height: 0;
+    padding: 13px 14px;
   }
 
   .jobTitleBlock strong {
@@ -1578,68 +1722,46 @@ input[type='checkbox'] {
     grid-template-columns: 1fr;
   }
 
-  .row {
-    grid-template-columns: 76px minmax(150px, 1fr) minmax(150px, 1fr) minmax(86px, auto);
-  }
-
-  .row > :nth-child(2) {
-    display: none;
+  .panelHeader p {
+    white-space: normal;
   }
 }
 
 @media (max-width: 680px) {
+  .workspaceLayout,
+  .settingsPage {
+    padding: 8px 10px 10px;
+  }
+
   .panelHeader,
   .compactHeader {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .subtitleTable {
-    padding: 10px;
+  .statsRail {
+    max-height: none;
   }
 
-  .row.head {
-    display: none;
+  .railMetrics {
+    grid-template-columns: 1fr;
+  }
+
+  .jobOverview,
+  .subtitleWorkbench,
+  .exportPanel {
+    border-radius: 18px;
   }
 
   .row {
-    grid-template-columns: repeat(2, minmax(0, auto)) minmax(0, 1fr);
-    gap: 8px;
-    margin-bottom: 10px;
-    border: 1px solid var(--tt-border-soft);
-    border-radius: var(--tt-radius-card);
-    padding: 12px;
-    background: var(--tt-surface-panel);
-  }
-
-  .row.selectable.selected {
-    box-shadow: inset 3px 0 0 var(--tt-accent), var(--tt-shadow-soft);
-  }
-
-  .row > span:nth-child(1),
-  .row > span:nth-child(2) {
-    display: inline-flex;
-    align-items: center;
-    min-height: 26px;
-    border-radius: var(--tt-radius-pill);
-    padding: 0 9px;
-    background: var(--tt-surface-panel-soft);
-    color: var(--tt-text-muted);
-    font-size: 12px;
-  }
-
-  .previewText,
-  .translatedPreview {
-    grid-column: 1 / -1;
+    margin: 8px 10px;
   }
 
   .status {
-    grid-column: 1 / -1;
     justify-self: start;
   }
 
   .editorGrid {
-    grid-template-rows: repeat(2, minmax(180px, 1fr));
     padding: 12px;
   }
 

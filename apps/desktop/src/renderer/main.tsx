@@ -544,38 +544,44 @@ function App(): JSX.Element {
                     <strong>{t('workflowSummary')}</strong>
                     <span>{t(stageLabel(job?.stage ?? 'idle'))}</span>
                   </div>
-                  <MetricCard
-                    icon={<Gauge size={16} />}
-                    label={t('jobStage')}
-                    value={t(stageLabel(job?.stage ?? 'idle'))}
-                  />
-                  <MetricCard
-                    icon={<Languages size={16} />}
-                    label={t('languagePair')}
-                    value={`${sourceLabel} -> ${targetLabel}`}
-                  />
-                  <MetricCard
-                    icon={<ShieldCheck size={16} />}
-                    label={t('translatedRows')}
-                    value={`${translatedCount}/${segments.length}`}
-                  />
-                  <MetricCard
-                    icon={<AlertCircle size={16} />}
-                    label={t('warnings')}
-                    value={String(warningCount)}
-                  />
-                  <div className="railNote">
-                    <span className={`signal ${llmHealth?.ok ? 'good' : llmHealth ? 'warn' : ''}`} />
-                    <div>
-                      <strong>{providerLabel(translationProviderId, t)}</strong>
-                      <small>{llmHealth ? t(providerStatusLabel(llmHealth.status)) : t('translationProviderDetail')}</small>
-                    </div>
+                  <div className="railMetrics">
+                    <MetricCard
+                      icon={<Gauge size={16} />}
+                      label={t('jobStage')}
+                      value={t(stageLabel(job?.stage ?? 'idle'))}
+                    />
+                    <MetricCard
+                      icon={<Languages size={16} />}
+                      label={t('languagePair')}
+                      value={`${sourceLabel} -> ${targetLabel}`}
+                    />
+                    <MetricCard
+                      icon={<ShieldCheck size={16} />}
+                      label={t('translatedRows')}
+                      value={`${translatedCount}/${segments.length}`}
+                    />
+                    <MetricCard
+                      icon={<AlertCircle size={16} />}
+                      label={t('warnings')}
+                      value={String(warningCount)}
+                    />
                   </div>
-                  <div className="railNote">
-                    <span className={`signal ${runtimeStatus?.binary.installed ? 'good' : ''}`} />
-                    <div>
-                      <strong>{t('runtime')}</strong>
-                      <small>{runtimeSummary}</small>
+                  <div className="railStatusStack">
+                    <div className="railNote">
+                      <span className={`signal ${llmHealth?.ok ? 'good' : llmHealth ? 'warn' : ''}`} />
+                      <div>
+                        <strong>{providerLabel(translationProviderId, t)}</strong>
+                        <small>
+                          {llmHealth ? t(providerStatusLabel(llmHealth.status)) : t('translationProviderDetail')}
+                        </small>
+                      </div>
+                    </div>
+                    <div className="railNote">
+                      <span className={`signal ${runtimeStatus?.binary.installed ? 'good' : ''}`} />
+                      <div>
+                        <strong>{t('runtime')}</strong>
+                        <small>{runtimeSummary}</small>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -646,11 +652,11 @@ function App(): JSX.Element {
                   <div className="subtitleWorkspace">
                     <div className="subtitleTable">
                       <div className="row head">
-                        <span>{t('start')}</span>
-                        <span>{t('end')}</span>
-                        <span>{t('original')}</span>
-                        <span>{t('translated')}</span>
-                        <span>{t('status')}</span>
+                        <span className="rowStart">{t('start')}</span>
+                        <span className="rowEnd">{t('end')}</span>
+                        <span className="rowOriginal">{t('original')}</span>
+                        <span className="rowTranslated">{t('translated')}</span>
+                        <span className="rowStatus">{t('status')}</span>
                       </div>
                       {job.subtitleDocument.segments.map((segment) => (
                         <button
@@ -659,11 +665,13 @@ function App(): JSX.Element {
                           key={segment.id}
                           onClick={() => setSelectedSegmentId(segment.id)}
                         >
-                          <span>{formatTimestamp(segment.startMs)}</span>
-                          <span>{formatTimestamp(segment.endMs)}</span>
-                          <div className="previewText">{segment.sourceText}</div>
-                          <div className="previewText translatedPreview">{segment.translatedText ?? ''}</div>
-                          <span className={`status ${segment.status}`}>{t(statusLabel(segment.status))}</span>
+                          <span className="rowStart">{formatTimestamp(segment.startMs)}</span>
+                          <span className="rowEnd">{formatTimestamp(segment.endMs)}</span>
+                          <div className="previewText rowOriginal">{segment.sourceText}</div>
+                          <div className="previewText translatedPreview rowTranslated">
+                            {segment.translatedText ?? ''}
+                          </div>
+                          <span className={`status rowStatus ${segment.status}`}>{t(statusLabel(segment.status))}</span>
                         </button>
                       ))}
                     </div>
