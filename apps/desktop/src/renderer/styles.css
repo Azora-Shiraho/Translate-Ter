@@ -789,6 +789,21 @@ h3 {
   font-size: 24px;
 }
 
+.segmentIndexBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 5ch;
+  min-height: 42px;
+  border: 1px solid var(--tt-border-soft);
+  border-radius: 14px;
+  padding: 0 14px;
+  background: var(--tt-surface-panel);
+  box-shadow: var(--tt-shadow-soft);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
 .segmentTitleStack p {
   margin: 0;
   color: var(--tt-text-muted);

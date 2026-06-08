@@ -682,7 +682,9 @@ function App(): JSX.Element {
                         <div className="segmentDetailHero">
                           <div className="segmentTitleStack">
                             <span className="fieldLabel">{t('segmentDetails')}</span>
-                            <h3>#{selectedSegment.index}</h3>
+                            <h3>
+                              <span className="segmentIndexBadge">#{selectedSegment.index}</span>
+                            </h3>
                             <p>
                               {formatTimestamp(selectedSegment.startMs)} - {formatTimestamp(selectedSegment.endMs)}
                             </p>
