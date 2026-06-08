@@ -7,12 +7,13 @@ import {
   ArrowRightLeft,
   CheckCircle2,
   Clock3,
-  Download,
   FileVideo,
   Gauge,
   HardDriveDownload,
   Languages,
   MonitorCog,
+  PanelLeftClose,
+  PanelLeftOpen,
   Play,
   RotateCcw,
   Save,
@@ -32,24 +33,34 @@ import type {
   WhisperModelInfo,
   WhisperRuntimeStatus
 } from '@shared/types';
-import type { JobStage } from '@shared/models';
+import type { AssetEvent, JobStage } from '@shared/models';
 import { formatTimestamp } from '@shared/srt';
 import { languageLabel, languageRegistry } from '@shared/languages';
 
 const steps = ['import', 'asr', 'subtitles', 'translate', 'export'] as const;
-const translationProviders = ['mock.local', 'openai.compatible'] as const;
+const translationProviders = ['openai.compatible'] as const;
 
 type ExportVariant = 'source' | 'translated' | 'bilingual';
 type BilingualOrder = 'source-first' | 'target-first';
+type AppView = 'workspace' | 'settings';
+type ToastTone = 'neutral' | 'warning' | 'error' | 'success';
+type ToastMessage = {
+  id: string;
+  message: string;
+  tone: ToastTone;
+  exiting: boolean;
+};
 
 const asrProviders = [
   { id: 'local.whisper.cpp', nameKey: 'localProvider', descriptionKey: 'localProviderDetail' },
-  { id: 'cloud.openai', nameKey: 'cloudProvider', descriptionKey: 'cloudProviderDetail' },
-  { id: 'mock.asr', nameKey: 'mockProvider', descriptionKey: 'mockProviderDetail' }
+  { id: 'cloud.openai', nameKey: 'cloudProvider', descriptionKey: 'cloudProviderDetail' }
 ] as const;
 
 function App(): JSX.Element {
   const { t, i18n } = useTranslation();
+  const [activeView, setActiveView] = useState<AppView>('workspace');
+  const [statsCollapsed, setStatsCollapsed] = useState(false);
+  const [systemPrefersDark, setSystemPrefersDark] = useState(true);
   const [settings, setSettings] = useState<AppSettingsPublic>();
   const [models, setModels] = useState<WhisperModelInfo[]>([]);
   const [nativeHealth, setNativeHealth] = useState<NativeHealth>();
@@ -63,6 +74,9 @@ function App(): JSX.Element {
   const [bilingualOrder, setBilingualOrder] = useState<BilingualOrder>('source-first');
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>();
   const [message, setMessage] = useState(t('ready'));
+  const [runtimeActivity, setRuntimeActivity] = useState<string>();
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [copyBubble, setCopyBubble] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [checkingRuntime, setCheckingRuntime] = useState(false);
   const [checkingProvider, setCheckingProvider] = useState<string>();
@@ -82,7 +96,9 @@ function App(): JSX.Element {
         window.translateTer.settings.getSecret('cloud.openai'),
         window.translateTer.settings.getSecret('openai.compatible')
       ]);
+
       if (!mounted) return;
+
       setSettings(nextSettings);
       setModels(nextModels);
       setNativeHealth(nextHealth);
@@ -94,17 +110,26 @@ function App(): JSX.Element {
       if (mounted) setMessage(i18n.t('ready'));
     })();
 
-    const unsubscribe = window.translateTer.jobs.onEvent((event) => {
+    const unsubscribeJobs = window.translateTer.jobs.onEvent((event) => {
       if (event.type === 'snapshot') setJob(event.job);
       if (event.type === 'progress') setMessage(event.message ?? translateStage(event.stage));
-      if (event.type === 'error') setMessage(event.message);
+      if (event.type === 'error') pushStatus(event.message, 'error');
     });
     const unsubscribeAssets = window.translateTer.assets.onEvent((event) => {
-      setMessage(event.message);
+      const nextMessage = assetEventLabel(event, (key, options) => i18n.t(key, options));
+      setRuntimeActivity(nextMessage);
+      setMessage(nextMessage);
+      if (event.type !== 'download-progress') {
+        pushToast(nextMessage, toastToneForAssetEvent(event));
+      }
+      if (event.type === 'ready' || event.type === 'error') {
+        void refreshModels();
+      }
     });
+
     return () => {
       mounted = false;
-      unsubscribe();
+      unsubscribeJobs();
       unsubscribeAssets();
     };
   }, [i18n, translateStage]);
@@ -114,6 +139,7 @@ function App(): JSX.Element {
       setSelectedSegmentId(undefined);
       return;
     }
+
     setSelectedSegmentId((current) =>
       current && job.subtitleDocument?.segments.some((segment) => segment.id === current)
         ? current
@@ -121,11 +147,46 @@ function App(): JSX.Element {
     );
   }, [job?.subtitleDocument]);
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const syncSystemTheme = (): void => setSystemPrefersDark(mediaQuery.matches);
+    syncSystemTheme();
+    mediaQuery.addEventListener('change', syncSystemTheme);
+    return () => mediaQuery.removeEventListener('change', syncSystemTheme);
+  }, []);
+
+  useEffect(() => {
+    if (!settings) return;
+    document.documentElement.dataset.theme =
+      settings.theme === 'system' ? (systemPrefersDark ? 'dark' : 'light') : settings.theme;
+  }, [settings, systemPrefersDark]);
+
+  useEffect(() => {
+    if (!settings) return;
+    const migratedTranslationPriority = settings.translationProviderPriority.filter(
+      (providerId) => providerId !== 'mock.local'
+    );
+    const migratedAsrProviderId =
+      settings.asrProviderId === 'mock.asr' ? 'local.whisper.cpp' : settings.asrProviderId;
+    const needsMigration =
+      migratedAsrProviderId !== settings.asrProviderId ||
+      migratedTranslationPriority.length !== settings.translationProviderPriority.length ||
+      migratedTranslationPriority.length === 0;
+
+    if (!needsMigration) return;
+
+    void updateSettings({
+      asrProviderId: migratedAsrProviderId,
+      translationProviderPriority:
+        migratedTranslationPriority.length > 0 ? migratedTranslationPriority : ['openai.compatible']
+    });
+  }, [settings]);
+
   async function updateSettings(patch: Partial<AppSettingsPublic>): Promise<void> {
     const next = await window.translateTer.saveSettings(patch);
     setSettings(next);
     if (patch.uiLanguage) {
-      await i18n.changeLanguage(patch.uiLanguage);
+      await i18n.changeLanguage(next.uiLanguage);
       setMessage(i18n.t('ready'));
     }
   }
@@ -137,6 +198,8 @@ function App(): JSX.Element {
   async function checkRuntime(): Promise<void> {
     if (!settings) return;
     setCheckingRuntime(true);
+    setRuntimeActivity(t('runtimeChecking'));
+    pushStatus(t('runtimeChecking'));
     try {
       const status = await window.translateTer.assets.ensureWhisperRuntime({
         modelId: settings.whisperModelId,
@@ -144,10 +207,14 @@ function App(): JSX.Element {
         preferCuda: settings.localWhisperUseCuda
       });
       setRuntimeStatus(status);
-      setMessage(status.message ?? t(runtimeActionLabel(status.actionRequired)));
+      const nextMessage = status.message ?? t(runtimeActionLabel(status.actionRequired));
+      setRuntimeActivity(nextMessage);
+      pushStatus(nextMessage, status.actionRequired === 'none' ? 'success' : 'warning');
       await refreshModels();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      const nextMessage = error instanceof Error ? error.message : String(error);
+      setRuntimeActivity(nextMessage);
+      pushStatus(nextMessage, 'error');
     } finally {
       setCheckingRuntime(false);
     }
@@ -162,9 +229,9 @@ function App(): JSX.Element {
       }
       const health = await window.translateTer.settings.testProvider(providerId);
       setProviderHealth((current) => ({ ...current, [providerId]: health }));
-      setMessage(health.message ?? t(providerStatusLabel(health.status)));
+      pushStatus(health.message ?? t(providerStatusLabel(health.status)), health.ok ? 'success' : 'warning');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
       setCheckingProvider(undefined);
     }
@@ -197,7 +264,7 @@ function App(): JSX.Element {
       });
       setJob(nextJob);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
       setBusy(false);
     }
@@ -209,7 +276,7 @@ function App(): JSX.Element {
     try {
       setJob(await window.translateTer.startTranslation(job.id));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
       setBusy(false);
     }
@@ -220,9 +287,9 @@ function App(): JSX.Element {
     setBusy(true);
     try {
       await window.translateTer.exportSrt(job.subtitleDocument, exportPath.trim(), exportVariant, bilingualOrder);
-      setMessage(t('exported'));
+      pushStatus(t('exported'), 'success');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      pushStatus(error instanceof Error ? error.message : String(error), 'error');
     } finally {
       setBusy(false);
     }
@@ -244,7 +311,7 @@ function App(): JSX.Element {
 
   async function saveProviderSecret(providerId: string): Promise<void> {
     await window.translateTer.settings.setSecret(providerId, providerSecrets[providerId] ?? {});
-    setMessage(t('providerSaved'));
+    pushStatus(t('providerSaved'), 'success');
   }
 
   function updateProviderSecret(providerId: string, patch: Partial<ProviderSecretInput>): void {
@@ -266,27 +333,67 @@ function App(): JSX.Element {
     () => models.find((model) => model.id === settings?.whisperModelId),
     [models, settings?.whisperModelId]
   );
+
   const completion = job?.progress ?? 0;
   const segments = job?.subtitleDocument?.segments ?? [];
   const translatedCount = segments.filter((segment) => Boolean(segment.translatedText?.trim())).length;
   const warningCount = (job?.warnings.length ?? 0) + (job?.subtitleDocument?.metadata.warnings.length ?? 0);
   const sourceLabel = settings ? languageLabel(settings.sourceLanguage, settings.uiLanguage) : '';
   const targetLabel = settings ? languageLabel(settings.targetLanguage, settings.uiLanguage) : '';
-  const translationProviderId = settings?.translationProviderPriority[0] ?? 'mock.local';
+  const translationProviderId = settings?.translationProviderPriority[0] ?? 'openai.compatible';
   const supportsCuda = Boolean(nativeHealth?.cudaSupported || runtimeStatus?.acceleration.cudaSupported);
   const llmHealth = providerHealth[translationProviderId];
-  const asrHealth = providerHealth[settings?.asrProviderId ?? 'mock.asr'];
+  const asrHealth = providerHealth[settings?.asrProviderId ?? 'local.whisper.cpp'];
   const cloudAsrSecret = providerSecrets['cloud.openai'] ?? {};
   const llmSecret = providerSecrets['openai.compatible'] ?? {};
   const canForceStop = Boolean(job && !['completed', 'failed', 'cancelled'].includes(job.stage));
   const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) ?? segments[0];
+  const runtimeSummary = runtimeStatus
+    ? `${t(runtimeActionLabel(runtimeStatus.actionRequired))} · ${runtimeStatus.acceleration.selected.toUpperCase()}`
+    : t('notChecked');
+  const selectedMediaPath = job?.mediaPath ?? mediaPath.trim();
+  const selectedMediaFileName =
+    job?.fileName ?? selectedMediaPath.split(/[\\/]/).filter(Boolean).at(-1) ?? t('chooseMedia');
+  const jobTitle = selectedMediaFileName;
+  const exportDockVisible = job?.step === 'export';
 
   async function forceStop(): Promise<void> {
     if (!job) return;
     setBusy(false);
     await window.translateTer.jobs.cancel(job.id);
     setJob(await window.translateTer.jobs.get(job.id));
-    setMessage(t('stopped'));
+    pushStatus(t('stopped'), 'warning');
+  }
+
+  function pushStatus(nextMessage: string, tone: ToastTone = 'neutral'): void {
+    setMessage(nextMessage);
+    pushToast(nextMessage, tone);
+  }
+
+  function pushToast(nextMessage: string, tone: ToastTone = 'neutral'): void {
+    const id = `toast-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setToasts((current) => [...current.slice(-3), { id, message: nextMessage, tone, exiting: false }]);
+    window.setTimeout(() => {
+      setToasts((current) => current.map((toast) => (toast.id === id ? { ...toast, exiting: true } : toast)));
+      window.setTimeout(() => {
+        setToasts((current) => current.filter((toast) => toast.id !== id));
+      }, 360);
+    }, 4200);
+  }
+
+  async function copyToastMessage(toast: ToastMessage): Promise<void> {
+    if (toast.tone !== 'error') return;
+    try {
+      await navigator.clipboard.writeText(toast.message);
+      showCopyBubble(t('copiedToClipboard'));
+    } catch {
+      showCopyBubble(t('copyFailed'));
+    }
+  }
+
+  function showCopyBubble(nextMessage: string): void {
+    setCopyBubble(nextMessage);
+    window.setTimeout(() => setCopyBubble(undefined), 1800);
   }
 
   if (!settings) return <div className="boot">Translate-Ter</div>;
@@ -294,517 +401,741 @@ function App(): JSX.Element {
   return (
     <div className="appShell">
       <header className="topChrome">
-        <div className="windowDots" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
         <div className="brand">
           <FileVideo size={18} />
           <div>
             <strong>{t('appName')}</strong>
-            <span title={job?.fileName ?? t('mockNotice')}>{job?.fileName ?? t('mockNotice')}</span>
           </div>
         </div>
-        <nav className="stepper">
-          {steps.map((step, index) => (
-            <span className={index <= currentStepIndex ? 'step active' : 'step'} key={step}>
-              <span>{index + 1}</span>
-              {t(step)}
-            </span>
-          ))}
-        </nav>
-        <label className="languageSwitch">
-          <span>{t('uiLanguage')}</span>
-          <select
-            aria-label={t('uiLanguage')}
-            value={settings.uiLanguage}
-            onChange={(event) => void updateSettings({ uiLanguage: event.target.value as 'en-US' | 'zh-CN' })}
+        <div className="topChromeTabs">
+          <button
+            className={activeView === 'workspace' ? 'chromeTab active' : 'chromeTab'}
+            onClick={() => setActiveView('workspace')}
           >
-            <option value="en-US">English</option>
-            <option value="zh-CN">中文</option>
-          </select>
-        </label>
+            <Gauge size={15} />
+            {t('workspace')}
+          </button>
+          <button
+            className={activeView === 'settings' ? 'chromeTab active' : 'chromeTab'}
+            onClick={() => setActiveView('settings')}
+          >
+            <Settings size={15} />
+            {t('settings')}
+          </button>
+        </div>
       </header>
-      <nav className="workflowRail">
-        {steps.map((step, index) => (
-          <span className={index < currentStepIndex ? 'workflowStep done' : index === currentStepIndex ? 'workflowStep active' : 'workflowStep'} key={step}>
-            <span className="workflowStepDot" />
-            <strong>{index + 1}</strong>
-            <span>{t(step)}</span>
-          </span>
-        ))}
-      </nav>
 
-      <main className="workstation">
-        <section className="editorStage">
-          <section className="jobOverview" aria-label={t('preview')}>
-            <div className="jobOverviewMain">
-              <strong title={job?.fileName ?? t('chooseMedia')}>{job?.fileName ?? t('chooseMedia')}</strong>
-              <span>{t(stageLabel(job?.stage ?? 'idle'))}</span>
-            </div>
-            <div className="jobOverviewMeta">
-              <span>{sourceLabel}</span>
-              <ArrowRight size={16} />
-              <span>{targetLabel}</span>
-              <span className="jobOverviewProgress">{completion}%</span>
-            </div>
-            <div className="jobOverviewBar track">
-              <span style={{ width: `${completion}%` }} />
-            </div>
-            <div className="jobOverviewActions">
-              <label className="heroField">
-                <span>{t('mediaPath')}</span>
-                <input
-                  value={mediaPath}
-                  placeholder={t('placeholderPath')}
-                  onChange={(event) => setMediaPath(event.target.value)}
-                />
-              </label>
-              <button className="secondary" onClick={() => void pickMedia()}>
-                <FileVideo size={16} />
-                {t('chooseMedia')}
-              </button>
-              <button className="primary" disabled={busy || !mediaPath.trim()} onClick={() => void createAndStart()}>
-                <Play size={16} />
-                {t('startTranscription')}
-              </button>
-              <button className="secondary" disabled={busy || !job?.subtitleDocument} onClick={() => void translateJob()}>
-                <Languages size={16} />
-                {t('translateSubtitles')}
-              </button>
-              <button className="secondary" disabled={busy || !job?.subtitleDocument || !exportPath.trim()} onClick={() => void exportSrt()}>
-                <Save size={16} />
-                {t('exportSrt')}
-              </button>
-            </div>
-            <div className="jobOverviewStats" aria-label={t('workflowSummary')}>
-              <MetricCard icon={<Gauge size={16} />} label={t('jobStage')} value={t(stageLabel(job?.stage ?? 'idle'))} />
-              <MetricCard icon={<Languages size={16} />} label={t('languagePair')} value={`${shortLanguage(settings.sourceLanguage)} -> ${shortLanguage(settings.targetLanguage)}`} />
-              <MetricCard icon={<ShieldCheck size={16} />} label={t('translatedRows')} value={`${translatedCount}/${segments.length}`} />
-              <MetricCard icon={<AlertCircle size={16} />} label={t('warnings')} value={String(warningCount)} />
-            </div>
-          </section>
+      {activeView === 'workspace' ? (
+        <section className="viewFrame workspaceFrame">
+          <nav className="workflowRail">
+            {steps.map((step, index) => (
+              <span
+                className={
+                  index < currentStepIndex
+                    ? 'workflowStep done'
+                    : index === currentStepIndex
+                      ? 'workflowStep active'
+                      : 'workflowStep'
+                }
+                key={step}
+              >
+                <span className="workflowStepDot" />
+                <strong>{index + 1}</strong>
+                <span>{t(step)}</span>
+              </span>
+            ))}
+          </nav>
 
-          <section className="subtitleWorkbench">
-            <div className="panelHeader">
-              <div>
-                <h2>{t('subtitles')}</h2>
-                <p>{t('subtitlePanelHint')}</p>
-              </div>
-              <span>{t('rows', { count: segments.length })}</span>
-            </div>
-            {job?.subtitleDocument ? (
-              <div className="subtitleWorkspace">
-                <div className="subtitleTable">
-                <div className="row head">
-                  <span>{t('start')}</span>
-                  <span>{t('end')}</span>
-                  <span>{t('original')}</span>
-                  <span>{t('translated')}</span>
-                  <span>{t('status')}</span>
+          <main
+            className={`workspaceLayout${statsCollapsed ? ' statsCollapsed' : ''}${
+              exportDockVisible ? ' exportVisible' : ''
+            }`}
+          >
+            <aside className={`statsRail${statsCollapsed ? ' collapsed' : ''}`}>
+              <button
+                className="railToggle"
+                title={statsCollapsed ? t('expandSummary') : t('collapseSummary')}
+                onClick={() => setStatsCollapsed((current) => !current)}
+              >
+                {statsCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+              </button>
+              {!statsCollapsed && (
+                <div className="railContent">
+                  <div className="railHeader">
+                    <strong>{t('workflowSummary')}</strong>
+                    <span>{t(stageLabel(job?.stage ?? 'idle'))}</span>
+                  </div>
+                  <MetricCard
+                    icon={<Gauge size={16} />}
+                    label={t('jobStage')}
+                    value={t(stageLabel(job?.stage ?? 'idle'))}
+                  />
+                  <MetricCard
+                    icon={<Languages size={16} />}
+                    label={t('languagePair')}
+                    value={`${sourceLabel} -> ${targetLabel}`}
+                  />
+                  <MetricCard
+                    icon={<ShieldCheck size={16} />}
+                    label={t('translatedRows')}
+                    value={`${translatedCount}/${segments.length}`}
+                  />
+                  <MetricCard
+                    icon={<AlertCircle size={16} />}
+                    label={t('warnings')}
+                    value={String(warningCount)}
+                  />
+                  <div className="railNote">
+                    <span className={`signal ${llmHealth?.ok ? 'good' : llmHealth ? 'warn' : ''}`} />
+                    <div>
+                      <strong>{providerLabel(translationProviderId, t)}</strong>
+                      <small>{llmHealth ? t(providerStatusLabel(llmHealth.status)) : t('translationProviderDetail')}</small>
+                    </div>
+                  </div>
+                  <div className="railNote">
+                    <span className={`signal ${runtimeStatus?.binary.installed ? 'good' : ''}`} />
+                    <div>
+                      <strong>{t('runtime')}</strong>
+                      <small>{runtimeSummary}</small>
+                    </div>
+                  </div>
                 </div>
-                {job.subtitleDocument.segments.map((segment) => (
-                  <button
-                    type="button"
-                    className={segment.id === selectedSegment?.id ? 'row selectable selected' : 'row selectable'}
-                    key={segment.id}
-                    onClick={() => setSelectedSegmentId(segment.id)}
-                  >
-                    <span>{formatTimestamp(segment.startMs)}</span>
-                    <span>{formatTimestamp(segment.endMs)}</span>
-                    <div className="previewText">{segment.sourceText}</div>
-                    <div className="previewText translatedPreview">{segment.translatedText ?? ''}</div>
-                    <span className={`status ${segment.status}`}>{t(statusLabel(segment.status))}</span>
-                  </button>
-                ))}
+              )}
+            </aside>
+
+            <section className="workspaceMain">
+              <section className="jobOverview" aria-label={t('currentJob')}>
+                <div className="jobOverviewMain">
+                  <div className="jobTitleBlock">
+                    <strong title={jobTitle}>{jobTitle}</strong>
+                    <div className="jobOverviewMeta">
+                      <span className="stageBadge">{t(stageLabel(job?.stage ?? 'idle'))}</span>
+                      <span className="metaPill">
+                        <Languages size={14} />
+                        {sourceLabel} <ArrowRight size={12} /> {targetLabel}
+                      </span>
+                      <span className="metaPill">
+                        <Gauge size={14} />
+                        {completion}%
+                      </span>
+                    </div>
+                  </div>
+                  <div className="jobPrimaryActions">
+                    <button className="secondary" onClick={() => void pickMedia()}>
+                      <FileVideo size={16} />
+                      {t('chooseMedia')}
+                    </button>
+                    <button
+                      className="primary"
+                      disabled={busy || !mediaPath.trim()}
+                      onClick={() => void createAndStart()}
+                    >
+                      <Play size={16} />
+                      {t('startTranscription')}
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={busy || !job?.subtitleDocument}
+                      onClick={() => void translateJob()}
+                    >
+                      <Languages size={16} />
+                      {t('translateSubtitles')}
+                    </button>
+                  </div>
                 </div>
-                {selectedSegment && (
-                  <div className="segmentEditor">
-                    <div className="panelHeader compactHeader">
-                      <div>
-                        <h3>{t('status')} #{selectedSegment.index}</h3>
-                        <p>{formatTimestamp(selectedSegment.startMs)} - {formatTimestamp(selectedSegment.endMs)}</p>
+                <div className="track">
+                  <span style={{ width: `${completion}%` }} />
+                </div>
+                <div className="jobOverviewFooter">
+                  <div className="heroField mediaSummary">
+                    <span className="fieldLabel">{t('mediaFile')}</span>
+                    <strong title={jobTitle}>{jobTitle}</strong>
+                    <small title={selectedMediaPath}>{selectedMediaPath || t('placeholderPath')}</small>
+                  </div>
+                  <div className="overviewMetaGrid">
+                    <MetricCard
+                      icon={<Gauge size={16} />}
+                      label={t('jobStage')}
+                      value={t(stageLabel(job?.stage ?? 'idle'))}
+                    />
+                    <MetricCard
+                      icon={<ShieldCheck size={16} />}
+                      label={t('translatedRows')}
+                      value={`${translatedCount}/${segments.length}`}
+                    />
+                    <MetricCard
+                      icon={<AlertCircle size={16} />}
+                      label={t('warnings')}
+                      value={String(warningCount)}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <section className="subtitleWorkbench">
+                <div className="panelHeader">
+                  <div>
+                    <h2>{t('subtitles')}</h2>
+                    <p>{t('reviewHint')}</p>
+                  </div>
+                  <div className="panelHeaderMeta">
+                    <span>{t('rows', { count: segments.length })}</span>
+                  </div>
+                </div>
+                {job?.subtitleDocument ? (
+                  <div className="subtitleWorkspace">
+                    <div className="subtitleTable">
+                      <div className="row head">
+                        <span>{t('start')}</span>
+                        <span>{t('end')}</span>
+                        <span>{t('original')}</span>
+                        <span>{t('translated')}</span>
+                        <span>{t('status')}</span>
                       </div>
-                      <span className={`status ${selectedSegment.status}`}>{t(statusLabel(selectedSegment.status))}</span>
+                      {job.subtitleDocument.segments.map((segment) => (
+                        <button
+                          type="button"
+                          className={segment.id === selectedSegment?.id ? 'row selectable selected' : 'row selectable'}
+                          key={segment.id}
+                          onClick={() => setSelectedSegmentId(segment.id)}
+                        >
+                          <span>{formatTimestamp(segment.startMs)}</span>
+                          <span>{formatTimestamp(segment.endMs)}</span>
+                          <div className="previewText">{segment.sourceText}</div>
+                          <div className="previewText translatedPreview">{segment.translatedText ?? ''}</div>
+                          <span className={`status ${segment.status}`}>{t(statusLabel(segment.status))}</span>
+                        </button>
+                      ))}
                     </div>
-                    <div className="editorGrid">
-                      <label>
-                        {t('original')}
-                        <textarea
-                          aria-label={`${t('original')} ${selectedSegment.index}`}
-                          value={selectedSegment.sourceText}
-                          onChange={(event) => void updateSegment(selectedSegment, { sourceText: event.target.value })}
-                        />
-                      </label>
-                      <label>
-                        {t('translated')}
-                        <textarea
-                          aria-label={`${t('translated')} ${selectedSegment.index}`}
-                          value={selectedSegment.translatedText ?? ''}
-                          placeholder={t('translated')}
-                          onChange={(event) => void updateSegment(selectedSegment, { translatedText: event.target.value })}
-                        />
-                      </label>
-                    </div>
+                    {selectedSegment && (
+                      <div className="segmentDetail">
+                        <div className="panelHeader compactHeader">
+                          <div>
+                            <h3>{t('segmentDetails')} #{selectedSegment.index}</h3>
+                            <p>
+                              {formatTimestamp(selectedSegment.startMs)} - {formatTimestamp(selectedSegment.endMs)}
+                            </p>
+                          </div>
+                          <span className={`status ${selectedSegment.status}`}>
+                            {t(statusLabel(selectedSegment.status))}
+                          </span>
+                        </div>
+                        <div className="editorGrid">
+                          <label>
+                            {t('original')}
+                            <textarea
+                              aria-label={`${t('original')} ${selectedSegment.index}`}
+                              value={selectedSegment.sourceText}
+                              onChange={(event) =>
+                                void updateSegment(selectedSegment, { sourceText: event.target.value })
+                              }
+                            />
+                          </label>
+                          <label>
+                            {t('translated')}
+                            <textarea
+                              className="translatedField"
+                              aria-label={`${t('translated')} ${selectedSegment.index}`}
+                              value={selectedSegment.translatedText ?? ''}
+                              placeholder={t('translated')}
+                              onChange={(event) =>
+                                void updateSegment(selectedSegment, { translatedText: event.target.value })
+                              }
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="empty">
+                    <Clock3 size={24} />
+                    <strong>{t('noSubtitlesTitle')}</strong>
+                    <span>{t('noSubtitles')}</span>
                   </div>
                 )}
-              </div>
-            ) : (
-              <div className="empty">
-                <Clock3 size={24} />
-                <strong>{t('noSubtitlesTitle')}</strong>
-                <span>{t('noSubtitles')}</span>
-              </div>
-            )}
-          </section>
-        </section>
+              </section>
+            </section>
 
-        <aside className="contextPanel">
-          <InspectorSection icon={<Save size={16} />} title={t('export')}>
-            <div className="segmented">
-              {[
-                ['translated', t('translatedOnly')],
-                ['source', t('sourceOnly')],
-                ['bilingual', t('bilingual')]
-              ].map(([value, label]) => (
+            <aside className="exportDock">
+              <section className="exportPanel">
+                <div className="panelHeader exportHeader">
+                  <div>
+                    <h3>
+                      <Save size={16} />
+                      {t('export')}
+                    </h3>
+                  </div>
+                </div>
+                <div className="segmented">
+                  {[
+                    ['translated', t('translatedOnly')],
+                    ['source', t('sourceOnly')],
+                    ['bilingual', t('bilingual')]
+                  ].map(([value, label]) => (
+                    <button
+                      className={exportVariant === value ? 'selected' : ''}
+                      key={value}
+                      onClick={() => setExportVariant(value as ExportVariant)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {exportVariant === 'bilingual' && (
+                  <div className="segmented two">
+                    {[
+                      ['source-first', t('sourceFirst')],
+                      ['target-first', t('targetFirst')]
+                    ].map(([value, label]) => (
+                      <button
+                        className={bilingualOrder === value ? 'selected' : ''}
+                        key={value}
+                        onClick={() => setBilingualOrder(value as BilingualOrder)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <input
+                  value={exportPath}
+                  placeholder={t('exportPath')}
+                  onChange={(event) => setExportPath(event.target.value)}
+                />
                 <button
-                  className={exportVariant === value ? 'selected' : ''}
-                  key={value}
-                  onClick={() => setExportVariant(value as ExportVariant)}
+                  className="primary wideButton"
+                  disabled={busy || !job?.subtitleDocument || !exportPath.trim()}
+                  onClick={() => void exportSrt()}
                 >
-                  {label}
+                  <Save size={16} />
+                  {t('exportSrt')}
                 </button>
-              ))}
-            </div>
-            {exportVariant === 'bilingual' && (
-              <div className="segmented two">
-                {[
-                  ['source-first', t('sourceFirst')],
-                  ['target-first', t('targetFirst')]
-                ].map(([value, label]) => (
-                  <button
-                    className={bilingualOrder === value ? 'selected' : ''}
-                    key={value}
-                    onClick={() => setBilingualOrder(value as BilingualOrder)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-            <input value={exportPath} placeholder={t('exportPath')} onChange={(event) => setExportPath(event.target.value)} />
-            <button className="primary" disabled={busy || !job?.subtitleDocument || !exportPath.trim()} onClick={() => void exportSrt()}>
-              <Save size={16} />
-              {t('exportSrt')}
-            </button>
-          </InspectorSection>
+              </section>
+            </aside>
+          </main>
+        </section>
+      ) : (
+        <section className="viewFrame settingsFrame">
+          <main className="settingsPage">
+            <div className="settingsGrid">
+              <section className="settingsColumn">
+                <section className="settingsPanel">
+                  <InspectorSection icon={<Settings size={16} />} title={t('softwareSettings')}>
+                  <div className="segmented three">
+                    <button
+                      className={settings.theme === 'system' ? 'selected' : ''}
+                      onClick={() => void updateSettings({ theme: 'system' })}
+                    >
+                      {t('systemMode')}
+                    </button>
+                    <button
+                      className={settings.theme === 'dark' ? 'selected' : ''}
+                      onClick={() => void updateSettings({ theme: 'dark' })}
+                    >
+                      {t('darkMode')}
+                    </button>
+                    <button
+                      className={settings.theme === 'light' ? 'selected' : ''}
+                      onClick={() => void updateSettings({ theme: 'light' })}
+                    >
+                      {t('lightMode')}
+                    </button>
+                  </div>
+                  <label>
+                    {t('uiLanguage')}
+                    <select
+                      value={settings.uiLanguage}
+                      onChange={(event) =>
+                        void updateSettings({ uiLanguage: event.target.value as 'en-US' | 'zh-CN' })
+                      }
+                    >
+                      <option value="en-US">English</option>
+                      <option value="zh-CN">中文</option>
+                    </select>
+                  </label>
+                  </InspectorSection>
+                </section>
 
-          <InspectorSection icon={<Languages size={16} />} title={t('translate')}>
-            <label>
-              {t('translationProvider')}
-              <select
-                value={translationProviderId}
-                onChange={(event) =>
-                  void updateSettings({
-                    translationProviderPriority:
-                      event.target.value === 'mock.local' ? ['mock.local'] : [event.target.value, 'mock.local']
-                  })
-                }
-              >
-                {translationProviders.map((provider) => (
-                  <option key={provider} value={provider}>
-                    {provider}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <ProviderCard
-              activeId={translationProviderId}
-              detail={t('translationProviderDetail')}
-              health={llmHealth}
-              loading={checkingProvider === translationProviderId}
-              onTest={() => void testProvider(translationProviderId)}
-            />
-            {translationProviderId === 'mock.local' && (
-              <InlineNotice
-                title={t('translationProvider')}
-                detail={t('mockTranslationBypass')}
-              />
-            )}
-            {translationProviderId === 'openai.compatible' && (
-              <>
-                <div className="providerCard">
-                  <div>
-                    <strong>{t('llmProviderSettings')}</strong>
-                    <small>{t('translationProviderDetail')}</small>
-                  </div>
-                </div>
-                <TextField
-                  label={t('baseUrl')}
-                  value={llmSecret.baseUrl ?? ''}
-                  placeholder="https://api.openai.com/v1"
-                  onChange={(value) => updateProviderSecret('openai.compatible', { baseUrl: value })}
-                />
-                <TextField
-                  label={t('apiKey')}
-                  value={llmSecret.apiKey ?? ''}
-                  placeholder="sk-..."
-                  type="password"
-                  onChange={(value) => updateProviderSecret('openai.compatible', { apiKey: value })}
-                />
-                <TextField
-                  label={t('model')}
-                  value={llmSecret.model ?? ''}
-                  placeholder="gpt-4o-mini"
-                  onChange={(value) => updateProviderSecret('openai.compatible', { model: value })}
-                />
-                <TextField
-                  label={t('organization')}
-                  value={llmSecret.organization ?? ''}
-                  placeholder={t('optional')}
-                  onChange={(value) => updateProviderSecret('openai.compatible', { organization: value })}
-                />
-                <div className="providerCard">
-                  <div>
-                    <strong>{t('translationRateLimits')}</strong>
-                    <small>{t('translationRateLimitsDetail')}</small>
-                  </div>
-                </div>
-                <NumberField
-                  label={t('concurrency')}
-                  min={1}
-                  max={6}
-                  value={settings.translationConcurrency}
-                  onChange={(value) => void updateSettings({ translationConcurrency: value })}
-                />
-                <NumberField
-                  label={t('requestsPerMinute')}
-                  min={1}
-                  max={600}
-                  value={settings.translationRequestsPerMinute}
-                  onChange={(value) => void updateSettings({ translationRequestsPerMinute: value })}
-                />
-                <NumberField
-                  label={t('tokenBudgetPerMinute')}
-                  min={1000}
-                  max={1000000}
-                  step={1000}
-                  value={settings.translationTokenBudgetPerMinute}
-                  onChange={(value) => void updateSettings({ translationTokenBudgetPerMinute: value })}
-                />
-                <div className="providerCard">
-                  <div>
-                    <strong>{t('translationBatching')}</strong>
-                    <small>{t('translationBatchingDetail')}</small>
-                  </div>
-                </div>
-                <NumberField
-                  label={t('linesPerRequest')}
-                  min={1}
-                  max={32}
-                  value={settings.translationLinesPerRequest}
-                  onChange={(value) =>
-                    void updateSettings({
-                      translationLinesPerRequest: value,
-                      translationBatchStride: Math.min(settings.translationBatchStride, value)
-                    })
-                  }
-                />
-                <NumberField
-                  label={t('batchStride')}
-                  min={1}
-                  max={settings.translationLinesPerRequest}
-                  value={settings.translationBatchStride}
-                  onChange={(value) => void updateSettings({ translationBatchStride: value })}
-                />
-                <ProviderActionRow
-                  savingLabel={t('saveProvider')}
-                  testingLabel={checkingProvider === 'openai.compatible' ? t('checking') : t('test')}
-                  onSave={() => void saveProviderSecret('openai.compatible')}
-                  onTest={() => void testProvider('openai.compatible')}
-                  testDisabled={checkingProvider === 'openai.compatible'}
-                />
-              </>
-            )}
-          </InspectorSection>
+                <section className="settingsPanel">
+                  <InspectorSection icon={<MonitorCog size={16} />} title={t('runtime')}>
+                    <div className="runtimeGrid">
+                      <StatusLine
+                        label={t('nativeBackend')}
+                        value={nativeHealth?.status ? t(nativeHealth.status) : t('unknown')}
+                        tone={nativeHealth?.status === 'ok' ? 'good' : 'muted'}
+                      />
+                      <StatusLine
+                        label={t('acceleration')}
+                        value={nativeHealth?.hardwareAcceleration?.toUpperCase() ?? t('unknown')}
+                        tone={nativeHealth?.hardwareAcceleration === 'gpu' ? 'good' : 'muted'}
+                      />
+                      <StatusLine
+                        label={t('cudaAcceleration')}
+                        value={supportsCuda ? t('cudaDetectedShort') : t('cudaUnavailableShort')}
+                        tone={supportsCuda ? 'good' : 'muted'}
+                      />
+                      <StatusLine
+                        label={t('runtimeBinary')}
+                        value={runtimeStatus?.binary.installed ? t('installed') : t('notChecked')}
+                        tone={runtimeStatus?.binary.installed ? 'good' : 'muted'}
+                      />
+                      <StatusLine
+                        label={t('runtimeModel')}
+                        value={runtimeStatus?.model.installed ? t('installed') : t('notChecked')}
+                        tone={runtimeStatus?.model.installed ? 'good' : 'muted'}
+                      />
+                    </div>
+                  </InspectorSection>
+                </section>
+              </section>
 
-          <InspectorSection icon={<Settings size={16} />} title={t('asr')}>
-            <div className="languagePair">
-              <SelectField
-                label={t('sourceLanguage')}
-                uiLanguage={settings.uiLanguage}
-                value={settings.sourceLanguage}
-                onChange={(value) => void updateSettings({ sourceLanguage: value })}
-              />
-              <button className="swapButton" disabled={settings.sourceLanguage === 'auto'} title={t('swapLanguages')} onClick={() => void swapLanguages()}>
-                <ArrowRightLeft size={16} />
-              </button>
-              <SelectField
-                label={t('targetLanguage')}
-                uiLanguage={settings.uiLanguage}
-                value={settings.targetLanguage}
-                targetOnly
-                onChange={(value) => void updateSettings({ targetLanguage: value })}
-              />
-            </div>
-            <label>
-              {t('asrProvider')}
-              <select value={settings.asrProviderId} onChange={(event) => void updateSettings({ asrProviderId: event.target.value })}>
-                {asrProviders.map((provider) => (
-                  <option key={provider.id} value={provider.id}>
-                    {t(provider.nameKey)} · {provider.id}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <ProviderCard
-              activeId={settings.asrProviderId}
-              detail={t(asrProviders.find((provider) => provider.id === settings.asrProviderId)?.descriptionKey ?? 'providerReady')}
-              health={asrHealth}
-              loading={checkingProvider === settings.asrProviderId}
-              onTest={() => void testProvider(settings.asrProviderId)}
-            />
-            {settings.asrProviderId === 'mock.asr' && (
-              <InlineNotice
-                title={t('mockProvider')}
-                detail={t('mockProviderBypass')}
-              />
-            )}
-            {settings.asrProviderId === 'local.whisper.cpp' && (
-              <>
-                <div className="providerCard">
-                  <div>
-                    <strong>{t('localRuntimeSettings')}</strong>
-                    <small>{t('localProviderDetail')}</small>
-                  </div>
-                </div>
+              <section className="settingsColumn">
+                <section className="settingsPanel">
+                  <InspectorSection icon={<Settings size={16} />} title={t('workflowSettings')}>
+                    <div className="languagePair">
+                      <SelectField
+                        label={t('sourceLanguage')}
+                        uiLanguage={settings.uiLanguage}
+                        value={settings.sourceLanguage}
+                        onChange={(value) => void updateSettings({ sourceLanguage: value })}
+                      />
+                      <button
+                        className="swapButton"
+                        disabled={settings.sourceLanguage === 'auto'}
+                        title={t('swapLanguages')}
+                        onClick={() => void swapLanguages()}
+                      >
+                        <ArrowRightLeft size={16} />
+                      </button>
+                      <SelectField
+                        label={t('targetLanguage')}
+                        uiLanguage={settings.uiLanguage}
+                        value={settings.targetLanguage}
+                        targetOnly
+                        onChange={(value) => void updateSettings({ targetLanguage: value })}
+                      />
+                    </div>
+                  </InspectorSection>
+                </section>
+
+                <section className="settingsPanel">
+                  <InspectorSection icon={<Settings size={16} />} title={t('asr')}>
                 <label>
-                  {t('whisperModel')}
-                  <select value={settings.whisperModelId} onChange={(event) => void updateSettings({ whisperModelId: event.target.value })}>
-                    {models.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.displayName} · {model.installed ? t('installed') : t('missing')}
+                  {t('asrProvider')}
+                  <select
+                    value={settings.asrProviderId}
+                    onChange={(event) => void updateSettings({ asrProviderId: event.target.value })}
+                  >
+                    {asrProviders.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                        {providerLabel(provider.id, t)}
+                    </option>
+                    ))}
+                  </select>
+                </label>
+                <ProviderCard
+                  activeId={settings.asrProviderId}
+                  detail={t(asrProviders.find((provider) => provider.id === settings.asrProviderId)?.descriptionKey ?? 'providerReady')}
+                  health={asrHealth}
+                  loading={checkingProvider === settings.asrProviderId}
+                  onTest={() => void testProvider(settings.asrProviderId)}
+                />
+                {settings.asrProviderId === 'local.whisper.cpp' && (
+                  <>
+                    <div className="providerCard">
+                      <div>
+                        <strong>{t('localRuntimeSettings')}</strong>
+                        <small>{t('localProviderDetail')}</small>
+                      </div>
+                    </div>
+                    <label>
+                      {t('whisperModel')}
+                      <select
+                        value={settings.whisperModelId}
+                        onChange={(event) => void updateSettings({ whisperModelId: event.target.value })}
+                      >
+                        {models.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.displayName} · {model.installed ? t('installed') : t('missing')}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <ToggleField
+                      label={t('allowWhisperDownloads')}
+                      detail={t('allowWhisperDownloadsDetail')}
+                      checked={settings.allowWhisperAssetDownload}
+                      onChange={(checked) => void updateSettings({ allowWhisperAssetDownload: checked })}
+                    />
+                    <ToggleField
+                      label={t('cudaAcceleration')}
+                      detail={supportsCuda ? t('cudaDetected') : t('cudaUnavailable')}
+                      checked={settings.localWhisperUseCuda}
+                      disabled={!supportsCuda}
+                      onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
+                    />
+                    <div className="modelCard">
+                      <div>
+                        <span className={selectedModel?.installed ? 'signal good' : 'signal'} />
+                        <strong>{selectedModel?.displayName ?? t('whisperModel')}</strong>
+                        <small>{selectedModel ? formatBytes(selectedModel.sizeBytes) : t('missing')}</small>
+                      </div>
+                      <button
+                        className="secondary compact"
+                        disabled={checkingRuntime}
+                        onClick={() => void checkRuntime()}
+                      >
+                        <HardDriveDownload size={16} />
+                        {checkingRuntime ? t('checking') : t('checkRuntime')}
+                      </button>
+                      {runtimeStatus && (
+                        <p title={runtimeStatus.acceleration.fallbackReason}>
+                          {t(runtimeActionLabel(runtimeStatus.actionRequired))}
+                          {' · '}
+                          {runtimeStatus.acceleration.selected.toUpperCase()}
+                          {' · '}
+                          {t('runtimeVariant')}: {runtimeStatus.acceleration.runtimeVariant.toUpperCase()}
+                        </p>
+                      )}
+                      {runtimeActivity && <p title={runtimeActivity}>{runtimeActivity}</p>}
+                    </div>
+                  </>
+                )}
+                {settings.asrProviderId === 'cloud.openai' && (
+                  <>
+                    <div className="providerCard">
+                      <div>
+                        <strong>{t('cloudProviderSettings')}</strong>
+                        <small>{t('cloudProviderDetail')}</small>
+                      </div>
+                    </div>
+                    <TextField
+                      label={t('baseUrl')}
+                      value={cloudAsrSecret.baseUrl ?? ''}
+                      placeholder="https://api.openai.com/v1"
+                      onChange={(value) => updateProviderSecret('cloud.openai', { baseUrl: value })}
+                    />
+                    <TextField
+                      label={t('apiKey')}
+                      value={cloudAsrSecret.apiKey ?? ''}
+                      placeholder="sk-..."
+                      type="password"
+                      onChange={(value) => updateProviderSecret('cloud.openai', { apiKey: value })}
+                    />
+                    <TextField
+                      label={t('model')}
+                      value={cloudAsrSecret.model ?? ''}
+                      placeholder="whisper-1"
+                      onChange={(value) => updateProviderSecret('cloud.openai', { model: value })}
+                    />
+                    <ToggleField
+                      label={t('uploadConsent')}
+                      detail={t('uploadConsentDetail')}
+                      checked={settings.allowCloudAsrUpload}
+                      onChange={(checked) => void updateSettings({ allowCloudAsrUpload: checked })}
+                    />
+                    <ProviderActionRow
+                      savingLabel={t('saveProvider')}
+                      testingLabel={checkingProvider === 'cloud.openai' ? t('checking') : t('test')}
+                      onSave={() => void saveProviderSecret('cloud.openai')}
+                      onTest={() => void testProvider('cloud.openai')}
+                      testDisabled={checkingProvider === 'cloud.openai'}
+                    />
+                  </>
+                )}
+                  </InspectorSection>
+                </section>
+
+                <section className="settingsPanel">
+                  <InspectorSection icon={<Languages size={16} />} title={t('translate')}>
+                <label>
+                  {t('translationProvider')}
+                  <select
+                    value={translationProviderId}
+                    onChange={(event) =>
+                      void updateSettings({
+                        translationProviderPriority: [event.target.value]
+                      })
+                    }
+                  >
+                    {translationProviders.map((provider) => (
+                      <option key={provider} value={provider}>
+                        {providerLabel(provider, t)}
                       </option>
                     ))}
                   </select>
                 </label>
-                <ToggleField
-                  label={t('allowWhisperDownloads')}
-                  detail={t('allowWhisperDownloadsDetail')}
-                  checked={settings.allowWhisperAssetDownload}
-                  onChange={(checked) => void updateSettings({ allowWhisperAssetDownload: checked })}
+                <ProviderCard
+                  activeId={translationProviderId}
+                  detail={t('translationProviderDetail')}
+                  health={llmHealth}
+                  loading={checkingProvider === translationProviderId}
+                  onTest={() => void testProvider(translationProviderId)}
                 />
-                <ToggleField
-                  label={t('cudaAcceleration')}
-                  detail={supportsCuda ? t('cudaDetected') : t('cudaUnavailable')}
-                  checked={settings.localWhisperUseCuda}
-                  disabled={!supportsCuda}
-                  onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
-                />
-                <div className="modelCard">
-                  <div>
-                    <span className={selectedModel?.installed ? 'signal good' : 'signal'} />
-                    <strong>{selectedModel?.displayName ?? t('whisperModel')}</strong>
-                    <small>{selectedModel ? formatBytes(selectedModel.sizeBytes) : t('missing')}</small>
-                  </div>
-                  <button className="secondary compact" disabled={checkingRuntime} onClick={() => void checkRuntime()}>
-                    <HardDriveDownload size={16} />
-                    {checkingRuntime ? t('checking') : t('checkRuntime')}
-                  </button>
-                  {runtimeStatus && (
-                    <p title={runtimeStatus.acceleration.fallbackReason}>
-                      {t(runtimeActionLabel(runtimeStatus.actionRequired))}
-                      {' · '}
-                      {runtimeStatus.acceleration.selected.toUpperCase()}
-                      {' · '}
-                      {t('runtimeVariant')}: {runtimeStatus.acceleration.runtimeVariant.toUpperCase()}
-                    </p>
-                  )}
-                </div>
-              </>
-            )}
-            {settings.asrProviderId === 'cloud.openai' && (
-              <>
-                <div className="providerCard">
-                  <div>
-                    <strong>{t('cloudProviderSettings')}</strong>
-                    <small>{t('cloudProviderDetail')}</small>
-                  </div>
-                </div>
-                <TextField
-                  label={t('baseUrl')}
-                  value={cloudAsrSecret.baseUrl ?? ''}
-                  placeholder="https://api.openai.com/v1"
-                  onChange={(value) => updateProviderSecret('cloud.openai', { baseUrl: value })}
-                />
-                <TextField
-                  label={t('apiKey')}
-                  value={cloudAsrSecret.apiKey ?? ''}
-                  placeholder="sk-..."
-                  type="password"
-                  onChange={(value) => updateProviderSecret('cloud.openai', { apiKey: value })}
-                />
-                <TextField
-                  label={t('model')}
-                  value={cloudAsrSecret.model ?? ''}
-                  placeholder="whisper-1"
-                  onChange={(value) => updateProviderSecret('cloud.openai', { model: value })}
-                />
-                <ToggleField
-                  label={t('uploadConsent')}
-                  detail={t('uploadConsentDetail')}
-                  checked={settings.allowCloudAsrUpload}
-                  onChange={(checked) => void updateSettings({ allowCloudAsrUpload: checked })}
-                />
-                <ProviderActionRow
-                  savingLabel={t('saveProvider')}
-                  testingLabel={checkingProvider === 'cloud.openai' ? t('checking') : t('test')}
-                  onSave={() => void saveProviderSecret('cloud.openai')}
-                  onTest={() => void testProvider('cloud.openai')}
-                  testDisabled={checkingProvider === 'cloud.openai'}
-                />
-              </>
-            )}
-          </InspectorSection>
-          <InspectorSection icon={<MonitorCog size={16} />} title={t('runtime')}>
-            <div className="runtimeGrid">
-              <StatusLine label={t('nativeBackend')} value={nativeHealth?.status ? t(nativeHealth.status) : t('unknown')} tone={nativeHealth?.status === 'ok' ? 'good' : 'muted'} />
-              <StatusLine
-                label={t('acceleration')}
-                value={nativeHealth?.hardwareAcceleration?.toUpperCase() ?? t('unknown')}
-                tone={nativeHealth?.hardwareAcceleration === 'gpu' ? 'good' : 'muted'}
-              />
-              <StatusLine
-                label={t('cudaAcceleration')}
-                value={supportsCuda ? t('cudaDetectedShort') : t('cudaUnavailableShort')}
-                tone={supportsCuda ? 'good' : 'muted'}
-              />
-              <StatusLine label={t('runtimeBinary')} value={runtimeStatus?.binary.installed ? t('installed') : t('notChecked')} tone={runtimeStatus?.binary.installed ? 'good' : 'muted'} />
-              <StatusLine label={t('runtimeModel')} value={runtimeStatus?.model.installed ? t('installed') : t('notChecked')} tone={runtimeStatus?.model.installed ? 'good' : 'muted'} />
+                {translationProviderId === 'openai.compatible' && (
+                  <>
+                    <div className="providerCard">
+                      <div>
+                        <strong>{t('llmProviderSettings')}</strong>
+                        <small>{t('translationProviderDetail')}</small>
+                      </div>
+                    </div>
+                    <TextField
+                      label={t('baseUrl')}
+                      value={llmSecret.baseUrl ?? ''}
+                      placeholder="https://api.openai.com/v1"
+                      onChange={(value) => updateProviderSecret('openai.compatible', { baseUrl: value })}
+                    />
+                    <TextField
+                      label={t('apiKey')}
+                      value={llmSecret.apiKey ?? ''}
+                      placeholder="sk-..."
+                      type="password"
+                      onChange={(value) => updateProviderSecret('openai.compatible', { apiKey: value })}
+                    />
+                    <TextField
+                      label={t('model')}
+                      value={llmSecret.model ?? ''}
+                      placeholder="gpt-4o-mini"
+                      onChange={(value) => updateProviderSecret('openai.compatible', { model: value })}
+                    />
+                    <TextField
+                      label={t('organization')}
+                      value={llmSecret.organization ?? ''}
+                      placeholder={t('optional')}
+                      onChange={(value) => updateProviderSecret('openai.compatible', { organization: value })}
+                    />
+                    <div className="providerCard">
+                      <div>
+                        <strong>{t('translationRateLimits')}</strong>
+                        <small>{t('translationRateLimitsDetail')}</small>
+                      </div>
+                    </div>
+                    <NumberField
+                      label={t('concurrency')}
+                      min={1}
+                      max={6}
+                      value={settings.translationConcurrency}
+                      onChange={(value) => void updateSettings({ translationConcurrency: value })}
+                    />
+                    <NumberField
+                      label={t('requestsPerMinute')}
+                      min={1}
+                      max={600}
+                      value={settings.translationRequestsPerMinute}
+                      onChange={(value) => void updateSettings({ translationRequestsPerMinute: value })}
+                    />
+                    <NumberField
+                      label={t('tokenBudgetPerMinute')}
+                      min={1000}
+                      max={1000000}
+                      step={1000}
+                      value={settings.translationTokenBudgetPerMinute}
+                      onChange={(value) => void updateSettings({ translationTokenBudgetPerMinute: value })}
+                    />
+                    <div className="providerCard">
+                      <div>
+                        <strong>{t('translationBatching')}</strong>
+                        <small>{t('translationBatchingDetail')}</small>
+                      </div>
+                    </div>
+                    <NumberField
+                      label={t('linesPerRequest')}
+                      min={1}
+                      max={32}
+                      value={settings.translationLinesPerRequest}
+                      onChange={(value) =>
+                        void updateSettings({
+                          translationLinesPerRequest: value,
+                          translationBatchStride: Math.min(settings.translationBatchStride, value)
+                        })
+                      }
+                    />
+                    <NumberField
+                      label={t('batchStride')}
+                      min={1}
+                      max={settings.translationLinesPerRequest}
+                      value={settings.translationBatchStride}
+                      onChange={(value) => void updateSettings({ translationBatchStride: value })}
+                    />
+                    <ProviderActionRow
+                      savingLabel={t('saveProvider')}
+                      testingLabel={checkingProvider === 'openai.compatible' ? t('checking') : t('test')}
+                      onSave={() => void saveProviderSecret('openai.compatible')}
+                      onTest={() => void testProvider('openai.compatible')}
+                      testDisabled={checkingProvider === 'openai.compatible'}
+                    />
+                  </>
+                )}
+                  </InspectorSection>
+                </section>
+              </section>
             </div>
-          </InspectorSection>
-        </aside>
-      </main>
+          </main>
+        </section>
+      )}
 
       <footer className="systemStrip">
-        <span>{t('progress')}: {completion}%</span>
+        <span>
+          {t('progress')}: {completion}%
+        </span>
         <span title={message}>{message}</span>
-        {canForceStop && (
-          <button className="textButton" onClick={() => void forceStop()}>
-            <AlertCircle size={14} />
-            {t('forceStop')}
-          </button>
-        )}
-        {job?.error && (
-          <button className="textButton" onClick={() => void createAndStart()}>
-            <RotateCcw size={14} />
-            {t('retry')}
-          </button>
-        )}
+        <div className="systemActions">
+          {canForceStop && (
+            <button className="textButton" onClick={() => void forceStop()}>
+              <AlertCircle size={14} />
+              {t('forceStop')}
+            </button>
+          )}
+          {job?.error && (
+            <button className="textButton" onClick={() => void createAndStart()}>
+              <RotateCcw size={14} />
+              {t('retry')}
+            </button>
+          )}
+        </div>
       </footer>
+      <ToastStack toasts={toasts} copyTitle={t('copyErrorToast')} onCopyError={(toast) => void copyToastMessage(toast)} />
+      <BottomBubble message={copyBubble} />
     </div>
   );
+}
+
+function ToastStack(props: {
+  toasts: ToastMessage[];
+  copyTitle: string;
+  onCopyError: (toast: ToastMessage) => void;
+}): JSX.Element | null {
+  if (props.toasts.length === 0) return null;
+  return (
+    <div className="toastStack" aria-live="polite" aria-atomic="false">
+      {[...props.toasts].reverse().map((toast) =>
+        toast.tone === 'error' ? (
+          <button
+            className={`toastCard copyable ${toast.tone}${toast.exiting ? ' exiting' : ''}`}
+            key={toast.id}
+            title={props.copyTitle}
+            type="button"
+            onClick={() => props.onCopyError(toast)}
+          >
+            <span className="toastMark" />
+            <p>{toast.message}</p>
+          </button>
+        ) : (
+          <div className={`toastCard ${toast.tone}${toast.exiting ? ' exiting' : ''}`} key={toast.id}>
+            <span className="toastMark" />
+            <p>{toast.message}</p>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+function BottomBubble(props: { message?: string }): JSX.Element | null {
+  if (!props.message) return null;
+  return <div className="bottomBubble">{props.message}</div>;
 }
 
 function MetricCard(props: { icon: React.ReactNode; label: string; value: string }): JSX.Element {
@@ -853,7 +1184,7 @@ function ProviderCard(props: {
     <div className="providerCard">
       <div>
         <span className={`signal ${tone}`} />
-        <strong title={props.activeId}>{props.activeId}</strong>
+        <strong title={props.activeId}>{providerLabel(props.activeId, t)}</strong>
         <small>{props.health ? t(providerStatusLabel(props.health.status)) : props.detail}</small>
       </div>
       <button className="secondary compact" disabled={props.loading} onClick={props.onTest}>
@@ -968,7 +1299,9 @@ function SelectField(props: {
   targetOnly?: boolean;
   onChange: (value: string) => void;
 }): JSX.Element {
-  const options = languageRegistry.filter((language) => (props.targetOnly ? language.supportsTranslationTarget : language.supportsAsr));
+  const options = languageRegistry.filter((language) =>
+    props.targetOnly ? language.supportsTranslationTarget : language.supportsAsr
+  );
   return (
     <label>
       {props.label}
@@ -997,6 +1330,54 @@ function providerStatusLabel(status: ProviderHealth['status']): string {
 
 function runtimeActionLabel(action: WhisperRuntimeStatus['actionRequired'] = 'none'): string {
   return `runtimeAction.${action}`;
+}
+
+function assetEventLabel(event: AssetEvent, t: (key: string, options?: Record<string, unknown>) => string): string {
+  switch (event.type) {
+    case 'download-start':
+      return t('runtimeDownloading');
+    case 'download-progress':
+      return event.receivedBytes
+        ? t('runtimeDownloadingBytes', { bytes: formatBytes(event.receivedBytes) })
+        : t('runtimeDownloading');
+    case 'verify':
+      return t('runtimeVerifying');
+    case 'extract':
+      return t('runtimeExtracting');
+    case 'ready':
+      return t('runtimeReady');
+    case 'error':
+      return event.message || t('runtimeError');
+  }
+}
+
+function toastToneForAssetEvent(event: AssetEvent): ToastTone {
+  switch (event.type) {
+    case 'ready':
+      return 'success';
+    case 'error':
+      return 'error';
+    case 'verify':
+    case 'extract':
+      return 'warning';
+    case 'download-start':
+    case 'download-progress':
+    default:
+      return 'neutral';
+  }
+}
+
+function providerLabel(providerId: string, t: (key: string) => string): string {
+  switch (providerId) {
+    case 'local.whisper.cpp':
+      return t('localWhisperCppProvider');
+    case 'cloud.openai':
+      return t('cloudOpenaiProvider');
+    case 'openai.compatible':
+      return t('openaiCompatibleProvider');
+    default:
+      return providerId;
+  }
 }
 
 function shortLanguage(code: string): string {

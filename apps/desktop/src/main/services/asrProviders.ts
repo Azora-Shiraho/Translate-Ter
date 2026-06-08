@@ -2,7 +2,7 @@ import type { CreateJobRequest, ProviderHealth } from '@shared/models';
 
 export type AsrProviderInfo = {
   id: string;
-  kind: 'local' | 'cloud' | 'mock';
+  kind: 'local' | 'cloud';
   displayName: string;
   requiresConsentForUpload: boolean;
   health(): Promise<ProviderHealth>;
@@ -16,9 +16,9 @@ export const asrProviders: AsrProviderInfo[] = [
     requiresConsentForUpload: false,
     health: async () => ({
       providerId: 'local.whisper.cpp',
-      ok: true,
+      ok: false,
       status: 'degraded',
-      message: 'Runtime is checked per selected model.'
+      message: 'Runtime readiness depends on the selected whisper.cpp binary and model assets.'
     })
   },
   {
@@ -31,17 +31,6 @@ export const asrProviders: AsrProviderInfo[] = [
       ok: false,
       status: 'unconfigured',
       message: 'Cloud ASR is an explicit opt-in adapter placeholder.'
-    })
-  },
-  {
-    id: 'mock.asr',
-    kind: 'mock',
-    displayName: 'Mock ASR',
-    requiresConsentForUpload: false,
-    health: async () => ({
-      providerId: 'mock.asr',
-      ok: true,
-      status: 'healthy'
     })
   }
 ];

@@ -144,14 +144,29 @@ function registerIpc(): void {
   ipcMain.handle('settings:get-secret', async (_event, providerId: string) => settingsStore.getSecret(providerId));
   ipcMain.handle('settings:set-secret', async (_event, providerId, secret) => settingsStore.setSecret(providerId, secret));
   ipcMain.handle('settings:test-provider', async (_event, providerId: string) => {
+    if (providerId === 'local.whisper.cpp') {
+      const settings = await settingsStore.get();
+      const runtime = await whisperAssets.ensureRuntime({
+        modelId: settings.whisperModelId,
+        allowDownload: settings.allowWhisperAssetDownload,
+        preferCuda: settings.localWhisperUseCuda
+      });
+      return {
+        providerId,
+        ok: runtime.actionRequired === 'none',
+        status: runtime.actionRequired === 'none' ? 'healthy' : 'degraded',
+        message: runtime.message
+      };
+    }
+
     const asrProvider = asrProviders.find((provider) => provider.id === providerId);
     if (asrProvider) return asrProvider.health();
     const secret = settingsStore.getSecret(providerId);
     return {
       providerId,
-      ok: Boolean(secret?.apiKey) || providerId === 'mock.local',
-      status: providerId === 'mock.local' || secret?.apiKey ? 'healthy' : 'unconfigured',
-      message: secret?.apiKey || providerId === 'mock.local' ? undefined : 'Provider API key is not configured.'
+      ok: Boolean(secret?.apiKey),
+      status: secret?.apiKey ? 'healthy' : 'unconfigured',
+      message: secret?.apiKey ? undefined : 'Provider API key is not configured.'
     };
   });
 

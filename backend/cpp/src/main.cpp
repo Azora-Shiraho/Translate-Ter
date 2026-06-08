@@ -167,6 +167,11 @@ bool path_exists(const std::filesystem::path& path) {
   return std::filesystem::exists(path, error) && !std::filesystem::is_directory(path, error);
 }
 
+bool directory_exists(const std::filesystem::path& path) {
+  std::error_code error;
+  return std::filesystem::exists(path, error) && std::filesystem::is_directory(path, error);
+}
+
 std::vector<std::filesystem::path> path_entries() {
   std::vector<std::filesystem::path> entries;
   const char* raw_path = std::getenv("PATH");
@@ -309,24 +314,34 @@ std::string bool_json(bool value) {
   return value ? "true" : "false";
 }
 
-bool detect_cuda_support() {
+bool detect_cuda_support(const std::vector<std::filesystem::path>& extra_search_roots = {}) {
+#if defined(_WIN32)
+  const std::array<std::string, 2> cuda_dlls = {"cublas64_11.dll", "cublasLt64_11.dll"};
+  std::vector<std::filesystem::path> search_roots = extra_search_roots;
+  if (const char* cuda_path = std::getenv("CUDA_PATH")) {
+    search_roots.emplace_back(std::filesystem::path(cuda_path) / "bin");
+  }
+  if (const char* cuda_home = std::getenv("CUDA_HOME")) {
+    search_roots.emplace_back(std::filesystem::path(cuda_home) / "bin");
+  }
+  for (const auto& entry : path_entries()) {
+    if (directory_exists(entry)) {
+      search_roots.push_back(entry);
+    }
+  }
+
+  return std::all_of(cuda_dlls.begin(), cuda_dlls.end(), [&](const auto& dll_name) {
+    return std::any_of(search_roots.begin(), search_roots.end(), [&](const auto& root) {
+      return path_exists(root / dll_name);
+    });
+  });
+#else
   if (std::getenv("CUDA_PATH") != nullptr || std::getenv("CUDA_HOME") != nullptr) {
     return true;
   }
 
   if (find_tool("nvidia-smi").has_value()) {
     return true;
-  }
-
-#if defined(_WIN32)
-  const auto gpu_probe = run_command_capture(
-      "powershell.exe -NoProfile -Command \"(Get-CimInstance Win32_VideoController | "
-      "Where-Object { $_.Name -match 'NVIDIA' } | Measure-Object).Count\"");
-  if (gpu_probe.exit_code == 0) {
-    const auto count = without_line_breaks(gpu_probe.output);
-    if (!count.empty() && count != "0") {
-      return true;
-    }
   }
 #endif
 
@@ -349,7 +364,7 @@ std::string health_payload() {
   payload << "{\"protocolVersion\":1,\"backendVersion\":\"0.4.0\",\"status\":\""
           << (media_tools_available ? "ok" : "degraded")
           << "\",\"capabilities\":[\"runtime.health\",\"media.probe\",\"audio.extract\",\"srt.parse\",\"srt.serialize\","
-             "\"asr.transcribe\",\"job.cancel\"],\"whisperRuntimeAvailable\":true,\"ffmpegAvailable\":"
+             "\"asr.transcribe\",\"job.cancel\"],\"whisperRuntimeAvailable\":false,\"ffmpegAvailable\":"
           << bool_json(ffmpeg_available) << ",\"ffprobeAvailable\":" << bool_json(ffprobe_available)
           << ",\"hardwareAcceleration\":\"" << (cuda_supported ? "gpu" : "cpu") << "\",\"cudaSupported\":"
           << bool_json(cuda_supported) << ",\"recommendedLocalAcceleration\":\"" << (cuda_supported ? "gpu" : "cpu")
@@ -903,37 +918,6 @@ NativeResult audio_extract_result(const std::string& request) {
   return {true, payload.str(), "", "", false};
 }
 
-std::vector<Segment> create_mock_segments() {
-  Segment first;
-  first.index = 1;
-  first.start_ms = 900;
-  first.end_ms = 3100;
-  first.source_text = "Welcome to Translate-Ter.";
-  first.status = "transcribed";
-  first.confidence = 0.92;
-  first.has_confidence = true;
-
-  Segment second;
-  second.index = 2;
-  second.start_ms = 3600;
-  second.end_ms = 6200;
-  second.source_text = "This first build keeps every subtitle timestamp stable.";
-  second.status = "transcribed";
-  second.confidence = 0.92;
-  second.has_confidence = true;
-
-  Segment third;
-  third.index = 3;
-  third.start_ms = 6900;
-  third.end_ms = 9800;
-  third.source_text = "You can edit text, translate batches, and export SRT.";
-  third.status = "transcribed";
-  third.confidence = 0.92;
-  third.has_confidence = true;
-
-  return {first, second, third};
-}
-
 NativeResult asr_transcribe_result(const std::string& request) {
   const auto asr_provider = extract_string(request, "asrProviderId").value_or("local.whisper.cpp");
   const auto media_path = extract_string(request, "audioPath").value_or(
@@ -942,28 +926,9 @@ NativeResult asr_transcribe_result(const std::string& request) {
   const auto target_language = extract_string(request, "targetLanguage").value_or("");
   const auto job_id = extract_string(request, "jobId").value_or("native-job");
   const bool prefer_cuda = extract_bool(request, "preferCuda").value_or(false);
-  const bool cuda_supported = detect_cuda_support();
-
-  if (asr_provider == "mock.asr") {
-    std::vector<SubtitleWarning> warnings;
-    return {
-        true,
-        document_payload_from_segments(
-            create_mock_segments(),
-            "doc-" + job_id,
-            source_language,
-            target_language,
-            media_path,
-            "native-mock",
-            asr_provider,
-            warnings),
-        "",
-        "",
-        false};
-  }
 
   if (!starts_with(asr_provider, "local.whisper")) {
-    return {false, "", "UnsupportedCommand", "Only mock.asr and local.whisper.cpp are supported by the native MVP.", false};
+    return {false, "", "UnsupportedCommand", "Only local.whisper.cpp is supported by the native backend for offline transcription.", false};
   }
 
   const auto binary_path = extract_string(request, "binaryPath");
@@ -987,6 +952,7 @@ NativeResult asr_transcribe_result(const std::string& request) {
   if (media_path.empty() || !path_exists(media_path)) {
     return {false, "", "MalformedRequest", "asr.transcribe requires an existing payload.mediaPath.", false};
   }
+  const bool cuda_supported = detect_cuda_support({std::filesystem::path(*binary_path).parent_path()});
 
   const auto job_safe = sanitize_id(job_id);
   auto output_dir = requested_output_dir(request, job_id, "asr");

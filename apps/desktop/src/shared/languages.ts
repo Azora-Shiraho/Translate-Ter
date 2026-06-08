@@ -54,7 +54,5 @@ export const languageRegistry: LanguageOption[] = [
 export function languageLabel(code: string, uiLanguage: 'en-US' | 'zh-CN' = 'en-US'): string {
   const language = languageRegistry.find((item) => item.code === code);
   if (!language) return code;
-  return uiLanguage === 'zh-CN'
-    ? `${language.nativeName} / ${language.englishName}`
-    : `${language.englishName} / ${language.nativeName}`;
+  return uiLanguage === 'zh-CN' ? language.nativeName : language.englishName;
 }
