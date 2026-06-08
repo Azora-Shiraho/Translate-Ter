@@ -280,6 +280,7 @@ export class WhisperAssetManager extends EventEmitter {
       this.emitAsset({ type: 'error', scope, message: `Download failed with HTTP ${response.status}.` });
       throw new Error(`Failed to download whisper asset: HTTP ${response.status}`);
     }
+    const totalBytes = Number.parseInt(response.headers.get('content-length') ?? '', 10);
 
     await new Promise<void>((resolveDownload, reject) => {
       const stream = createWriteStream(destination, { flags: 'wx' });
@@ -302,7 +303,8 @@ export class WhisperAssetManager extends EventEmitter {
               type: 'download-progress',
               scope,
               message: scope === 'runtime' ? 'Downloading whisper runtime...' : 'Downloading whisper model...',
-              receivedBytes
+              receivedBytes,
+              totalBytes: Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : undefined
             });
             stream.write(chunk, (error) => {
               if (error) {

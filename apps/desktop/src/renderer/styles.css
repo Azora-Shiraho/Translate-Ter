@@ -1181,6 +1181,11 @@ input[type='checkbox'] {
   animation: progressFlow 760ms linear infinite;
 }
 
+.systemMiniTrack.indeterminate span {
+  width: 44% !important;
+  animation: indeterminateTrack 1.1s ease-in-out infinite;
+}
+
 .toastStack {
   position: fixed;
   left: 18px;

@@ -193,7 +193,7 @@ export type JobEvent =
 
 export type AssetEvent =
   | { type: 'download-start'; scope: 'runtime' | 'model'; message: string }
-  | { type: 'download-progress'; scope: 'runtime' | 'model'; message: string; receivedBytes?: number }
+  | { type: 'download-progress'; scope: 'runtime' | 'model'; message: string; receivedBytes?: number; totalBytes?: number }
   | { type: 'verify'; scope: 'runtime' | 'model'; message: string }
   | { type: 'extract'; scope: 'runtime'; message: string }
   | { type: 'ready'; scope: 'runtime' | 'model'; message: string }

@@ -52,6 +52,12 @@ type ToastMessage = {
   tone: ToastTone;
   exiting: boolean;
 };
+type ActiveDownload = {
+  scope: 'runtime' | 'model';
+  receivedBytes: number;
+  totalBytes?: number;
+  message: string;
+};
 
 const asrProviders = [
   { id: 'local.whisper.cpp', nameKey: 'localProvider', descriptionKey: 'localProviderDetail' },
@@ -78,6 +84,7 @@ function App(): JSX.Element {
   const [message, setMessage] = useState(t('ready'));
   const [runtimeActivity, setRuntimeActivity] = useState<string>();
   const [modelActivity, setModelActivity] = useState<string>();
+  const [activeDownload, setActiveDownload] = useState<ActiveDownload>();
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [copyBubble, setCopyBubble] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -120,6 +127,14 @@ function App(): JSX.Element {
     });
     const unsubscribeAssets = window.translateTer.assets.onEvent((event) => {
       const nextMessage = assetEventLabel(event, (key, options) => i18n.t(key, options));
+      if (event.type === 'download-start' || event.type === 'download-progress') {
+        setActiveDownload({
+          scope: event.scope,
+          receivedBytes: event.type === 'download-progress' ? (event.receivedBytes ?? 0) : 0,
+          totalBytes: event.type === 'download-progress' ? event.totalBytes : undefined,
+          message: nextMessage
+        });
+      }
       if (event.scope === 'model') {
         setModelActivity(nextMessage);
       } else {
@@ -130,6 +145,7 @@ function App(): JSX.Element {
         pushToast(nextMessage, toastToneForAssetEvent(event));
       }
       if (event.type === 'ready' || event.type === 'error') {
+        setActiveDownload(undefined);
         void refreshModels();
       }
     });
@@ -403,6 +419,15 @@ function App(): JSX.Element {
   );
   const appWorking = busy || checkingRuntime || Boolean(checkingProvider) || jobIsRunning;
   const workingMessage = runtimeActivity ?? modelActivity ?? message;
+  const downloadPercent =
+    activeDownload?.totalBytes && activeDownload.totalBytes > 0
+      ? Math.min(100, Math.round((activeDownload.receivedBytes / activeDownload.totalBytes) * 100))
+      : undefined;
+  const footerProgress = activeDownload ? (downloadPercent ?? 100) : completion;
+  const footerTitle = activeDownload
+    ? `${t('downloadProgress')}${downloadPercent === undefined ? '' : ` ${downloadPercent}%`}`
+    : `${t('progress')} ${completion}%`;
+  const footerMessage = activeDownload?.message ?? message;
 
   async function forceStop(): Promise<void> {
     if (!job) return;
@@ -1115,13 +1140,11 @@ function App(): JSX.Element {
         <div className="systemProgress">
           <span className={appWorking ? 'systemPulse active' : 'systemPulse'} />
           <div className="systemProgressCopy">
-            <strong>
-              {t('progress')} {completion}%
-            </strong>
-            <span title={message}>{message}</span>
+            <strong>{footerTitle}</strong>
+            <span title={footerMessage}>{footerMessage}</span>
           </div>
-          <div className="systemMiniTrack" aria-hidden="true">
-            <span style={{ width: `${completion}%` }} />
+          <div className={`systemMiniTrack${activeDownload && downloadPercent === undefined ? ' indeterminate' : ''}`} aria-hidden="true">
+            <span style={{ width: `${footerProgress}%` }} />
           </div>
         </div>
         <div className="systemActions">
