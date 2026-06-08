@@ -148,9 +148,9 @@ function registerIpc(): void {
       const settings = await settingsStore.get();
       const runtime = await whisperAssets.ensureRuntime({
         modelId: settings.whisperModelId,
-        allowDownload: false,
-        preferCuda: settings.localWhisperUseCuda,
-        downloadScope: 'none'
+        allowDownload: settings.allowWhisperAssetDownload,
+        preferCuda: false,
+        downloadScope: 'runtime'
       });
       return {
         providerId,

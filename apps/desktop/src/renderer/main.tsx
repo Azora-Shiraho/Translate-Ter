@@ -850,6 +850,7 @@ function App(): JSX.Element {
                   health={asrHealth}
                   loading={checkingProvider === settings.asrProviderId}
                   onTest={() => void testProvider(settings.asrProviderId)}
+                  showMessage={settings.asrProviderId !== 'local.whisper.cpp'}
                 />
                 {settings.asrProviderId === 'local.whisper.cpp' && (
                   <>
@@ -893,11 +894,6 @@ function App(): JSX.Element {
                         disabled={!supportsCuda}
                         onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
                       />
-                      {runtimeStatus?.acceleration.fallbackReason && (
-                        <p title={runtimeStatus.acceleration.fallbackReason}>
-                          {runtimeStatus.acceleration.fallbackReason}
-                        </p>
-                      )}
                     </div>
                     <ToggleField
                       label={t('allowWhisperDownloads')}
@@ -1216,6 +1212,7 @@ function ProviderCard(props: {
   health?: ProviderHealth;
   loading: boolean;
   onTest: () => void;
+  showMessage?: boolean;
 }): JSX.Element {
   const { t } = useTranslation();
   const tone = props.health?.ok ? 'good' : props.health ? 'warn' : 'muted';
@@ -1230,7 +1227,7 @@ function ProviderCard(props: {
         <CheckCircle2 size={16} />
         {props.loading ? t('checking') : t('test')}
       </button>
-      {props.health?.message && <p title={props.health.message}>{props.health.message}</p>}
+      {props.showMessage !== false && props.health?.message && <p title={props.health.message}>{props.health.message}</p>}
     </div>
   );
 }
