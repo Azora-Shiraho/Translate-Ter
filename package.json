@@ -1,6 +1,6 @@
 {
   "name": "translate-ter",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Local-first desktop workflow for transcription, subtitle editing, and translation.",
   "main": "out/main/index.js",
   "type": "module",

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AssetEvent, CreateJobRequest, JobEvent, JobSnapshot, SubtitleDocument, SubtitleSegment } from '@shared/models';
@@ -38,6 +38,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   registerIpc();
   createWindow();
 

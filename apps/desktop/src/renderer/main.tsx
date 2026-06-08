@@ -74,6 +74,7 @@ function App(): JSX.Element {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>();
   const [message, setMessage] = useState(t('ready'));
   const [runtimeActivity, setRuntimeActivity] = useState<string>();
+  const [modelActivity, setModelActivity] = useState<string>();
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [copyBubble, setCopyBubble] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -116,7 +117,11 @@ function App(): JSX.Element {
     });
     const unsubscribeAssets = window.translateTer.assets.onEvent((event) => {
       const nextMessage = assetEventLabel(event, (key, options) => i18n.t(key, options));
-      setRuntimeActivity(nextMessage);
+      if (event.scope === 'model') {
+        setModelActivity(nextMessage);
+      } else {
+        setRuntimeActivity(nextMessage);
+      }
       setMessage(nextMessage);
       if (event.type !== 'download-progress') {
         pushToast(nextMessage, toastToneForAssetEvent(event));
@@ -198,6 +203,7 @@ function App(): JSX.Element {
     if (!settings) return;
     setCheckingRuntime(true);
     setRuntimeActivity(t('runtimeChecking'));
+    setModelActivity(undefined);
     pushStatus(t('runtimeChecking'));
     try {
       const status = await window.translateTer.assets.ensureWhisperRuntime({
@@ -225,7 +231,8 @@ function App(): JSX.Element {
   async function downloadSelectedModel(): Promise<void> {
     if (!settings) return;
     setCheckingRuntime(true);
-    setRuntimeActivity(t('runtimeDownloading'));
+    setRuntimeActivity(undefined);
+    setModelActivity(t('runtimeDownloading'));
     pushStatus(t('runtimeDownloading'));
     try {
       const status = await window.translateTer.assets.ensureWhisperRuntime({
@@ -236,12 +243,12 @@ function App(): JSX.Element {
       });
       setRuntimeStatus(status);
       const nextMessage = status.model.verified ? t('modelReady') : (status.message ?? t('runtimeError'));
-      setRuntimeActivity(nextMessage);
+      setModelActivity(nextMessage);
       pushStatus(nextMessage, status.model.verified ? 'success' : 'warning');
       await refreshModels();
     } catch (error) {
       const nextMessage = error instanceof Error ? error.message : String(error);
-      setRuntimeActivity(nextMessage);
+      setModelActivity(nextMessage);
       pushStatus(nextMessage, 'error');
     } finally {
       setCheckingRuntime(false);
@@ -392,7 +399,7 @@ function App(): JSX.Element {
     job && !['idle', 'completed', 'failed', 'cancelled'].includes(job.stage)
   );
   const appWorking = busy || checkingRuntime || Boolean(checkingProvider) || jobIsRunning;
-  const workingMessage = runtimeActivity ?? message;
+  const workingMessage = runtimeActivity ?? modelActivity ?? message;
 
   async function forceStop(): Promise<void> {
     if (!job) return;
@@ -924,7 +931,7 @@ function App(): JSX.Element {
                           {t('runtimeModel')}: {runtimeStatus.model.verified ? t('installed') : t('missing')}
                         </p>
                       )}
-                      {runtimeActivity && <p title={runtimeActivity}>{runtimeActivity}</p>}
+                      {modelActivity && <p title={modelActivity}>{modelActivity}</p>}
                     </div>
                   </>
                 )}

@@ -224,6 +224,7 @@ button:disabled {
 .topChromeTabs {
   display: inline-grid;
   grid-template-columns: repeat(2, minmax(112px, 1fr));
+  flex: 0 0 auto;
   gap: 6px;
   margin-left: auto;
   padding: 4px;
@@ -1342,7 +1343,7 @@ input[type='checkbox'] {
   }
 
   .topChromeTabs {
-    margin-left: 0;
+    margin-left: auto;
   }
 
   .overviewMetaGrid {
@@ -1366,8 +1367,10 @@ input[type='checkbox'] {
   }
 
   .topChromeTabs {
-    width: 100%;
-    order: 2;
+    width: auto;
+    order: 0;
+    grid-template-columns: repeat(2, minmax(98px, 1fr));
+    margin-left: auto;
   }
 
   .workflowRail {
