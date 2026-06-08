@@ -542,14 +542,8 @@ function App(): JSX.Element {
                 <div className="railContent">
                   <div className="railHeader">
                     <strong>{t('workflowSummary')}</strong>
-                    <span>{t(stageLabel(job?.stage ?? 'idle'))}</span>
                   </div>
                   <div className="railMetrics">
-                    <MetricCard
-                      icon={<Gauge size={16} />}
-                      label={t('jobStage')}
-                      value={t(stageLabel(job?.stage ?? 'idle'))}
-                    />
                     <MetricCard
                       icon={<Languages size={16} />}
                       label={t('languagePair')}
@@ -595,12 +589,16 @@ function App(): JSX.Element {
                     <div className="jobMediaCard">
                       <span className="fieldLabel">{t('mediaFile')}</span>
                       <strong title={jobTitle}>{jobTitle}</strong>
+                      <div className="jobMediaMeta">
+                        <span className="stageBadge">{t(stageLabel(job?.stage ?? 'idle'))}</span>
+                        <span className="metaPill">{`${sourceLabel} -> ${targetLabel}`}</span>
+                      </div>
                       <small title={selectedMediaPath}>{selectedMediaPath || t('placeholderPath')}</small>
                     </div>
 
                     <div className="jobProgressCard">
                       <div className="progressHeader">
-                        <span className="stageBadge">{t(stageLabel(job?.stage ?? 'idle'))}</span>
+                        <span className="fieldLabel">{t('progress')}</span>
                         <strong>{completion}%</strong>
                       </div>
                       <div className={`track${appWorking ? ' active' : ''}`}>
@@ -685,9 +683,6 @@ function App(): JSX.Element {
                             <h3>
                               <span className="segmentIndexBadge">#{selectedSegment.index}</span>
                             </h3>
-                            <p>
-                              {formatTimestamp(selectedSegment.startMs)} - {formatTimestamp(selectedSegment.endMs)}
-                            </p>
                           </div>
                           <span className={`status ${selectedSegment.status}`}>
                             {t(statusLabel(selectedSegment.status))}

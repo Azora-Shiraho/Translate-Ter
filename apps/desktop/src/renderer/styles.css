@@ -402,7 +402,7 @@ button:disabled {
 
 .railHeader {
   display: grid;
-  gap: 2px;
+  gap: 0;
 }
 
 .railHeader strong {
@@ -485,6 +485,10 @@ button:disabled {
 .jobProgressCard {
   align-content: space-between;
   min-height: 0;
+}
+
+.jobProgressCard .fieldLabel {
+  color: var(--tt-text-body);
 }
 
 .jobActionCard button,
@@ -630,6 +634,12 @@ button:disabled {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.jobMediaMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .mediaSummary small,
@@ -802,12 +812,6 @@ h3 {
   box-shadow: var(--tt-shadow-soft);
   font-variant-numeric: tabular-nums;
   line-height: 1;
-}
-
-.segmentTitleStack p {
-  margin: 0;
-  color: var(--tt-text-muted);
-  font-size: 12px;
 }
 
 .segmentDetailMeta {
