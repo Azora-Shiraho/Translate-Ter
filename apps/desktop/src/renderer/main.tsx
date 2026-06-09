@@ -278,7 +278,7 @@ function App(): JSX.Element {
         downloadScope: 'cuda-runtime'
       });
       setRuntimeStatus(status);
-      const nextMessage = status.acceleration.cudaSupported ? t('cudaDetected') : t('cudaUnavailable');
+      const nextMessage = describeCudaStatusDetail(status, t);
       setRuntimeActivity(nextMessage);
       pushStatus(nextMessage, status.acceleration.cudaSupported ? 'success' : 'warning');
       if (status.acceleration.cudaSupported && !settings.localWhisperUseCuda) {
@@ -1105,7 +1105,7 @@ function App(): JSX.Element {
                           <SectionTitle icon={<Gauge size={15} />} title={t('cudaAcceleration')} />
                           <div className="modelCard accentCard">
                             <div>
-                             <span className={supportsCuda ? 'signal good' : 'signal'} />
+                              <span className={supportsCuda ? 'signal good' : 'signal'} />
                               <strong>{t('cudaAcceleration')}</strong>
                               <small>{cudaStatusDetail}</small>
                             </div>
@@ -1121,14 +1121,12 @@ function App(): JSX.Element {
                               label={t('useCudaAcceleration')}
                               detail={t('useCudaAccelerationDetail')}
                               checked={settings.localWhisperUseCuda}
-                              disabled={!supportsCuda && !settings.localWhisperIgnoreCudaMismatch}
                               onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
                             />
                             <ToggleField
                               label={t('ignoreCudaMismatch')}
                               detail={t('ignoreCudaMismatchDetail')}
                               checked={settings.localWhisperIgnoreCudaMismatch}
-                              disabled={!cudaMismatchDetected}
                               onChange={(checked) => void updateSettings({ localWhisperIgnoreCudaMismatch: checked })}
                             />
                           </div>

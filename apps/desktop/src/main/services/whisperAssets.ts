@@ -760,9 +760,10 @@ export class WhisperAssetManager extends EventEmitter {
     useMultiThreadDownload: boolean
   ): Promise<void> {
     if (process.platform !== 'win32') return;
-    const runtime = Object.values(manifest.runtime.platforms).find(
-      (candidate) => candidate.acceleration === 'cuda' && candidate.cudaVersion === cudaVersion
-    );
+    const runtime =
+      Object.values(manifest.runtime.platforms).find(
+        (candidate) => candidate.acceleration === 'cuda' && candidate.cudaVersion === cudaVersion
+      ) ?? Object.values(manifest.runtime.platforms).find((candidate) => candidate.acceleration === 'cuda');
     if (!runtime) return;
 
     const runtimeDir = dirname(join(this.cacheDir(), runtime.binary));
