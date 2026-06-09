@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { chmodSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { canonicalLanguageCode } from '@shared/languages';
 import type { AppSettingsPatch, AppSettingsPublic, ProviderSecretInput } from '@shared/models';
 
 const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = {
@@ -34,7 +35,7 @@ export class SettingsStore {
     const defaults = await this.defaults();
     try {
       const raw = await readFile(this.settingsPath(), 'utf8');
-      return { ...defaults, ...(JSON.parse(raw) as AppSettingsPublic), schemaVersion: 1 };
+      return normalizeSettings({ ...defaults, ...(JSON.parse(raw) as AppSettingsPublic), schemaVersion: 1 });
     } catch {
       await this.write(defaults);
       return defaults;
@@ -80,8 +81,9 @@ export class SettingsStore {
         defaults.translationBatchStride
       )
     };
-    await this.write(next);
-    return next;
+    const normalized = normalizeSettings(next);
+    await this.write(normalized);
+    return normalized;
   }
 
   async setSecret(providerId: string, secret: ProviderSecretInput): Promise<void> {
@@ -152,6 +154,14 @@ export class SettingsStore {
     const safeProviderId = providerId.replace(/[^a-z0-9._-]/gi, '_');
     return join(app.getPath('userData'), 'secrets', `${safeProviderId}.json`);
   }
+}
+
+function normalizeSettings(settings: AppSettingsPublic): AppSettingsPublic {
+  return {
+    ...settings,
+    sourceLanguage: canonicalLanguageCode(settings.sourceLanguage),
+    targetLanguage: canonicalLanguageCode(settings.targetLanguage)
+  };
 }
 
 function detectCudaSupport(): boolean {

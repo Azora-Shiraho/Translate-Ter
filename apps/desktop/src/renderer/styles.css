@@ -520,7 +520,7 @@ button:disabled {
 
 .workspaceHero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.7fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
   align-items: stretch;
   gap: 12px;
   min-width: 0;
@@ -544,7 +544,7 @@ button:disabled {
 }
 
 .jobActionCard {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
   align-content: start;
   gap: 8px;
 }
@@ -1562,11 +1562,11 @@ input[type='checkbox'] {
   }
 
   .workspaceHero {
-    grid-template-columns: minmax(0, 1fr) 86px;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .jobActionCard {
-    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

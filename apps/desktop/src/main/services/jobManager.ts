@@ -11,7 +11,7 @@ import type {
   SubtitleSegment,
   WorkflowStep
 } from '@shared/models';
-import { normalizeAsrLanguageCode, whisperPromptForLanguage } from '@shared/languages';
+import { canonicalLanguageCode, normalizeAsrLanguageCode } from '@shared/languages';
 import { TranslationScheduler } from '@shared/translation/scheduler';
 import { MockTranslationProvider, OpenAICompatibleTranslationProvider } from '@shared/translation/providers';
 import { validateAsrRequest } from './asrProviders';
@@ -43,8 +43,8 @@ export class JobManager extends EventEmitter {
       step: 'asr',
       stage: 'imported',
       progress: 0,
-      sourceLanguage: request.sourceLanguage,
-      targetLanguage: request.targetLanguage,
+      sourceLanguage: canonicalLanguageCode(request.sourceLanguage),
+      targetLanguage: canonicalLanguageCode(request.targetLanguage),
       asrProviderId: request.asrProviderId,
       whisperModelId: request.whisperModelId,
       localWhisperUseCuda: request.localWhisperUseCuda ?? false,
@@ -158,7 +158,6 @@ export class JobManager extends EventEmitter {
         audioPath: extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path,
         modelId: job.whisperModelId,
         sourceLanguage: job.sourceLanguage,
-        whisperPrompt: whisperPromptForLanguage(job.sourceLanguage),
         targetLanguage: job.targetLanguage,
         asrProviderId: job.asrProviderId,
         preferCuda: job.localWhisperUseCuda,
@@ -187,7 +186,6 @@ export class JobManager extends EventEmitter {
             audioPath: extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path,
             modelId: job.whisperModelId,
             sourceLanguage: job.sourceLanguage,
-            whisperPrompt: whisperPromptForLanguage(job.sourceLanguage),
             targetLanguage: job.targetLanguage,
             asrProviderId: job.asrProviderId,
             preferCuda: false,
@@ -396,10 +394,6 @@ export class JobManager extends EventEmitter {
     form.append('response_format', 'verbose_json');
     if (job.sourceLanguage !== 'auto') {
       form.append('language', normalizeAsrLanguageCode(job.sourceLanguage));
-    }
-    const asrPrompt = whisperPromptForLanguage(job.sourceLanguage);
-    if (asrPrompt) {
-      form.append('prompt', asrPrompt);
     }
 
     const response = await fetch(`${(secret.baseUrl ?? 'https://api.openai.com/v1').replace(/\/$/, '')}/audio/transcriptions`, {

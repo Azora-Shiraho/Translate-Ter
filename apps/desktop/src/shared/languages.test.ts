@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeAsrLanguageCode, whisperPromptForLanguage } from './languages';
+import { canonicalLanguageCode, languageLabel, normalizeAsrLanguageCode } from './languages';
 
 describe('normalizeAsrLanguageCode', () => {
   it('keeps auto detect for empty and auto values', () => {
@@ -15,9 +15,10 @@ describe('normalizeAsrLanguageCode', () => {
     expect(normalizeAsrLanguageCode('ja-JP')).toBe('ja');
   });
 
-  it('provides chinese script prompts for whisper recognition', () => {
-    expect(whisperPromptForLanguage('zh-CN')).toContain('简体中文');
-    expect(whisperPromptForLanguage('zh-TW')).toContain('繁體中文');
-    expect(whisperPromptForLanguage('en-US')).toBeUndefined();
+  it('maps chinese variants to one canonical app language', () => {
+    expect(canonicalLanguageCode('zh-CN')).toBe('zh-CN');
+    expect(canonicalLanguageCode('zh-TW')).toBe('zh-CN');
+    expect(languageLabel('zh-TW', 'en-US')).toBe('Chinese');
+    expect(languageLabel('zh-TW', 'zh-CN')).toBe('中文');
   });
 });

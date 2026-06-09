@@ -23,15 +23,8 @@ export const languageRegistry: LanguageOption[] = [
   },
   {
     code: 'zh-CN',
-    englishName: 'Chinese Simplified',
-    nativeName: '简体中文',
-    supportsAsr: true,
-    supportsTranslationTarget: true
-  },
-  {
-    code: 'zh-TW',
-    englishName: 'Chinese Traditional',
-    nativeName: '繁體中文',
+    englishName: 'Chinese',
+    nativeName: '中文',
     supportsAsr: true,
     supportsTranslationTarget: true
   },
@@ -58,8 +51,16 @@ export const languageRegistry: LanguageOption[] = [
   }
 ];
 
+export function canonicalLanguageCode(code: string): string {
+  const normalized = code.trim().toLowerCase();
+  if (normalized === 'zh-tw') return 'zh-CN';
+  if (normalized === 'zh-cn') return 'zh-CN';
+  if (normalized === 'en-us') return 'en';
+  return code;
+}
+
 export function languageLabel(code: string, uiLanguage: 'en-US' | 'zh-CN' = 'en-US'): string {
-  const language = languageRegistry.find((item) => item.code === code);
+  const language = languageRegistry.find((item) => item.code === canonicalLanguageCode(code));
   if (!language) return code;
   return uiLanguage === 'zh-CN' ? language.nativeName : language.englishName;
 }
@@ -72,15 +73,4 @@ export function normalizeAsrLanguageCode(code: string): string {
   if (primary === 'zh') return 'zh';
   if (primary === 'pt') return normalized === 'pt-br' ? 'pt' : 'pt';
   return primary;
-}
-
-export function whisperPromptForLanguage(code: string): string | undefined {
-  const normalized = code.trim().toLowerCase();
-  if (normalized === 'zh-cn') {
-    return '以下音频内容使用简体中文。请优先输出简体中文文本，避免使用繁体字。';
-  }
-  if (normalized === 'zh-tw') {
-    return '以下音訊內容使用繁體中文。請優先輸出繁體中文文本，避免使用簡體字。';
-  }
-  return undefined;
 }

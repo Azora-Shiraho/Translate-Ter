@@ -15,7 +15,6 @@ export type NativeTranscribePayload = {
   audioPath?: string;
   modelId: string;
   sourceLanguage: string;
-  whisperPrompt?: string;
   targetLanguage?: string;
   asrProviderId?: string;
   preferCuda?: boolean;

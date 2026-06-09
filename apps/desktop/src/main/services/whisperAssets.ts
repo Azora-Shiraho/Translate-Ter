@@ -8,10 +8,20 @@ import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:pa
 import type { AssetEvent, WhisperModelInfo, WhisperRuntimeRequest, WhisperRuntimeStatus } from '@shared/models';
 
 const NVIDIA_CUDA_REDIST_BASE_URL = 'https://developer.download.nvidia.com/compute/cuda/redist/';
-const NVIDIA_CUDA_11_8_REDIST_MANIFEST_URL = `${NVIDIA_CUDA_REDIST_BASE_URL}redistrib_11.8.0.json`;
-const WINDOWS_CUBLAS_DLLS = ['cublas64_11.dll', 'cublasLt64_11.dll'];
+const NVIDIA_CUDA_REDIST_MANIFEST_URLS = {
+  '11.8': `${NVIDIA_CUDA_REDIST_BASE_URL}redistrib_11.8.0.json`,
+  '12.8': `${NVIDIA_CUDA_REDIST_BASE_URL}redistrib_12.8.0.json`
+} as const;
+const WINDOWS_CUDA_RUNTIME_DLLS = {
+  '11.8': ['cublas64_11.dll', 'cublasLt64_11.dll'],
+  '12.8': ['cublas64_12.dll', 'cublasLt64_12.dll']
+} as const;
 const MULTI_THREAD_DOWNLOAD_PARTS = 4;
 const MULTI_THREAD_MIN_BYTES = 8 * 1024 * 1024;
+const CUDA_11_8 = '11.8' as const;
+const CUDA_12_8 = '12.8' as const;
+
+type SupportedCudaVersion = keyof typeof NVIDIA_CUDA_REDIST_MANIFEST_URLS;
 
 type WhisperManifest = {
   manifestVersion: number;
@@ -22,7 +32,13 @@ type WhisperManifest = {
     version: string;
     platforms: Record<
       string,
-      { binary: string; sha256: string; url: string | null; acceleration: 'cpu' | 'cuda' | 'metal' | 'vulkan' }
+      {
+        binary: string;
+        sha256: string;
+        url: string | null;
+        acceleration: 'cpu' | 'cuda' | 'metal' | 'vulkan';
+        cudaVersion?: SupportedCudaVersion;
+      }
     >;
   };
   models: Array<{
@@ -44,6 +60,12 @@ type CudaRedistribManifest = {
       sha256?: string;
     }
   >;
+};
+
+type NvidiaGpuInfo = {
+  name: string;
+  architecture?: string;
+  computeCapability?: string;
 };
 
 export class WhisperAssetManager extends EventEmitter {
@@ -74,6 +96,8 @@ export class WhisperAssetManager extends EventEmitter {
     await this.migrateLegacyCacheIfNeeded();
     const manifest = await this.manifest();
     const model = manifest.models.find((item) => item.id === request.modelId) ?? manifest.models[0];
+    const gpuInfo = detectNvidiaGpuInfo();
+    const requiredCudaVersion = gpuInfo ? requiredCudaVersionForGpu(gpuInfo) : undefined;
     const downloadScope = request.downloadScope ?? 'all';
     const canDownloadRuntime =
       request.allowDownload && (downloadScope === 'all' || downloadScope === 'runtime');
@@ -82,12 +106,22 @@ export class WhisperAssetManager extends EventEmitter {
       (downloadScope === 'all' || downloadScope === 'runtime' || downloadScope === 'cuda-runtime');
     const canDownloadModel = request.allowDownload && (downloadScope === 'all' || downloadScope === 'model');
     const cudaHardwareSupported = detectCudaHardwareSupport();
-    let cudaSupported = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest));
+    const preferredCudaVersion = requiredCudaVersion ?? CUDA_11_8;
+    let cudaSupported = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest, preferredCudaVersion), preferredCudaVersion);
     if (request.preferCuda && cudaHardwareSupported && !cudaSupported && canDownloadCudaRuntime) {
-      await this.ensureWindowsCudaRuntimeDependencies(manifest, Boolean(request.useMultiThreadDownload));
-      cudaSupported = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest));
+      await this.ensureWindowsCudaRuntimeDependencies(
+        manifest,
+        preferredCudaVersion,
+        Boolean(request.useMultiThreadDownload)
+      );
+      cudaSupported = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest, preferredCudaVersion), preferredCudaVersion);
     }
-    const { runtime, platformKey } = this.selectRuntime(manifest, request.preferCuda, cudaSupported);
+    const { runtime, platformKey, compatibilityMessage } = this.selectRuntime(
+      manifest,
+      request.preferCuda,
+      cudaSupported,
+      gpuInfo
+    );
 
     if (manifest.enabled === false) {
       return this.status(
@@ -128,7 +162,7 @@ export class WhisperAssetManager extends EventEmitter {
         false,
         {
           actionRequired: 'download-runtime',
-          message: `No whisper.cpp runtime is pinned for ${platformKey}.`
+          message: compatibilityMessage ?? `No whisper.cpp runtime is pinned for ${platformKey}.`
         }
       );
     }
@@ -242,8 +276,10 @@ export class WhisperAssetManager extends EventEmitter {
     return join(app.getPath('userData'), 'runtime', 'whisper');
   }
 
-  private cudaRuntimeSearchRoots(manifest: WhisperManifest): string[] {
-    const runtime = manifest.runtime.platforms[`${this.platformKey()}-cuda`];
+  private cudaRuntimeSearchRoots(manifest: WhisperManifest, cudaVersion?: SupportedCudaVersion): string[] {
+    const runtime = Object.values(manifest.runtime.platforms).find(
+      (candidate) => candidate.acceleration === 'cuda' && (!cudaVersion || candidate.cudaVersion === cudaVersion)
+    );
     return runtime ? [dirname(join(this.cacheDir(), runtime.binary))] : [];
   }
 
@@ -516,20 +552,37 @@ export class WhisperAssetManager extends EventEmitter {
   private selectRuntime(
     manifest: WhisperManifest,
     preferCuda: boolean,
-    cudaSupported: boolean
+    cudaSupported: boolean,
+    gpuInfo?: NvidiaGpuInfo
   ): {
     runtime: WhisperManifest['runtime']['platforms'][string] | undefined;
     platformKey: string;
+    compatibilityMessage?: string;
   } {
     const baseKey = this.platformKey();
-    const preferredKeys = preferCuda && cudaSupported ? [`${baseKey}-cuda`, baseKey] : [baseKey];
-    for (const key of preferredKeys) {
-      const runtime = manifest.runtime.platforms[key];
-      if (runtime) {
-        return { runtime, platformKey: key };
+    if (preferCuda && cudaSupported) {
+      const cudaRuntime = manifest.runtime.platforms[`${baseKey}-cuda`];
+      if (cudaRuntime) {
+        const compatibility = isCudaRuntimeCompatibleWithGpu(cudaRuntime.cudaVersion, gpuInfo);
+        if (compatibility.ok) {
+          return { runtime: cudaRuntime, platformKey: `${baseKey}-cuda` };
+        }
+
+        const cpuRuntime = manifest.runtime.platforms[baseKey];
+        return {
+          runtime: cpuRuntime,
+          platformKey: cpuRuntime ? baseKey : `${baseKey}-cuda`,
+          compatibilityMessage: compatibility.message
+        };
       }
     }
-    return { runtime: undefined, platformKey: preferredKeys[0] };
+
+    const cpuRuntime = manifest.runtime.platforms[baseKey];
+    if (cpuRuntime) {
+      return { runtime: cpuRuntime, platformKey: baseKey };
+    }
+
+    return { runtime: undefined, platformKey: preferCuda ? `${baseKey}-cuda` : baseKey };
   }
 
   private async exists(path: string): Promise<boolean> {
@@ -700,16 +753,19 @@ export class WhisperAssetManager extends EventEmitter {
 
   private async ensureWindowsCudaRuntimeDependencies(
     manifest: WhisperManifest,
+    cudaVersion: SupportedCudaVersion,
     useMultiThreadDownload: boolean
   ): Promise<void> {
     if (process.platform !== 'win32') return;
-    const runtime = manifest.runtime.platforms[`${this.platformKey()}-cuda`];
+    const runtime = Object.values(manifest.runtime.platforms).find(
+      (candidate) => candidate.acceleration === 'cuda' && candidate.cudaVersion === cudaVersion
+    );
     if (!runtime) return;
 
     const runtimeDir = dirname(join(this.cacheDir(), runtime.binary));
-    if (hasWindowsCudaRuntime([runtimeDir])) return;
+    if (hasWindowsCudaRuntime(cudaVersion, [runtimeDir])) return;
 
-    const packageInfo = await this.fetchCudaLibcublasPackage();
+    const packageInfo = await this.fetchCudaLibcublasPackage(cudaVersion);
     if (!packageInfo.relative_path || !packageInfo.sha256 || !isPinnedSha256(packageInfo.sha256)) {
       throw new Error('NVIDIA CUDA libcublas redistributable metadata is missing a pinned SHA-256 hash.');
     }
@@ -741,8 +797,9 @@ export class WhisperAssetManager extends EventEmitter {
     await mkdir(extractDir, { recursive: true });
     await this.extractZip(archivePath, extractDir);
 
-    const dllPaths = await findFilesByName(extractDir, WINDOWS_CUBLAS_DLLS);
-    for (const dllName of WINDOWS_CUBLAS_DLLS) {
+    const runtimeDlls = WINDOWS_CUDA_RUNTIME_DLLS[cudaVersion];
+    const dllPaths = await findFilesByName(extractDir, runtimeDlls);
+    for (const dllName of runtimeDlls) {
       const sourcePath = dllPaths.get(dllName.toLowerCase());
       if (!sourcePath) {
         throw new Error(`CUDA cuBLAS runtime archive did not contain ${dllName}.`);
@@ -755,8 +812,8 @@ export class WhisperAssetManager extends EventEmitter {
     this.emitAsset({ type: 'ready', scope: 'runtime', message: 'CUDA cuBLAS runtime is ready.' });
   }
 
-  private async fetchCudaLibcublasPackage(): Promise<NonNullable<CudaRedistribManifest['libcublas']>[string]> {
-    const response = await fetch(NVIDIA_CUDA_11_8_REDIST_MANIFEST_URL);
+  private async fetchCudaLibcublasPackage(cudaVersion: SupportedCudaVersion): Promise<NonNullable<CudaRedistribManifest['libcublas']>[string]> {
+    const response = await fetch(NVIDIA_CUDA_REDIST_MANIFEST_URLS[cudaVersion]);
     if (!response.ok) {
       throw new Error(`Failed to fetch NVIDIA CUDA redistributable manifest: HTTP ${response.status}`);
     }
@@ -773,10 +830,13 @@ function isPinnedSha256(value: string): boolean {
   return /^[a-f0-9]{64}$/i.test(value) && !/^0{64}$/i.test(value);
 }
 
-function detectCudaSupport(extraSearchRoots: string[] = []): boolean {
+function detectCudaSupport(
+  extraSearchRoots: string[] = [],
+  cudaVersion: SupportedCudaVersion = CUDA_11_8
+): boolean {
   if (process.platform !== 'win32' && process.platform !== 'linux') return false;
   if (process.platform === 'win32') {
-    return hasWindowsCudaRuntime(extraSearchRoots);
+    return hasWindowsCudaRuntime(cudaVersion, extraSearchRoots);
   }
   if (process.env.CUDA_PATH || process.env.CUDA_HOME) return true;
 
@@ -819,7 +879,46 @@ function detectCudaHardwareSupport(): boolean {
   return false;
 }
 
-function hasWindowsCudaRuntime(extraSearchRoots: string[] = []): boolean {
+function detectNvidiaGpuInfo(): NvidiaGpuInfo | undefined {
+  const query = spawnSync('nvidia-smi', ['--query-gpu=name,compute_cap', '--format=csv,noheader'], {
+    windowsHide: true,
+    encoding: 'utf8'
+  });
+  if (query.status !== 0) return undefined;
+
+  const line = String(query.stdout ?? '')
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .find(Boolean);
+  if (!line) return undefined;
+
+  const parts = line.split(',').map((entry) => entry.trim());
+  const architectureQuery =
+    process.platform === 'win32'
+      ? spawnSync(
+          'powershell.exe',
+          [
+            '-NoProfile',
+            '-Command',
+            "(nvidia-smi -q | Select-String -Pattern 'Product Architecture' | Select-Object -First 1).ToString()"
+          ],
+          {
+            windowsHide: true,
+            encoding: 'utf8'
+          }
+        )
+      : undefined;
+  const architectureLine = String(architectureQuery?.stdout ?? '');
+  const architectureMatch = architectureLine.match(/Product Architecture\\s*:\\s*(.+)/i);
+
+  return {
+    name: parts[0] ?? 'NVIDIA GPU',
+    computeCapability: parts[1],
+    architecture: architectureMatch?.[1]?.trim()
+  };
+}
+
+function hasWindowsCudaRuntime(cudaVersion: SupportedCudaVersion, extraSearchRoots: string[] = []): boolean {
   const searchRoots = [
     ...extraSearchRoots,
     process.env.CUDA_PATH ? join(process.env.CUDA_PATH, 'bin') : undefined,
@@ -830,7 +929,37 @@ function hasWindowsCudaRuntime(extraSearchRoots: string[] = []): boolean {
       .filter(Boolean)
   ].filter((entry): entry is string => Boolean(entry));
 
-  return WINDOWS_CUBLAS_DLLS.every((dllName) => searchRoots.some((root) => existsSync(join(root, dllName))));
+  return WINDOWS_CUDA_RUNTIME_DLLS[cudaVersion].every((dllName) =>
+    searchRoots.some((root) => existsSync(join(root, dllName)))
+  );
+}
+
+function requiredCudaVersionForGpu(gpuInfo: NvidiaGpuInfo): SupportedCudaVersion {
+  const capability = Number.parseFloat(gpuInfo.computeCapability ?? '');
+  if (Number.isFinite(capability) && capability >= 12) {
+    return CUDA_12_8;
+  }
+  return CUDA_11_8;
+}
+
+function isCudaRuntimeCompatibleWithGpu(
+  runtimeCudaVersion: SupportedCudaVersion | undefined,
+  gpuInfo?: NvidiaGpuInfo
+): { ok: boolean; message?: string } {
+  if (!gpuInfo) return { ok: true };
+  const requiredCudaVersion = requiredCudaVersionForGpu(gpuInfo);
+  if (!runtimeCudaVersion || runtimeCudaVersion === requiredCudaVersion) {
+    return { ok: true };
+  }
+
+  if (requiredCudaVersion === CUDA_12_8 && runtimeCudaVersion === CUDA_11_8) {
+    return {
+      ok: false,
+      message: `Detected ${gpuInfo.name}${gpuInfo.computeCapability ? ` (compute capability ${gpuInfo.computeCapability})` : ''}. This GPU generation requires CUDA 12.8+ for local whisper CUDA, but the pinned runtime is CUDA ${runtimeCudaVersion}. Falling back to CPU until a matching whisper CUDA runtime is provided.`
+    };
+  }
+
+  return { ok: true };
 }
 
 function canRunWhisperBinary(path: string): boolean {
@@ -875,7 +1004,7 @@ async function findFileByName(root: string, fileName: string, maxDepth: number):
   return undefined;
 }
 
-async function findFilesByName(root: string, names: string[]): Promise<Map<string, string>> {
+async function findFilesByName(root: string, names: readonly string[]): Promise<Map<string, string>> {
   const wanted = new Set(names.map((name) => name.toLowerCase()));
   const found = new Map<string, string>();
   const stack = [root];
