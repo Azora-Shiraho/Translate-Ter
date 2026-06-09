@@ -88,6 +88,7 @@ function App(): JSX.Element {
   const [job, setJob] = useState<JobSnapshot>();
   const [mediaPath, setMediaPath] = useState('');
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>();
+  const [warningPanelOpen, setWarningPanelOpen] = useState(false);
   const [selectedWarningId, setSelectedWarningId] = useState<string>();
   const [message, setMessage] = useState(t('ready'));
   const [runtimeActivity, setRuntimeActivity] = useState<string>();
@@ -98,7 +99,7 @@ function App(): JSX.Element {
   const [runningAction, setRunningAction] = useState<RunningAction>();
   const [exportingVariant, setExportingVariant] = useState<ExportVariant>();
   const [busy, setBusy] = useState(false);
-  const [checkingRuntime, setCheckingRuntime] = useState(false);
+  const [runtimeOperation, setRuntimeOperation] = useState<'cuda' | 'model'>();
   const [checkingProvider, setCheckingProvider] = useState<string>();
   const actionTokenRef = useRef(0);
 
@@ -186,6 +187,7 @@ function App(): JSX.Element {
 
   useEffect(() => {
     if (!workflowWarnings.length) {
+      setWarningPanelOpen(false);
       setSelectedWarningId(undefined);
       return;
     }
@@ -247,7 +249,7 @@ function App(): JSX.Element {
 
   async function checkCudaRuntime(): Promise<void> {
     if (!settings) return;
-    setCheckingRuntime(true);
+    setRuntimeOperation('cuda');
     setActiveDownload(undefined);
     setRuntimeActivity(t('runtimeChecking'));
     setModelActivity(undefined);
@@ -255,7 +257,7 @@ function App(): JSX.Element {
     try {
       const status = await window.translateTer.assets.ensureWhisperRuntime({
         modelId: settings.whisperModelId,
-        allowDownload: settings.allowWhisperAssetDownload,
+        allowDownload: true,
         preferCuda: true,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'cuda-runtime'
@@ -274,13 +276,13 @@ function App(): JSX.Element {
       pushStatus(nextMessage, 'error');
     } finally {
       setActiveDownload(undefined);
-      setCheckingRuntime(false);
+      setRuntimeOperation(undefined);
     }
   }
 
   async function downloadSelectedModel(): Promise<void> {
     if (!settings) return;
-    setCheckingRuntime(true);
+    setRuntimeOperation('model');
     setActiveDownload(undefined);
     setRuntimeActivity(undefined);
     setModelActivity(t('runtimeDownloading'));
@@ -288,7 +290,7 @@ function App(): JSX.Element {
     try {
       const status = await window.translateTer.assets.ensureWhisperRuntime({
         modelId: settings.whisperModelId,
-        allowDownload: settings.allowWhisperAssetDownload,
+        allowDownload: true,
         preferCuda: settings.localWhisperUseCuda,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'model'
@@ -306,7 +308,7 @@ function App(): JSX.Element {
       pushStatus(nextMessage, 'error');
     } finally {
       setActiveDownload(undefined);
-      setCheckingRuntime(false);
+      setRuntimeOperation(undefined);
     }
   }
 
@@ -471,7 +473,7 @@ function App(): JSX.Element {
   const isTranslating = runningAction === 'translate' || job?.stage === 'translating';
   const runningStep = isTranscribing ? 'asr' : isTranslating ? 'translate' : undefined;
   const failedStep = job?.stage === 'failed' ? job.step : undefined;
-  const appWorking = busy || checkingRuntime || Boolean(checkingProvider) || jobIsRunning;
+  const appWorking = busy || Boolean(runtimeOperation) || Boolean(checkingProvider) || jobIsRunning;
   const hasRecognizedSubtitles = Boolean(job?.subtitleDocument?.segments.length);
   const translationComplete = hasRecognizedSubtitles && translatedCount === segments.length && segments.length > 0;
   const canExportTranslated = translationComplete && !busy;
@@ -660,15 +662,23 @@ function App(): JSX.Element {
                       icon={<AlertCircle size={16} />}
                       label={t('warnings')}
                       value={String(warningCount)}
-                      active={warningCount > 0}
+                      active={warningCount > 0 && warningPanelOpen}
                       onClick={
                         warningCount > 0
-                          ? () => setSelectedWarningId((current) => current ?? workflowWarnings[0]?.id)
+                          ? () => {
+                              setWarningPanelOpen((current) => {
+                                const next = !current;
+                                if (next) {
+                                  setSelectedWarningId((warningId) => warningId ?? workflowWarnings[0]?.id);
+                                }
+                                return next;
+                              });
+                            }
                           : undefined
                       }
                     />
                   </div>
-                  {workflowWarnings.length > 0 && selectedWarning && (
+                  {warningPanelOpen && workflowWarnings.length > 0 && selectedWarning && (
                     <div className="warningPanel">
                       <div className="warningPanelHeader">
                         <strong>{t('warningDetails')}</strong>
@@ -698,26 +708,26 @@ function App(): JSX.Element {
                             <small>{selectedWarning.message}</small>
                           </div>
                         </div>
-                        <StatusLine
-                          label={t('warningSegmentRange')}
-                          tone="warn"
-                          value={formatWarningSegmentRange(selectedWarning)}
-                        />
-                        <StatusLine
-                          label={t('warningTimeline')}
-                          tone="warn"
-                          value={formatWarningTimeline(selectedWarning)}
-                        />
-                        <StatusLine
-                          label={t('warningGeneratedAt')}
-                          tone="muted"
-                          value={formatWarningDate(selectedWarning.createdAt)}
-                        />
-                        <StatusLine
-                          label={t('warningProvider')}
-                          tone="muted"
-                          value={providerLabel(selectedWarning.providerId ?? translationProviderId, t)}
-                        />
+                        <div className="warningMetaGrid">
+                          <div className="warningMetaCard">
+                            <span>{t('warningSegmentRange')}</span>
+                            <strong className="warn">{formatWarningSegmentRange(selectedWarning)}</strong>
+                          </div>
+                          <div className="warningMetaCard">
+                            <span>{t('warningTimeline')}</span>
+                            <strong className="warn">{formatWarningTimeline(selectedWarning)}</strong>
+                          </div>
+                          <div className="warningMetaCard">
+                            <span>{t('warningGeneratedAt')}</span>
+                            <strong className="muted">{formatWarningDate(selectedWarning.createdAt)}</strong>
+                          </div>
+                          <div className="warningMetaCard">
+                            <span>{t('warningProvider')}</span>
+                            <strong className="muted">
+                              {providerLabel(selectedWarning.providerId ?? translationProviderId, t)}
+                            </strong>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1076,11 +1086,11 @@ function App(): JSX.Element {
                             </div>
                             <button
                               className="secondary compact"
-                              disabled={checkingRuntime || !settings.allowWhisperAssetDownload}
+                              disabled={runtimeOperation === 'cuda'}
                               onClick={() => void checkCudaRuntime()}
                             >
                               <HardDriveDownload size={16} />
-                              {checkingRuntime ? t('checking') : t('checkCudaRuntime')}
+                              {runtimeOperation === 'cuda' ? t('checking') : t('checkCudaRuntime')}
                             </button>
                             <ToggleField
                               label={t('useCudaAcceleration')}
@@ -1121,11 +1131,11 @@ function App(): JSX.Element {
                             {!selectedModel?.installed && (
                               <button
                                 className="secondary compact"
-                                disabled={checkingRuntime || !settings.allowWhisperAssetDownload}
+                                disabled={runtimeOperation === 'model'}
                                 onClick={() => void downloadSelectedModel()}
                               >
                                 <HardDriveDownload size={16} />
-                                {checkingRuntime ? t('checking') : t('downloadModel')}
+                                {runtimeOperation === 'model' ? t('checking') : t('downloadModel')}
                               </button>
                             )}
                             {runtimeStatus && (

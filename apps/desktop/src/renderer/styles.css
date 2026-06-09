@@ -474,6 +474,35 @@ button:disabled {
   background: var(--tt-surface-panel);
 }
 
+.warningMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.warningMetaCard {
+  display: grid;
+  gap: 4px;
+  padding: 10px 11px;
+  border: 1px solid var(--tt-border-soft);
+  border-radius: 14px;
+  background: var(--tt-surface-panel-soft);
+}
+
+.warningMetaCard span {
+  color: var(--tt-text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.warningMetaCard strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .railStatusStack {
   display: grid;
   gap: 12px;
