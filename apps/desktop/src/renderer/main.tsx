@@ -315,21 +315,25 @@ function App(): JSX.Element {
   async function testProvider(providerId: string): Promise<void> {
     setCheckingProvider(providerId);
     try {
+      if (providerId === 'local.whisper.cpp' && settings) {
+        const nextRuntimeStatus = await window.translateTer.assets.ensureWhisperRuntime({
+          modelId: settings.whisperModelId,
+          allowDownload: true,
+          preferCuda: settings.localWhisperUseCuda,
+          useMultiThreadDownload: settings.enableMultiThreadDownload,
+          downloadScope: 'runtime'
+        });
+        setRuntimeStatus(nextRuntimeStatus);
+        syncLocalWhisperHealth(nextRuntimeStatus);
+        pushStatus(describeLocalWhisperTestResult(nextRuntimeStatus, t), nextRuntimeStatus.binary.verified ? 'success' : 'warning');
+        return;
+      }
+
       const draftSecret = providerSecrets[providerId];
       if (draftSecret) {
         await window.translateTer.settings.setSecret(providerId, draftSecret);
       }
       const health = await window.translateTer.settings.testProvider(providerId);
-      if (providerId === 'local.whisper.cpp' && settings) {
-        const nextRuntimeStatus = await window.translateTer.assets.ensureWhisperRuntime({
-          modelId: settings.whisperModelId,
-          allowDownload: false,
-          preferCuda: settings.localWhisperUseCuda,
-          useMultiThreadDownload: settings.enableMultiThreadDownload,
-          downloadScope: 'none'
-        });
-        setRuntimeStatus(nextRuntimeStatus);
-      }
       setProviderHealth((current) => ({ ...current, [providerId]: health }));
       const healthMessage =
         providerId === 'local.whisper.cpp' && !health.ok
@@ -454,6 +458,7 @@ function App(): JSX.Element {
   const targetLabel = settings ? languageLabel(settings.targetLanguage, settings.uiLanguage) : '';
   const translationProviderId = settings?.translationProviderPriority[0] ?? 'openai.compatible';
   const supportsCuda = Boolean(nativeHealth?.cudaSupported || runtimeStatus?.acceleration.cudaSupported);
+  const cudaStatusDetail = describeCudaStatusDetail(runtimeStatus, t);
   const llmHealth = providerHealth[translationProviderId];
   const asrHealth = providerHealth[settings?.asrProviderId ?? 'local.whisper.cpp'];
   const cloudAsrSecret = providerSecrets['cloud.openai'] ?? {};
@@ -1080,9 +1085,9 @@ function App(): JSX.Element {
                           <SectionTitle icon={<Gauge size={15} />} title={t('cudaAcceleration')} />
                           <div className="modelCard accentCard">
                             <div>
-                              <span className={supportsCuda ? 'signal good' : 'signal'} />
+                             <span className={supportsCuda ? 'signal good' : 'signal'} />
                               <strong>{t('cudaAcceleration')}</strong>
-                              <small>{supportsCuda ? t('cudaDetected') : t('cudaUnavailable')}</small>
+                              <small>{cudaStatusDetail}</small>
                             </div>
                             <button
                               className="secondary compact"
@@ -1708,6 +1713,39 @@ function providerLabel(providerId: string, t: (key: string) => string): string {
     default:
       return providerId;
   }
+}
+
+function describeLocalWhisperTestResult(status: WhisperRuntimeStatus, t: (key: string) => string): string {
+  if (!status.binary.verified) {
+    return status.message ?? t('downloadWhisperPrompt');
+  }
+  if (!status.model.verified) {
+    return t('modelReadyPending');
+  }
+  if (status.acceleration.requested === 'gpu') {
+    return describeCudaStatusDetail(status, t);
+  }
+  return status.message ?? t('providerReady');
+}
+
+function describeCudaStatusDetail(
+  status: WhisperRuntimeStatus | undefined,
+  t: (key: string) => string
+): string {
+  if (!status) return t('cudaUnavailable');
+  if (status.acceleration.cudaSupported) return t('cudaDetected');
+
+  const combined = `${status.message ?? ''} ${status.acceleration.fallbackReason ?? ''}`;
+  if (/requires CUDA 12\.8\+/i.test(combined)) {
+    return t('cudaRuntimeMismatch');
+  }
+  if (/required CUDA runtime DLLs/i.test(combined)) {
+    return t('cudaRuntimeMissing');
+  }
+  if (/no supported NVIDIA runtime was detected/i.test(combined)) {
+    return t('cudaNoHardware');
+  }
+  return status.message ?? status.acceleration.fallbackReason ?? t('cudaUnavailable');
 }
 
 function deriveWorkflowWarnings(job?: JobSnapshot): SubtitleWarning[] {
