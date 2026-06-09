@@ -120,7 +120,8 @@ export class WhisperAssetManager extends EventEmitter {
       manifest,
       request.preferCuda,
       cudaSupported,
-      gpuInfo
+      gpuInfo,
+      Boolean(request.ignoreCudaMismatch)
     );
 
     if (manifest.enabled === false) {
@@ -554,7 +555,8 @@ export class WhisperAssetManager extends EventEmitter {
     manifest: WhisperManifest,
     preferCuda: boolean,
     cudaSupported: boolean,
-    gpuInfo?: NvidiaGpuInfo
+    gpuInfo?: NvidiaGpuInfo,
+    ignoreCudaMismatch = false
   ): {
     runtime: WhisperManifest['runtime']['platforms'][string] | undefined;
     platformKey: string;
@@ -565,7 +567,7 @@ export class WhisperAssetManager extends EventEmitter {
       const cudaRuntime = manifest.runtime.platforms[`${baseKey}-cuda`];
       if (cudaRuntime) {
         const compatibility = isCudaRuntimeCompatibleWithGpu(cudaRuntime.cudaVersion, gpuInfo);
-        if (compatibility.ok) {
+        if (compatibility.ok || ignoreCudaMismatch) {
           return { runtime: cudaRuntime, platformKey: `${baseKey}-cuda` };
         }
 

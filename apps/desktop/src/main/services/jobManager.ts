@@ -48,6 +48,7 @@ export class JobManager extends EventEmitter {
       asrProviderId: request.asrProviderId,
       whisperModelId: request.whisperModelId,
       localWhisperUseCuda: request.localWhisperUseCuda ?? false,
+      localWhisperIgnoreCudaMismatch: request.localWhisperIgnoreCudaMismatch ?? false,
       allowWhisperAssetDownload: request.allowWhisperAssetDownload ?? true,
       allowCloudAsrUpload: request.allowCloudAsrUpload ?? false,
       translationProviderPriority: request.translationProviderPriority,
@@ -90,6 +91,7 @@ export class JobManager extends EventEmitter {
             modelId: job.whisperModelId,
             allowDownload: false,
             preferCuda: job.localWhisperUseCuda,
+            ignoreCudaMismatch: job.localWhisperIgnoreCudaMismatch,
             downloadScope: 'none'
           })
         : undefined;

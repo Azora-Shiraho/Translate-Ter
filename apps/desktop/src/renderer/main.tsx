@@ -128,6 +128,20 @@ function App(): JSX.Element {
         'cloud.openai': cloudAsrSecret ?? {},
         'openai.compatible': llmSecret ?? {}
       });
+      const initialRuntimeStatus = nextSettings.asrProviderId === 'local.whisper.cpp'
+        ? await window.translateTer.assets.ensureWhisperRuntime({
+            modelId: nextSettings.whisperModelId,
+            allowDownload: false,
+            preferCuda: nextSettings.localWhisperUseCuda,
+            ignoreCudaMismatch: nextSettings.localWhisperIgnoreCudaMismatch,
+            useMultiThreadDownload: nextSettings.enableMultiThreadDownload,
+            downloadScope: 'none'
+          }).catch(() => undefined)
+        : undefined;
+      if (initialRuntimeStatus) {
+        setRuntimeStatus(initialRuntimeStatus);
+        syncLocalWhisperHealth(initialRuntimeStatus);
+      }
       await i18n.changeLanguage(nextSettings.uiLanguage);
       if (mounted) setMessage(i18n.t('ready'));
     })();
@@ -259,6 +273,7 @@ function App(): JSX.Element {
         modelId: settings.whisperModelId,
         allowDownload: true,
         preferCuda: true,
+        ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'cuda-runtime'
       });
@@ -292,6 +307,7 @@ function App(): JSX.Element {
         modelId: settings.whisperModelId,
         allowDownload: true,
         preferCuda: settings.localWhisperUseCuda,
+        ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'model'
       });
@@ -320,6 +336,7 @@ function App(): JSX.Element {
           modelId: settings.whisperModelId,
           allowDownload: true,
           preferCuda: settings.localWhisperUseCuda,
+          ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
           useMultiThreadDownload: settings.enableMultiThreadDownload,
           downloadScope: 'runtime'
         });
@@ -363,6 +380,7 @@ function App(): JSX.Element {
         asrProviderId: settings.asrProviderId,
         whisperModelId: settings.whisperModelId,
         localWhisperUseCuda: settings.localWhisperUseCuda,
+        localWhisperIgnoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
         allowWhisperAssetDownload: settings.allowWhisperAssetDownload,
         allowCloudAsrUpload: settings.allowCloudAsrUpload,
         translationProviderPriority: settings.translationProviderPriority,
@@ -459,6 +477,8 @@ function App(): JSX.Element {
   const translationProviderId = settings?.translationProviderPriority[0] ?? 'openai.compatible';
   const supportsCuda = Boolean(nativeHealth?.cudaSupported || runtimeStatus?.acceleration.cudaSupported);
   const cudaStatusDetail = describeCudaStatusDetail(runtimeStatus, t);
+  const cudaStatusShort = describeCudaStatusShort(runtimeStatus, t);
+  const cudaMismatchDetected = Boolean(runtimeStatus && /requires CUDA 12\.8\+/i.test(`${runtimeStatus.message ?? ''} ${runtimeStatus.acceleration.fallbackReason ?? ''}`));
   const llmHealth = providerHealth[translationProviderId];
   const asrHealth = providerHealth[settings?.asrProviderId ?? 'local.whisper.cpp'];
   const cloudAsrSecret = providerSecrets['cloud.openai'] ?? {};
@@ -969,8 +989,8 @@ function App(): JSX.Element {
                       />
                       <StatusLine
                         label={t('cudaAcceleration')}
-                        value={supportsCuda ? t('cudaDetectedShort') : t('cudaUnavailableShort')}
-                        tone={supportsCuda ? 'good' : 'muted'}
+                        value={cudaStatusShort}
+                        tone={supportsCuda ? 'good' : cudaMismatchDetected ? 'warn' : 'muted'}
                       />
                       <StatusLine
                         label={t('runtimeBinary')}
@@ -1101,8 +1121,15 @@ function App(): JSX.Element {
                               label={t('useCudaAcceleration')}
                               detail={t('useCudaAccelerationDetail')}
                               checked={settings.localWhisperUseCuda}
-                              disabled={!supportsCuda}
+                              disabled={!supportsCuda && !settings.localWhisperIgnoreCudaMismatch}
                               onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
+                            />
+                            <ToggleField
+                              label={t('ignoreCudaMismatch')}
+                              detail={t('ignoreCudaMismatchDetail')}
+                              checked={settings.localWhisperIgnoreCudaMismatch}
+                              disabled={!cudaMismatchDetected}
+                              onChange={(checked) => void updateSettings({ localWhisperIgnoreCudaMismatch: checked })}
                             />
                           </div>
                         </div>
@@ -1732,7 +1759,7 @@ function describeCudaStatusDetail(
   status: WhisperRuntimeStatus | undefined,
   t: (key: string) => string
 ): string {
-  if (!status) return t('cudaUnavailable');
+  if (!status) return t('runtimeNotChecked');
   if (status.acceleration.cudaSupported) return t('cudaDetected');
 
   const combined = `${status.message ?? ''} ${status.acceleration.fallbackReason ?? ''}`;
@@ -1746,6 +1773,19 @@ function describeCudaStatusDetail(
     return t('cudaNoHardware');
   }
   return status.message ?? status.acceleration.fallbackReason ?? t('cudaUnavailable');
+}
+
+function describeCudaStatusShort(
+  status: WhisperRuntimeStatus | undefined,
+  t: (key: string) => string
+): string {
+  if (!status) return t('notChecked');
+  if (status.acceleration.cudaSupported) return t('cudaDetectedShort');
+  const combined = `${status.message ?? ''} ${status.acceleration.fallbackReason ?? ''}`;
+  if (/requires CUDA 12\.8\+/i.test(combined)) return t('versionMismatchShort');
+  if (/required CUDA runtime DLLs/i.test(combined)) return t('missingRuntimeShort');
+  if (/no supported NVIDIA runtime was detected/i.test(combined)) return t('cudaUnavailableShort');
+  return t('cudaUnavailableShort');
 }
 
 function deriveWorkflowWarnings(job?: JobSnapshot): SubtitleWarning[] {

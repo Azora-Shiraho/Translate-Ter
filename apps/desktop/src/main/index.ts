@@ -101,6 +101,7 @@ function registerIpc(): void {
       modelId: settings.whisperModelId,
       allowDownload: false,
       preferCuda: settings.localWhisperUseCuda,
+      ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
       useMultiThreadDownload: settings.enableMultiThreadDownload,
       downloadScope: 'none'
     });
@@ -110,6 +111,7 @@ function registerIpc(): void {
         modelId: settings.whisperModelId,
         allowDownload: true,
         preferCuda: settings.localWhisperUseCuda,
+        ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'runtime'
       });
@@ -117,6 +119,7 @@ function registerIpc(): void {
         modelId: settings.whisperModelId,
         allowDownload: false,
         preferCuda: settings.localWhisperUseCuda,
+        ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'none'
       });

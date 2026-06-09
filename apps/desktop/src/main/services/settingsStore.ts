@@ -14,6 +14,7 @@ const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = 
   targetLanguage: 'zh-CN',
   asrProviderId: 'local.whisper.cpp',
   whisperModelId: 'ggml-base',
+  localWhisperIgnoreCudaMismatch: false,
   allowWhisperAssetDownload: true,
   enableMultiThreadDownload: false,
   allowCloudAsrUpload: false,
@@ -159,6 +160,7 @@ export class SettingsStore {
 function normalizeSettings(settings: AppSettingsPublic): AppSettingsPublic {
   return {
     ...settings,
+    localWhisperIgnoreCudaMismatch: Boolean(settings.localWhisperIgnoreCudaMismatch),
     sourceLanguage: canonicalSourceLanguageCode(settings.sourceLanguage),
     targetLanguage: canonicalTargetLanguageCode(settings.targetLanguage)
   };

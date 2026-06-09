@@ -63,6 +63,7 @@ export type AppSettingsPublic = {
   asrProviderId: string;
   whisperModelId: string;
   localWhisperUseCuda: boolean;
+  localWhisperIgnoreCudaMismatch: boolean;
   allowWhisperAssetDownload: boolean;
   enableMultiThreadDownload: boolean;
   allowCloudAsrUpload: boolean;
@@ -106,6 +107,7 @@ export type WhisperRuntimeRequest = {
   modelId: string;
   allowDownload: boolean;
   preferCuda: boolean;
+  ignoreCudaMismatch?: boolean;
   useMultiThreadDownload?: boolean;
   downloadScope?: 'all' | 'runtime' | 'cuda-runtime' | 'model' | 'none';
 };
@@ -149,6 +151,7 @@ export type CreateJobRequest = {
   asrProviderId: string;
   whisperModelId: string;
   localWhisperUseCuda?: boolean;
+  localWhisperIgnoreCudaMismatch?: boolean;
   allowWhisperAssetDownload?: boolean;
   allowCloudAsrUpload?: boolean;
   translationProviderPriority: string[];
@@ -184,6 +187,7 @@ export type JobSnapshot = {
   asrProviderId: string;
   whisperModelId: string;
   localWhisperUseCuda: boolean;
+  localWhisperIgnoreCudaMismatch: boolean;
   allowWhisperAssetDownload: boolean;
   allowCloudAsrUpload: boolean;
   translationProviderPriority: string[];
