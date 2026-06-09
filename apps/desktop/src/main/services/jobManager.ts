@@ -11,7 +11,7 @@ import type {
   SubtitleSegment,
   WorkflowStep
 } from '@shared/models';
-import { canonicalLanguageCode, normalizeAsrLanguageCode } from '@shared/languages';
+import { canonicalSourceLanguageCode, canonicalTargetLanguageCode, normalizeAsrLanguageCode } from '@shared/languages';
 import { TranslationScheduler } from '@shared/translation/scheduler';
 import { MockTranslationProvider, OpenAICompatibleTranslationProvider } from '@shared/translation/providers';
 import { validateAsrRequest } from './asrProviders';
@@ -43,8 +43,8 @@ export class JobManager extends EventEmitter {
       step: 'asr',
       stage: 'imported',
       progress: 0,
-      sourceLanguage: canonicalLanguageCode(request.sourceLanguage),
-      targetLanguage: canonicalLanguageCode(request.targetLanguage),
+      sourceLanguage: canonicalSourceLanguageCode(request.sourceLanguage),
+      targetLanguage: canonicalTargetLanguageCode(request.targetLanguage),
       asrProviderId: request.asrProviderId,
       whisperModelId: request.whisperModelId,
       localWhisperUseCuda: request.localWhisperUseCuda ?? false,

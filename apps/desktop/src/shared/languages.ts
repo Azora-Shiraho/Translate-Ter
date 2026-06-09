@@ -22,10 +22,24 @@ export const languageRegistry: LanguageOption[] = [
     supportsTranslationTarget: true
   },
   {
-    code: 'zh-CN',
+    code: 'zh',
     englishName: 'Chinese',
     nativeName: '中文',
     supportsAsr: true,
+    supportsTranslationTarget: false
+  },
+  {
+    code: 'zh-CN',
+    englishName: 'Chinese Simplified',
+    nativeName: '简体中文',
+    supportsAsr: false,
+    supportsTranslationTarget: true
+  },
+  {
+    code: 'zh-TW',
+    englishName: 'Chinese Traditional',
+    nativeName: '繁體中文',
+    supportsAsr: false,
     supportsTranslationTarget: true
   },
   {
@@ -51,16 +65,26 @@ export const languageRegistry: LanguageOption[] = [
   }
 ];
 
-export function canonicalLanguageCode(code: string): string {
+export function canonicalSourceLanguageCode(code: string): string {
   const normalized = code.trim().toLowerCase();
-  if (normalized === 'zh-tw') return 'zh-CN';
+  if (normalized === 'zh-tw' || normalized === 'zh-cn' || normalized === 'zh') return 'zh';
+  if (normalized === 'en-us') return 'en';
+  return code;
+}
+
+export function canonicalTargetLanguageCode(code: string): string {
+  const normalized = code.trim().toLowerCase();
+  if (normalized === 'zh') return 'zh-CN';
   if (normalized === 'zh-cn') return 'zh-CN';
+  if (normalized === 'zh-tw') return 'zh-TW';
   if (normalized === 'en-us') return 'en';
   return code;
 }
 
 export function languageLabel(code: string, uiLanguage: 'en-US' | 'zh-CN' = 'en-US'): string {
-  const language = languageRegistry.find((item) => item.code === canonicalLanguageCode(code));
+  const canonicalCode =
+    code.trim().toLowerCase() === 'zh' ? canonicalSourceLanguageCode(code) : canonicalTargetLanguageCode(code);
+  const language = languageRegistry.find((item) => item.code === canonicalCode);
   if (!language) return code;
   return uiLanguage === 'zh-CN' ? language.nativeName : language.englishName;
 }

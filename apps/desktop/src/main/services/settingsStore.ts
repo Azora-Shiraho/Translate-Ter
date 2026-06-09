@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { chmodSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { canonicalLanguageCode } from '@shared/languages';
+import { canonicalSourceLanguageCode, canonicalTargetLanguageCode } from '@shared/languages';
 import type { AppSettingsPatch, AppSettingsPublic, ProviderSecretInput } from '@shared/models';
 
 const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = {
@@ -159,8 +159,8 @@ export class SettingsStore {
 function normalizeSettings(settings: AppSettingsPublic): AppSettingsPublic {
   return {
     ...settings,
-    sourceLanguage: canonicalLanguageCode(settings.sourceLanguage),
-    targetLanguage: canonicalLanguageCode(settings.targetLanguage)
+    sourceLanguage: canonicalSourceLanguageCode(settings.sourceLanguage),
+    targetLanguage: canonicalTargetLanguageCode(settings.targetLanguage)
   };
 }
 
