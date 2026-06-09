@@ -341,7 +341,7 @@ function chunkToString(chunk: unknown): string {
 function formatNativeBackendCloseDetail(stderr: string, code: number | null, signal: NodeJS.Signals | null): string {
   const trimmed = stderr.replace(/\s+/g, ' ').trim();
   const suffixParts = [
-    code !== null ? `exit code ${code}` : undefined,
+    code !== null ? `exit code ${code}${decodeWindowsExitCode(code)}` : undefined,
     signal ? `signal ${signal}` : undefined
   ].filter(Boolean);
   const suffix = suffixParts.length > 0 ? ` (${suffixParts.join(', ')})` : '';
@@ -350,4 +350,18 @@ function formatNativeBackendCloseDetail(stderr: string, code: number | null, sig
   }
   const excerpt = trimmed.length > 240 ? `${trimmed.slice(0, 240)}...` : trimmed;
   return `Native backend process exited unexpectedly${suffix}: ${excerpt}`;
+}
+
+function decodeWindowsExitCode(code: number): string {
+  const unsigned = code >>> 0;
+  switch (unsigned) {
+    case 0xc0000409:
+      return ', 0xC0000409 stack buffer overrun / fast-fail';
+    case 0xc0000005:
+      return ', 0xC0000005 access violation';
+    case 0xc0000135:
+      return ', 0xC0000135 missing DLL dependency';
+    default:
+      return '';
+  }
 }

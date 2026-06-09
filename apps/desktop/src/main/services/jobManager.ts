@@ -172,6 +172,53 @@ export class JobManager extends EventEmitter {
       if (this.isCancelled(job.id)) return;
 
       if (!response.ok) {
+        const shouldRetryOnCpu = shouldRetryLocalWhisperOnCpu(job, response.error);
+        if (shouldRetryOnCpu) {
+          job.warnings.push({
+            code: 'CudaTranscriptionCrashFallback',
+            message: 'Local whisper CUDA transcription crashed. Retrying once on CPU.',
+            stage: 'asr',
+            createdAt: new Date().toISOString()
+          });
+          await this.setProgress(job, 'transcribing', 78, 'Local GPU transcription crashed. Retrying on CPU.');
+          const cpuRetry = await this.nativeBackend.transcribe({
+            jobId: job.id,
+            mediaPath: job.mediaPath,
+            audioPath: extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path,
+            modelId: job.whisperModelId,
+            sourceLanguage: job.sourceLanguage,
+            whisperPrompt: whisperPromptForLanguage(job.sourceLanguage),
+            targetLanguage: job.targetLanguage,
+            asrProviderId: job.asrProviderId,
+            preferCuda: false,
+            runtime: runtime
+              ? {
+                  binaryPath: runtime.binary.expectedPath,
+                  modelPath: runtime.model.expectedPath
+                }
+              : undefined
+          });
+          if (this.isCancelled(job.id)) return;
+          if (cpuRetry.ok) {
+            const cpuRetryDocument = nativePayloadToDocument(cpuRetry.payload, job);
+            if (!cpuRetryDocument) {
+              this.fail(job, 'MalformedNativeResponse', 'Native backend did not return a subtitle document after CPU retry.', true);
+              return;
+            }
+
+            job.subtitleDocument = normalizeDocumentForSubtitleDisplay({
+              ...cpuRetryDocument,
+              metadata: {
+                ...cpuRetryDocument.metadata,
+                warnings: dedupeWarnings([...(cpuRetryDocument.metadata.warnings ?? []), ...job.warnings])
+              }
+            });
+            job.step = 'subtitles';
+            this.cancelledJobs.delete(job.id);
+            await this.setProgress(job, 'completed', 100, 'Transcription complete after CPU retry.');
+            return;
+          }
+        }
         this.fail(
           job,
           response.error?.code ?? 'NativeBackendError',
@@ -510,6 +557,17 @@ function dedupeWarnings(warnings: SubtitleWarning[]): SubtitleWarning[] {
 
 function translationProviderIdFromPriority(priority: string[]): string {
   return priority[0] ?? 'openai.compatible';
+}
+
+function shouldRetryLocalWhisperOnCpu(
+  job: JobSnapshot,
+  error?: { code?: string; message?: string; retryable?: boolean }
+): boolean {
+  if (job.asrProviderId !== 'local.whisper.cpp' || !job.localWhisperUseCuda) {
+    return false;
+  }
+  const message = error?.message?.toLowerCase() ?? '';
+  return message.includes('0xc0000409') || message.includes('3221226505') || message.includes('stack buffer overrun');
 }
 
 function cancelledStep(job: JobSnapshot): WorkflowStep {
