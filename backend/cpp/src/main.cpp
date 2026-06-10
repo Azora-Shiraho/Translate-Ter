@@ -255,6 +255,16 @@ std::string quote_shell_value(std::string_view value) {
   return quoted;
 }
 
+std::string normalize_whisper_language_code(std::string language_code) {
+  std::transform(language_code.begin(), language_code.end(), language_code.begin(), [](unsigned char ch) {
+    return static_cast<char>(std::tolower(ch));
+  });
+  if (language_code.empty() || language_code == "auto") return "auto";
+  const auto separator = language_code.find('-');
+  if (separator == std::string::npos) return language_code;
+  return language_code.substr(0, separator);
+}
+
 CommandOutput run_command_capture(std::string command) {
   command += " 2>&1";
   std::array<char, 4096> buffer{};
@@ -997,8 +1007,9 @@ NativeResult asr_transcribe_result(const std::string& request) {
   command << quote_shell_value(*binary_path) << " -m " << quote_shell_value(*model_path)
           << " -f " << quote_shell_arg(whisper_input)
           << " --output-srt --output-json-full --output-file " << quote_shell_arg(output_base);
-  if (source_language != "auto" && !source_language.empty()) {
-    command << " -l " << quote_shell_value(source_language);
+  const auto whisper_language = normalize_whisper_language_code(source_language);
+  if (whisper_language != "auto" && !whisper_language.empty()) {
+    command << " -l " << quote_shell_value(whisper_language);
   }
   if (!prefer_cuda || !cuda_supported) {
     command << " -ng";

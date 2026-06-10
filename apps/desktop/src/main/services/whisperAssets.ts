@@ -3,13 +3,34 @@ import { app } from 'electron';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { access, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { availableParallelism, cpus } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
-import type { AssetEvent, WhisperModelInfo, WhisperRuntimeRequest, WhisperRuntimeStatus } from '@shared/models';
+import type {
+  AssetEvent,
+  WhisperModelInfo,
+  WhisperModelRequest,
+  WhisperModelStatus,
+  WhisperRuntimeRequest,
+  WhisperRuntimeStatus
+} from '@shared/models';
 
 const NVIDIA_CUDA_REDIST_BASE_URL = 'https://developer.download.nvidia.com/compute/cuda/redist/';
-const NVIDIA_CUDA_11_8_REDIST_MANIFEST_URL = `${NVIDIA_CUDA_REDIST_BASE_URL}redistrib_11.8.0.json`;
-const WINDOWS_CUBLAS_DLLS = ['cublas64_11.dll', 'cublasLt64_11.dll'];
+const NVIDIA_CUDA_REDIST_MANIFEST_URLS = {
+  '11.8': `${NVIDIA_CUDA_REDIST_BASE_URL}redistrib_11.8.0.json`,
+  '12.8': `${NVIDIA_CUDA_REDIST_BASE_URL}redistrib_12.8.0.json`
+} as const;
+const WINDOWS_CUDA_RUNTIME_DLLS = {
+  '11.8': ['cublas64_11.dll', 'cublasLt64_11.dll'],
+  '12.8': ['cublas64_12.dll', 'cublasLt64_12.dll']
+} as const;
+const MULTI_THREAD_MIN_BYTES = 8 * 1024 * 1024;
+const CUDA_11_8 = '11.8' as const;
+const CUDA_12_8 = '12.8' as const;
+const TRANSIENT_FS_ERROR_CODES = new Set(['EPERM', 'EBUSY', 'ENOTEMPTY']);
+const REMOVE_RETRY_DELAYS_MS = [120, 240, 480, 960];
+
+type SupportedCudaVersion = keyof typeof NVIDIA_CUDA_REDIST_MANIFEST_URLS;
 
 type WhisperManifest = {
   manifestVersion: number;
@@ -20,7 +41,13 @@ type WhisperManifest = {
     version: string;
     platforms: Record<
       string,
-      { binary: string; sha256: string; url: string | null; acceleration: 'cpu' | 'cuda' | 'metal' | 'vulkan' }
+      {
+        binary: string;
+        sha256: string;
+        url: string | null;
+        acceleration: 'cpu' | 'cuda' | 'metal' | 'vulkan';
+        cudaVersion?: SupportedCudaVersion;
+      }
     >;
   };
   models: Array<{
@@ -44,6 +71,12 @@ type CudaRedistribManifest = {
   >;
 };
 
+type NvidiaGpuInfo = {
+  name: string;
+  architecture?: string;
+  computeCapability?: string;
+};
+
 export class WhisperAssetManager extends EventEmitter {
   private manifestCache?: WhisperManifest;
 
@@ -54,21 +87,82 @@ export class WhisperAssetManager extends EventEmitter {
   async listModels(): Promise<WhisperModelInfo[]> {
     const manifest = await this.manifest();
     return Promise.all(
-      manifest.models.map(async (model) => ({
-        id: model.id,
-        displayName: model.displayName,
-        languageScope: model.languageScope,
-        sizeBytes: model.sizeBytes,
-        sha256: model.sha256,
-        installed: await this.exists(join(this.cacheDir(), model.path))
-      }))
+      manifest.models.map(async (model) => {
+        const modelPath = await this.findExistingModelPath(model.path);
+        return {
+          id: model.id,
+          displayName: model.displayName,
+          languageScope: model.languageScope,
+          sizeBytes: model.sizeBytes,
+          sha256: model.sha256,
+          installed: Boolean(modelPath)
+        };
+      })
     );
+  }
+
+  async ensureModel(request: WhisperModelRequest): Promise<WhisperModelStatus> {
+    await this.migrateLegacyCacheIfNeeded();
+    const manifest = await this.manifest();
+    const model = manifest.models.find((item) => item.id === request.modelId) ?? manifest.models[0];
+    const managedModelPath = join(this.cacheDir(), model.path);
+    const existingModelPath = await this.findExistingModelPath(model.path);
+    const modelPath = existingModelPath ?? managedModelPath;
+    const hashesPinned = isPinnedSha256(model.sha256);
+    const modelInstalled = await this.exists(modelPath);
+    const modelVerified = hashesPinned && modelInstalled ? await this.verifySha256(modelPath, model.sha256) : false;
+
+    if (!modelVerified && request.allowDownload && manifest.enabled !== false && hashesPinned) {
+      await this.downloadAndInstall(
+        'model',
+        model.url,
+        managedModelPath,
+        model.sha256,
+        Boolean(request.useMultiThreadDownload)
+      );
+    }
+
+    const resolvedModelPath = (await this.findExistingModelPath(model.path)) ?? managedModelPath;
+    const resolvedModelInstalled = await this.exists(resolvedModelPath);
+    const resolvedModelVerified = hashesPinned && resolvedModelInstalled
+      ? await this.verifySha256(resolvedModelPath, model.sha256)
+      : false;
+
+    if (resolvedModelVerified) {
+      return this.modelStatus(resolvedModelPath, model.id, resolvedModelInstalled, true, {
+        actionRequired: 'none',
+        message: 'Selected whisper model is ready.'
+      });
+    }
+
+    if (manifest.enabled === false) {
+      return this.modelStatus(resolvedModelPath, model.id, resolvedModelInstalled, false, {
+        actionRequired: 'manifest-not-configured',
+        message:
+          manifest.note ??
+          'The checked-in whisper manifest is a disabled sample. Provide a pinned runtime/model manifest before transcription.'
+      });
+    }
+
+    if (!hashesPinned) {
+      return this.modelStatus(resolvedModelPath, model.id, resolvedModelInstalled, false, {
+        actionRequired: 'manifest-not-configured',
+        message: 'Model hash is not pinned. Provide a trusted SHA-256 value before enabling download or verification.'
+      });
+    }
+
+    return this.modelStatus(resolvedModelPath, model.id, resolvedModelInstalled, false, {
+      actionRequired: 'download-model',
+      message: 'Selected whisper model is missing. Download the model before transcription.'
+    });
   }
 
   async ensureRuntime(request: WhisperRuntimeRequest): Promise<WhisperRuntimeStatus> {
     await this.migrateLegacyCacheIfNeeded();
     const manifest = await this.manifest();
     const model = manifest.models.find((item) => item.id === request.modelId) ?? manifest.models[0];
+    const gpuInfo = detectNvidiaGpuInfo();
+    const requiredCudaVersion = gpuInfo ? requiredCudaVersionForGpu(gpuInfo) : undefined;
     const downloadScope = request.downloadScope ?? 'all';
     const canDownloadRuntime =
       request.allowDownload && (downloadScope === 'all' || downloadScope === 'runtime');
@@ -77,12 +171,36 @@ export class WhisperAssetManager extends EventEmitter {
       (downloadScope === 'all' || downloadScope === 'runtime' || downloadScope === 'cuda-runtime');
     const canDownloadModel = request.allowDownload && (downloadScope === 'all' || downloadScope === 'model');
     const cudaHardwareSupported = detectCudaHardwareSupport();
-    let cudaSupported = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest));
-    if (request.preferCuda && cudaHardwareSupported && !cudaSupported && canDownloadCudaRuntime) {
-      await this.ensureWindowsCudaRuntimeDependencies(manifest);
-      cudaSupported = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest));
+    const preferredCudaVersion = requiredCudaVersion ?? CUDA_11_8;
+    let cudaRuntimeDetected = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest, preferredCudaVersion), preferredCudaVersion);
+    if (request.preferCuda && cudaHardwareSupported && !cudaRuntimeDetected && canDownloadCudaRuntime) {
+      await this.ensureWindowsCudaRuntimeDependencies(
+        manifest,
+        preferredCudaVersion,
+        Boolean(request.useMultiThreadDownload)
+      );
+      cudaRuntimeDetected = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest, preferredCudaVersion), preferredCudaVersion);
     }
-    const { runtime, platformKey } = this.selectRuntime(manifest, request.preferCuda, cudaSupported);
+    const { runtime, platformKey, compatibilityMessage } = this.selectRuntime(
+      manifest,
+      request.preferCuda,
+      cudaHardwareSupported,
+      cudaRuntimeDetected,
+      gpuInfo,
+      Boolean(request.ignoreCudaMismatch)
+    );
+    const hasPinnedCudaRuntime = Boolean(manifest.runtime.platforms[`${this.platformKey()}-cuda`]);
+    const runtimeCudaVersion = this.runtimeCudaVersion(manifest);
+    const versionMismatch =
+      hasPinnedCudaRuntime &&
+      cudaHardwareSupported &&
+      cudaRuntimeDetected &&
+      !isCudaRuntimeCompatibleWithGpu(runtimeCudaVersion, gpuInfo).ok;
+    const cudaSupported =
+      hasPinnedCudaRuntime &&
+      cudaHardwareSupported &&
+      cudaRuntimeDetected &&
+      (!versionMismatch || Boolean(request.ignoreCudaMismatch));
 
     if (manifest.enabled === false) {
       return this.status(
@@ -93,7 +211,11 @@ export class WhisperAssetManager extends EventEmitter {
         runtime?.acceleration ?? 'cpu',
         request.preferCuda,
         cudaHardwareSupported,
+        cudaRuntimeDetected,
         cudaSupported,
+        versionMismatch,
+        requiredCudaVersion,
+        runtimeCudaVersion,
         false,
         false,
         false,
@@ -116,14 +238,18 @@ export class WhisperAssetManager extends EventEmitter {
         'cpu',
         request.preferCuda,
         cudaHardwareSupported,
+        cudaRuntimeDetected,
         cudaSupported,
+        versionMismatch,
+        requiredCudaVersion,
+        runtimeCudaVersion,
         false,
         false,
         false,
         false,
         {
           actionRequired: 'download-runtime',
-          message: `No whisper.cpp runtime is pinned for ${platformKey}.`
+          message: compatibilityMessage ?? `No whisper.cpp runtime is pinned for ${platformKey}.`
         }
       );
     }
@@ -131,7 +257,9 @@ export class WhisperAssetManager extends EventEmitter {
     const managedBinaryPath = join(this.cacheDir(), runtime.binary);
     const systemBinaryPath = await this.findSystemWhisperBinary(runtime.binary);
     const binaryPath = systemBinaryPath ?? managedBinaryPath;
-    const modelPath = join(this.cacheDir(), model.path);
+    const managedModelPath = join(this.cacheDir(), model.path);
+    const existingModelPath = await this.findExistingModelPath(model.path);
+    const modelPath = existingModelPath ?? managedModelPath;
     const hashesPinned = isPinnedSha256(runtime.sha256) && isPinnedSha256(model.sha256);
     const binaryExists = await this.exists(binaryPath);
     const modelExists = await this.exists(modelPath);
@@ -151,7 +279,11 @@ export class WhisperAssetManager extends EventEmitter {
         runtime.acceleration,
         request.preferCuda,
         cudaHardwareSupported,
+        cudaRuntimeDetected,
         cudaSupported,
+        versionMismatch,
+        requiredCudaVersion,
+        runtimeCudaVersion,
         binaryExists,
         modelExists,
         false,
@@ -164,30 +296,47 @@ export class WhisperAssetManager extends EventEmitter {
     }
 
     if (!binaryVerified && canDownloadRuntime) {
-      await this.downloadAndInstall('runtime', runtime.url, managedBinaryPath, runtime.sha256);
+      await this.downloadAndInstall(
+        'runtime',
+        runtime.url,
+        managedBinaryPath,
+        runtime.sha256,
+        Boolean(request.useMultiThreadDownload)
+      );
     }
     if (!modelVerified && canDownloadModel) {
-      await this.downloadAndInstall('model', model.url, modelPath, model.sha256);
+      await this.downloadAndInstall(
+        'model',
+        model.url,
+        managedModelPath,
+        model.sha256,
+        Boolean(request.useMultiThreadDownload)
+      );
     }
 
     const resolvedSystemBinaryPath = systemBinaryPath ?? (await this.findSystemWhisperBinary(runtime.binary));
     const resolvedBinaryPath = resolvedSystemBinaryPath ?? managedBinaryPath;
+    const resolvedModelPath = (await this.findExistingModelPath(model.path)) ?? managedModelPath;
     const resolvedBinaryInstalled = await this.exists(resolvedBinaryPath);
-    const resolvedModelInstalled = await this.exists(modelPath);
+    const resolvedModelInstalled = await this.exists(resolvedModelPath);
     const resolvedBinaryVerified = resolvedSystemBinaryPath
       ? true
       : await this.verifyRuntime(resolvedBinaryPath, runtime.url, runtime.sha256);
-    const resolvedModelVerified = await this.verifyIfPresent(modelPath, model.sha256);
+    const resolvedModelVerified = await this.verifyIfPresent(resolvedModelPath, model.sha256);
 
     return this.status(
       platformKey,
       resolvedBinaryPath,
-      model.path,
+      resolvedModelPath,
       model.id,
       runtime.acceleration,
       request.preferCuda,
       cudaHardwareSupported,
+      cudaRuntimeDetected,
       cudaSupported,
+      versionMismatch,
+      requiredCudaVersion,
+      runtimeCudaVersion,
       resolvedBinaryInstalled,
       resolvedModelInstalled,
       resolvedBinaryVerified,
@@ -195,11 +344,11 @@ export class WhisperAssetManager extends EventEmitter {
       {
         actionRequired: !resolvedBinaryVerified ? 'download-runtime' : !resolvedModelVerified ? 'download-model' : 'none',
         message:
-          resolvedBinaryVerified && resolvedModelVerified
-            ? 'whisper.cpp runtime is ready.'
-            : !resolvedBinaryVerified
-              ? 'whisper.cpp binary is missing or cannot run. Download whisper runtime before testing local transcription.'
-              : 'Selected whisper model is missing. Download the model before transcription.'
+          !resolvedBinaryVerified
+            ? 'whisper.cpp binary is missing or cannot run. Download whisper runtime before testing local transcription.'
+            : !resolvedModelVerified
+              ? 'Selected whisper model is missing. Download the model before transcription.'
+              : compatibilityMessage ?? 'whisper.cpp runtime is ready.'
       }
     );
   }
@@ -222,12 +371,25 @@ export class WhisperAssetManager extends EventEmitter {
     return join(app.getPath('userData'), 'runtime', 'whisper');
   }
 
-  private cudaRuntimeSearchRoots(manifest: WhisperManifest): string[] {
-    const runtime = manifest.runtime.platforms[`${this.platformKey()}-cuda`];
-    return runtime ? [dirname(join(this.cacheDir(), runtime.binary))] : [];
+  private cudaRuntimeSearchRoots(manifest: WhisperManifest, cudaVersion?: SupportedCudaVersion): string[] {
+    const runtimes = Object.values(manifest.runtime.platforms).filter((candidate) => candidate.acceleration === 'cuda');
+    const ordered = cudaVersion
+      ? [
+          ...runtimes.filter((candidate) => candidate.cudaVersion === cudaVersion),
+          ...runtimes.filter((candidate) => candidate.cudaVersion !== cudaVersion)
+        ]
+      : runtimes;
+
+    return [...new Set(ordered.map((runtime) => dirname(join(this.cacheDir(), runtime.binary))))];
   }
 
-  private async downloadAndInstall(scope: 'runtime' | 'model', url: string | null, destination: string, sha256: string): Promise<void> {
+  private async downloadAndInstall(
+    scope: 'runtime' | 'model',
+    url: string | null,
+    destination: string,
+    sha256: string,
+    useMultiThreadDownload: boolean
+  ): Promise<void> {
     if (!url || url.startsWith('disabled://')) return;
     if (!isPinnedSha256(sha256)) {
       throw new Error('Refusing to download whisper asset without a pinned SHA-256 hash.');
@@ -235,7 +397,7 @@ export class WhisperAssetManager extends EventEmitter {
 
     const tmpPath = this.shouldExtractArchive(url, destination) ? `${destination}.download.zip` : `${destination}.tmp`;
     await mkdir(dirname(destination), { recursive: true });
-    await rm(tmpPath, { force: true });
+    await this.removePathWithRetry(tmpPath);
 
     this.emitAsset({
       type: 'download-start',
@@ -247,7 +409,7 @@ export class WhisperAssetManager extends EventEmitter {
       const sourcePath = url.slice('file://'.length);
       await copyFile(sourcePath, tmpPath);
     } else if (url.startsWith('https://')) {
-      await this.downloadHttp(scope, url, tmpPath);
+      await this.downloadHttp(scope, url, tmpPath, useMultiThreadDownload);
     } else {
       throw new Error(`Unsupported whisper asset URL scheme: ${url}`);
     }
@@ -255,7 +417,7 @@ export class WhisperAssetManager extends EventEmitter {
     this.emitAsset({ type: 'verify', scope, message: scope === 'runtime' ? 'Verifying runtime checksum.' : 'Verifying model checksum.' });
     const verified = await this.verifySha256(tmpPath, sha256);
     if (!verified) {
-      await rm(tmpPath, { force: true });
+      await this.removePathWithRetry(tmpPath);
       this.emitAsset({ type: 'error', scope, message: 'Downloaded file failed checksum verification.' });
       throw new Error('Downloaded asset failed SHA-256 verification.');
     }
@@ -265,7 +427,7 @@ export class WhisperAssetManager extends EventEmitter {
       this.emitAsset({ type: 'extract', scope: 'runtime', message: 'Extracting runtime archive.' });
       await this.extractZip(tmpPath, extractDir);
       await writeFile(this.archiveMarkerPath(destination), sha256, 'utf8');
-      await rm(tmpPath, { force: true });
+      await this.removePathWithRetry(tmpPath);
       this.emitAsset({ type: 'ready', scope, message: 'Runtime download complete.' });
       return;
     }
@@ -274,7 +436,25 @@ export class WhisperAssetManager extends EventEmitter {
     this.emitAsset({ type: 'ready', scope, message: scope === 'runtime' ? 'Runtime download complete.' : 'Model download complete.' });
   }
 
-  private async downloadHttp(scope: 'runtime' | 'model', url: string, destination: string): Promise<void> {
+  private async downloadHttp(
+    scope: 'runtime' | 'model',
+    url: string,
+    destination: string,
+    useMultiThreadDownload = false
+  ): Promise<void> {
+    if (useMultiThreadDownload) {
+      try {
+        const downloaded = await this.downloadHttpSegmented(scope, url, destination);
+        if (downloaded) return;
+      } catch {
+        await this.removePathWithRetry(destination);
+      }
+    }
+
+    await this.downloadHttpSingle(scope, url, destination);
+  }
+
+  private async downloadHttpSingle(scope: 'runtime' | 'model', url: string, destination: string): Promise<void> {
     const response = await fetch(url);
     if (!response.ok || !response.body) {
       this.emitAsset({ type: 'error', scope, message: `Download failed with HTTP ${response.status}.` });
@@ -284,10 +464,23 @@ export class WhisperAssetManager extends EventEmitter {
 
     await new Promise<void>((resolveDownload, reject) => {
       const stream = createWriteStream(destination, { flags: 'wx' });
-      stream.on('error', reject);
-      stream.on('finish', resolveDownload);
-
       const reader = response.body!.getReader();
+      let settled = false;
+      const fail = (error: unknown): void => {
+        if (settled) return;
+        settled = true;
+        void reader.cancel().catch(() => undefined);
+        stream.destroy(error instanceof Error ? error : new Error(String(error)));
+        reject(error);
+      };
+      const succeed = (): void => {
+        if (settled) return;
+        settled = true;
+        resolveDownload();
+      };
+
+      stream.on('error', fail);
+      stream.on('finish', succeed);
       let receivedBytes = 0;
       const pump = (): void => {
         reader
@@ -308,16 +501,89 @@ export class WhisperAssetManager extends EventEmitter {
             });
             stream.write(chunk, (error) => {
               if (error) {
-                reject(error);
+                fail(error);
                 return;
               }
               pump();
             });
           })
-          .catch(reject);
+          .catch(fail);
       };
       pump();
+    }).catch(async (error) => {
+      await this.removePathWithRetry(destination);
+      throw error;
     });
+  }
+
+  private async downloadHttpSegmented(scope: 'runtime' | 'model', url: string, destination: string): Promise<boolean> {
+    const plan = await this.segmentedDownloadPlan(url);
+    if (!plan) return false;
+
+    const file = await open(destination, 'w');
+    try {
+      await file.truncate(plan.totalBytes);
+      let receivedBytes = 0;
+      const emitProgress = (delta: number): void => {
+        receivedBytes += delta;
+        this.emitAsset({
+          type: 'download-progress',
+          scope,
+          message: scope === 'runtime' ? 'Downloading whisper runtime...' : 'Downloading whisper model...',
+          receivedBytes,
+          totalBytes: plan.totalBytes
+        });
+      };
+
+      await Promise.all(
+        plan.ranges.map(async (range) => {
+          const response = await fetch(url, {
+            headers: {
+              Range: `bytes=${range.start}-${range.end}`
+            }
+          });
+          if (response.status !== 206 || !response.body) {
+            throw new Error(`Segmented download range failed with HTTP ${response.status}.`);
+          }
+
+          const reader = response.body.getReader();
+          let offset = range.start;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = Buffer.from(value);
+            await file.write(chunk, 0, chunk.length, offset);
+            offset += chunk.length;
+            emitProgress(chunk.length);
+          }
+        })
+      );
+      return true;
+    } finally {
+      await file.close();
+    }
+  }
+
+  private async segmentedDownloadPlan(url: string): Promise<{ totalBytes: number; ranges: Array<{ start: number; end: number }> } | undefined> {
+    const response = await fetch(url, { method: 'HEAD' });
+    if (!response.ok) return undefined;
+    const totalBytes = Number.parseInt(response.headers.get('content-length') ?? '', 10);
+    const acceptsRanges = response.headers.get('accept-ranges')?.toLowerCase().includes('bytes') ?? false;
+    if (!acceptsRanges || !Number.isFinite(totalBytes) || totalBytes < MULTI_THREAD_MIN_BYTES) return undefined;
+
+    const maxParts = defaultConcurrentDownloadParts();
+    if (maxParts <= 1) return undefined;
+    const partCount = Math.min(maxParts, Math.max(2, Math.ceil(totalBytes / MULTI_THREAD_MIN_BYTES)));
+    const partSize = Math.ceil(totalBytes / partCount);
+    const ranges = Array.from({ length: partCount }, (_, index) => {
+      const start = index * partSize;
+      return {
+        start,
+        end: Math.min(totalBytes - 1, start + partSize - 1)
+      };
+    }).filter((range) => range.start <= range.end);
+
+    return { totalBytes, ranges };
   }
 
   private status(
@@ -328,7 +594,11 @@ export class WhisperAssetManager extends EventEmitter {
     runtimeAcceleration: 'cpu' | 'cuda' | 'metal' | 'vulkan',
     preferCuda: boolean,
     cudaHardwareSupported: boolean,
+    cudaRuntimeDetected: boolean,
     cudaSupported: boolean,
+    versionMismatch: boolean,
+    requiredCudaVersion: SupportedCudaVersion | undefined,
+    runtimeCudaVersion: SupportedCudaVersion | undefined,
     binaryInstalled: boolean,
     modelInstalled: boolean,
     binaryVerified: boolean,
@@ -337,12 +607,14 @@ export class WhisperAssetManager extends EventEmitter {
   ): WhisperRuntimeStatus {
     const canUseCuda = preferCuda && cudaSupported && runtimeAcceleration === 'cuda';
     const fallbackReason =
-      preferCuda && runtimeAcceleration !== 'cuda'
-        ? 'The selected whisper runtime build does not include CUDA acceleration.'
-        : preferCuda && cudaHardwareSupported && !cudaSupported
+      preferCuda && versionMismatch
+        ? extra.message
+        : preferCuda && cudaHardwareSupported && !cudaRuntimeDetected
           ? 'NVIDIA hardware is present, but the required CUDA runtime DLLs for whisper.cpp were not found.'
-        : preferCuda && !cudaSupported
-          ? 'CUDA was requested but no supported NVIDIA runtime was detected on this machine.'
+          : preferCuda && !cudaHardwareSupported
+            ? 'CUDA was requested but no supported NVIDIA runtime was detected on this machine.'
+          : preferCuda && runtimeAcceleration !== 'cuda'
+            ? 'The selected whisper runtime build does not include CUDA acceleration.'
           : runtimeAcceleration === 'cuda' && !cudaSupported
             ? 'This runtime can use CUDA, but no supported NVIDIA runtime was detected on this machine.'
             : 'Using CPU execution for the selected whisper runtime.';
@@ -358,7 +630,7 @@ export class WhisperAssetManager extends EventEmitter {
       },
       model: {
         id: modelId,
-        expectedPath: join(this.cacheDir(), modelPath),
+        expectedPath: isAbsolute(modelPath) ? modelPath : join(this.cacheDir(), modelPath),
         installed: modelInstalled,
         verified: modelVerified
       },
@@ -366,6 +638,11 @@ export class WhisperAssetManager extends EventEmitter {
         requested: preferCuda ? 'gpu' : 'cpu',
         selected: canUseCuda ? 'gpu' : 'cpu',
         cudaSupported,
+        hardwareDetected: cudaHardwareSupported,
+        runtimeDetected: cudaRuntimeDetected,
+        versionMismatch,
+        requiredCudaVersion,
+        runtimeCudaVersion,
         runtimeVariant: runtimeAcceleration,
         fallbackReason
       },
@@ -404,20 +681,51 @@ export class WhisperAssetManager extends EventEmitter {
   private selectRuntime(
     manifest: WhisperManifest,
     preferCuda: boolean,
-    cudaSupported: boolean
+    cudaHardwareSupported: boolean,
+    cudaRuntimeDetected: boolean,
+    gpuInfo?: NvidiaGpuInfo,
+    ignoreCudaMismatch = false
   ): {
     runtime: WhisperManifest['runtime']['platforms'][string] | undefined;
     platformKey: string;
+    compatibilityMessage?: string;
   } {
     const baseKey = this.platformKey();
-    const preferredKeys = preferCuda && cudaSupported ? [`${baseKey}-cuda`, baseKey] : [baseKey];
-    for (const key of preferredKeys) {
-      const runtime = manifest.runtime.platforms[key];
-      if (runtime) {
-        return { runtime, platformKey: key };
-      }
+    const cpuRuntime = manifest.runtime.platforms[baseKey];
+    const cudaRuntime = manifest.runtime.platforms[`${baseKey}-cuda`];
+    const compatibility = isCudaRuntimeCompatibleWithGpu(cudaRuntime?.cudaVersion, gpuInfo);
+    const cudaSupported =
+      Boolean(cudaRuntime) &&
+      cudaHardwareSupported &&
+      cudaRuntimeDetected &&
+      (compatibility.ok || ignoreCudaMismatch);
+
+    if (preferCuda && cudaSupported && cudaRuntime) {
+      return { runtime: cudaRuntime, platformKey: `${baseKey}-cuda` };
     }
-    return { runtime: undefined, platformKey: preferredKeys[0] };
+
+    if (preferCuda && cudaRuntime && cudaHardwareSupported && cudaRuntimeDetected && !compatibility.ok) {
+      return {
+        runtime: cpuRuntime,
+        platformKey: cpuRuntime ? baseKey : `${baseKey}-cuda`,
+        compatibilityMessage: compatibility.message
+      };
+    }
+
+    if (cpuRuntime) {
+      return { runtime: cpuRuntime, platformKey: baseKey };
+    }
+
+    if (preferCuda && cudaSupported && cudaRuntime) {
+      return { runtime: cudaRuntime, platformKey: `${baseKey}-cuda` };
+    }
+
+    return { runtime: undefined, platformKey: preferCuda ? `${baseKey}-cuda` : baseKey };
+  }
+
+  private runtimeCudaVersion(manifest: WhisperManifest): SupportedCudaVersion | undefined {
+    const runtime = manifest.runtime.platforms[`${this.platformKey()}-cuda`];
+    return runtime?.cudaVersion;
   }
 
   private async exists(path: string): Promise<boolean> {
@@ -444,6 +752,50 @@ export class WhisperAssetManager extends EventEmitter {
       if (!existsSync(candidate)) continue;
       if (canRunWhisperBinary(candidate)) return candidate;
     }
+    return undefined;
+  }
+
+  private async findExistingModelPath(manifestModelPath: string): Promise<string | undefined> {
+    const configuredPath = process.env.WHISPER_MODEL_PATH?.trim();
+    if (configuredPath && existsSync(configuredPath)) {
+      return configuredPath;
+    }
+
+    const fileName = basename(manifestModelPath);
+    const candidateDirs = [
+      process.env.WHISPER_MODEL_DIR?.trim(),
+      join(this.cacheDir(), dirname(manifestModelPath)),
+      join(this.legacyCacheDir(), dirname(manifestModelPath)),
+      join(dirname(process.execPath), 'runtime', 'whisper', dirname(manifestModelPath)),
+      join(dirname(process.execPath), dirname(manifestModelPath)),
+      join(dirname(process.execPath), 'models'),
+      resolve(dirname(manifestModelPath)),
+      resolve('models'),
+      resolve('.runtime', 'whisper', dirname(manifestModelPath))
+    ].filter((entry): entry is string => Boolean(entry));
+
+    for (const dir of uniquePaths(candidateDirs)) {
+      const directCandidate = join(dir, fileName);
+      if (existsSync(directCandidate)) {
+        return directCandidate;
+      }
+    }
+
+    const searchRoots = uniquePaths([
+      process.env.WHISPER_MODEL_DIR?.trim(),
+      dirname(process.execPath),
+      this.cacheDir(),
+      this.legacyCacheDir(),
+      resolve('.')
+    ].filter((entry): entry is string => Boolean(entry)));
+
+    for (const root of searchRoots) {
+      const matched = await findFileByName(root, fileName, 3);
+      if (matched) {
+        return matched;
+      }
+    }
+
     return undefined;
   }
 
@@ -542,15 +894,22 @@ export class WhisperAssetManager extends EventEmitter {
     }
   }
 
-  private async ensureWindowsCudaRuntimeDependencies(manifest: WhisperManifest): Promise<void> {
+  private async ensureWindowsCudaRuntimeDependencies(
+    manifest: WhisperManifest,
+    cudaVersion: SupportedCudaVersion,
+    useMultiThreadDownload: boolean
+  ): Promise<void> {
     if (process.platform !== 'win32') return;
-    const runtime = manifest.runtime.platforms[`${this.platformKey()}-cuda`];
+    const runtime =
+      Object.values(manifest.runtime.platforms).find(
+        (candidate) => candidate.acceleration === 'cuda' && candidate.cudaVersion === cudaVersion
+      ) ?? Object.values(manifest.runtime.platforms).find((candidate) => candidate.acceleration === 'cuda');
     if (!runtime) return;
 
     const runtimeDir = dirname(join(this.cacheDir(), runtime.binary));
-    if (hasWindowsCudaRuntime([runtimeDir])) return;
+    if (hasWindowsCudaRuntime(cudaVersion, [runtimeDir])) return;
 
-    const packageInfo = await this.fetchCudaLibcublasPackage();
+    const packageInfo = await this.fetchCudaLibcublasPackage(cudaVersion);
     if (!packageInfo.relative_path || !packageInfo.sha256 || !isPinnedSha256(packageInfo.sha256)) {
       throw new Error('NVIDIA CUDA libcublas redistributable metadata is missing a pinned SHA-256 hash.');
     }
@@ -560,16 +919,21 @@ export class WhisperAssetManager extends EventEmitter {
     const extractDir = join(this.cacheDir(), 'cuda-redist', 'libcublas');
     await mkdir(downloadDir, { recursive: true });
     await mkdir(runtimeDir, { recursive: true });
-    await rm(archivePath, { force: true });
-    await rm(extractDir, { force: true, recursive: true });
+    await this.removePathWithRetry(archivePath);
+    await this.removePathWithRetry(extractDir, { recursive: true });
 
     this.emitAsset({ type: 'download-start', scope: 'runtime', message: 'Downloading CUDA cuBLAS runtime.' });
-    await this.downloadHttp('runtime', `${NVIDIA_CUDA_REDIST_BASE_URL}${packageInfo.relative_path}`, archivePath);
+    await this.downloadHttp(
+      'runtime',
+      `${NVIDIA_CUDA_REDIST_BASE_URL}${packageInfo.relative_path}`,
+      archivePath,
+      useMultiThreadDownload
+    );
 
     this.emitAsset({ type: 'verify', scope: 'runtime', message: 'Verifying CUDA cuBLAS runtime checksum.' });
     const verified = await this.verifySha256(archivePath, packageInfo.sha256);
     if (!verified) {
-      await rm(archivePath, { force: true });
+      await this.removePathWithRetry(archivePath);
       throw new Error('Downloaded CUDA cuBLAS runtime failed SHA-256 verification.');
     }
 
@@ -577,8 +941,9 @@ export class WhisperAssetManager extends EventEmitter {
     await mkdir(extractDir, { recursive: true });
     await this.extractZip(archivePath, extractDir);
 
-    const dllPaths = await findFilesByName(extractDir, WINDOWS_CUBLAS_DLLS);
-    for (const dllName of WINDOWS_CUBLAS_DLLS) {
+    const runtimeDlls = WINDOWS_CUDA_RUNTIME_DLLS[cudaVersion];
+    const dllPaths = await findFilesByName(extractDir, runtimeDlls);
+    for (const dllName of runtimeDlls) {
       const sourcePath = dllPaths.get(dllName.toLowerCase());
       if (!sourcePath) {
         throw new Error(`CUDA cuBLAS runtime archive did not contain ${dllName}.`);
@@ -586,13 +951,29 @@ export class WhisperAssetManager extends EventEmitter {
       await copyFile(sourcePath, join(runtimeDir, dllName));
     }
 
-    await rm(archivePath, { force: true });
-    await rm(extractDir, { force: true, recursive: true });
+    await this.removePathWithRetry(archivePath);
+    await this.removePathWithRetry(extractDir, { recursive: true });
     this.emitAsset({ type: 'ready', scope: 'runtime', message: 'CUDA cuBLAS runtime is ready.' });
   }
 
-  private async fetchCudaLibcublasPackage(): Promise<NonNullable<CudaRedistribManifest['libcublas']>[string]> {
-    const response = await fetch(NVIDIA_CUDA_11_8_REDIST_MANIFEST_URL);
+  private async removePathWithRetry(path: string, options: { recursive?: boolean } = {}): Promise<void> {
+    let attempt = 0;
+    while (true) {
+      try {
+        await rm(path, { force: true, recursive: Boolean(options.recursive) });
+        return;
+      } catch (error) {
+        if (!isTransientFsError(error) || attempt >= REMOVE_RETRY_DELAYS_MS.length) {
+          throw error;
+        }
+        await wait(REMOVE_RETRY_DELAYS_MS[attempt]);
+        attempt += 1;
+      }
+    }
+  }
+
+  private async fetchCudaLibcublasPackage(cudaVersion: SupportedCudaVersion): Promise<NonNullable<CudaRedistribManifest['libcublas']>[string]> {
+    const response = await fetch(NVIDIA_CUDA_REDIST_MANIFEST_URLS[cudaVersion]);
     if (!response.ok) {
       throw new Error(`Failed to fetch NVIDIA CUDA redistributable manifest: HTTP ${response.status}`);
     }
@@ -603,16 +984,57 @@ export class WhisperAssetManager extends EventEmitter {
     }
     return packageInfo;
   }
+
+  private modelStatus(
+    modelPath: string,
+    modelId: string,
+    installed: boolean,
+    verified: boolean,
+    extra: Pick<WhisperModelStatus, 'actionRequired' | 'message'>
+  ): WhisperModelStatus {
+    return {
+      id: modelId,
+      cacheDir: this.cacheDir(),
+      expectedPath: isAbsolute(modelPath) ? modelPath : join(this.cacheDir(), modelPath),
+      installed,
+      verified,
+      ...extra
+    };
+  }
 }
 
 function isPinnedSha256(value: string): boolean {
   return /^[a-f0-9]{64}$/i.test(value) && !/^0{64}$/i.test(value);
 }
 
-function detectCudaSupport(extraSearchRoots: string[] = []): boolean {
+function isTransientFsError(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && TRANSIENT_FS_ERROR_CODES.has(String(error.code));
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
+}
+
+function defaultConcurrentDownloadParts(): number {
+  const parallelism = detectParallelism();
+  return Math.max(1, Math.min(16, Math.ceil(parallelism / 2)));
+}
+
+function detectParallelism(): number {
+  try {
+    return typeof availableParallelism === 'function' ? availableParallelism() : cpus().length;
+  } catch {
+    return cpus().length;
+  }
+}
+
+function detectCudaSupport(
+  extraSearchRoots: string[] = [],
+  cudaVersion: SupportedCudaVersion = CUDA_11_8
+): boolean {
   if (process.platform !== 'win32' && process.platform !== 'linux') return false;
   if (process.platform === 'win32') {
-    return hasWindowsCudaRuntime(extraSearchRoots);
+    return hasWindowsCudaRuntime(cudaVersion, extraSearchRoots);
   }
   if (process.env.CUDA_PATH || process.env.CUDA_HOME) return true;
 
@@ -655,7 +1077,46 @@ function detectCudaHardwareSupport(): boolean {
   return false;
 }
 
-function hasWindowsCudaRuntime(extraSearchRoots: string[] = []): boolean {
+function detectNvidiaGpuInfo(): NvidiaGpuInfo | undefined {
+  const query = spawnSync('nvidia-smi', ['--query-gpu=name,compute_cap', '--format=csv,noheader'], {
+    windowsHide: true,
+    encoding: 'utf8'
+  });
+  if (query.status !== 0) return undefined;
+
+  const line = String(query.stdout ?? '')
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .find(Boolean);
+  if (!line) return undefined;
+
+  const parts = line.split(',').map((entry) => entry.trim());
+  const architectureQuery =
+    process.platform === 'win32'
+      ? spawnSync(
+          'powershell.exe',
+          [
+            '-NoProfile',
+            '-Command',
+            "(nvidia-smi -q | Select-String -Pattern 'Product Architecture' | Select-Object -First 1).ToString()"
+          ],
+          {
+            windowsHide: true,
+            encoding: 'utf8'
+          }
+        )
+      : undefined;
+  const architectureLine = String(architectureQuery?.stdout ?? '');
+  const architectureMatch = architectureLine.match(/Product Architecture\\s*:\\s*(.+)/i);
+
+  return {
+    name: parts[0] ?? 'NVIDIA GPU',
+    computeCapability: parts[1],
+    architecture: architectureMatch?.[1]?.trim()
+  };
+}
+
+function hasWindowsCudaRuntime(cudaVersion: SupportedCudaVersion, extraSearchRoots: string[] = []): boolean {
   const searchRoots = [
     ...extraSearchRoots,
     process.env.CUDA_PATH ? join(process.env.CUDA_PATH, 'bin') : undefined,
@@ -666,7 +1127,37 @@ function hasWindowsCudaRuntime(extraSearchRoots: string[] = []): boolean {
       .filter(Boolean)
   ].filter((entry): entry is string => Boolean(entry));
 
-  return WINDOWS_CUBLAS_DLLS.every((dllName) => searchRoots.some((root) => existsSync(join(root, dllName))));
+  return WINDOWS_CUDA_RUNTIME_DLLS[cudaVersion].every((dllName) =>
+    searchRoots.some((root) => existsSync(join(root, dllName)))
+  );
+}
+
+function requiredCudaVersionForGpu(gpuInfo: NvidiaGpuInfo): SupportedCudaVersion {
+  const capability = Number.parseFloat(gpuInfo.computeCapability ?? '');
+  if (Number.isFinite(capability) && capability >= 12) {
+    return CUDA_12_8;
+  }
+  return CUDA_11_8;
+}
+
+function isCudaRuntimeCompatibleWithGpu(
+  runtimeCudaVersion: SupportedCudaVersion | undefined,
+  gpuInfo?: NvidiaGpuInfo
+): { ok: boolean; message?: string } {
+  if (!gpuInfo || !runtimeCudaVersion) return { ok: true };
+  const requiredCudaVersion = requiredCudaVersionForGpu(gpuInfo);
+  if (runtimeCudaVersion === requiredCudaVersion) {
+    return { ok: true };
+  }
+
+  if (requiredCudaVersion === CUDA_12_8 && runtimeCudaVersion === CUDA_11_8) {
+    return {
+      ok: false,
+      message: `Detected ${gpuInfo.name}${gpuInfo.computeCapability ? ` (compute capability ${gpuInfo.computeCapability})` : ''}. This GPU generation requires CUDA 12.8+ for local whisper CUDA, but the pinned runtime is CUDA ${runtimeCudaVersion}. Falling back to CPU until a matching whisper CUDA runtime is provided.`
+    };
+  }
+
+  return { ok: true };
 }
 
 function canRunWhisperBinary(path: string): boolean {
@@ -678,7 +1169,40 @@ function canRunWhisperBinary(path: string): boolean {
   return probe.status === 0;
 }
 
-async function findFilesByName(root: string, names: string[]): Promise<Map<string, string>> {
+function uniquePaths(paths: string[]): string[] {
+  return [...new Set(paths.map((entry) => resolve(entry)))];
+}
+
+async function findFileByName(root: string, fileName: string, maxDepth: number): Promise<string | undefined> {
+  if (!existsSync(root)) return undefined;
+
+  const stack: Array<{ path: string; depth: number }> = [{ path: root, depth: 0 }];
+  const target = fileName.toLowerCase();
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    let entries;
+    try {
+      entries = await readdir(current.path, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const nextPath = join(current.path, entry.name);
+      if (entry.isFile() && entry.name.toLowerCase() === target) {
+        return nextPath;
+      }
+      if (entry.isDirectory() && current.depth < maxDepth) {
+        stack.push({ path: nextPath, depth: current.depth + 1 });
+      }
+    }
+  }
+
+  return undefined;
+}
+
+async function findFilesByName(root: string, names: readonly string[]): Promise<Map<string, string>> {
   const wanted = new Set(names.map((name) => name.toLowerCase()));
   const found = new Map<string, string>();
   const stack = [root];

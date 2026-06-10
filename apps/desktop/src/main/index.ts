@@ -1,16 +1,30 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import type { AssetEvent, CreateJobRequest, JobEvent, JobSnapshot, SubtitleDocument, SubtitleSegment } from '@shared/models';
+import { basename, dirname, extname, join } from 'node:path';
+import type {
+  AssetEvent,
+  BilingualOrder,
+  CreateJobRequest,
+  ExportVariant,
+  JobEvent,
+  JobSnapshot,
+  SubtitleDocument,
+  SubtitleSegment,
+  WhisperRuntimeStatus
+} from '@shared/models';
+import { serializeSrt } from '@shared/srt';
 import { JobManager } from './services/jobManager';
 import { NativeBackendClient } from './services/nativeBackendClient';
 import { SettingsStore } from './services/settingsStore';
+import { FfmpegAssetManager } from './services/ffmpegAssets';
 import { WhisperAssetManager } from './services/whisperAssets';
 import { asrProviders } from './services/asrProviders';
 
 let mainWindow: BrowserWindow | undefined;
 const settingsStore = new SettingsStore();
 const whisperAssets = new WhisperAssetManager();
+const ffmpegAssets = new FfmpegAssetManager();
 const nativeBackend = new NativeBackendClient();
 const jobManager = new JobManager(settingsStore, whisperAssets, nativeBackend);
 
@@ -58,6 +72,9 @@ function registerIpc(): void {
   whisperAssets.on('asset-event', (event: AssetEvent) => {
     mainWindow?.webContents.send('assets:event', event);
   });
+  ffmpegAssets.on('asset-event', (event: AssetEvent) => {
+    mainWindow?.webContents.send('assets:event', event);
+  });
 
   async function selectMedia(): Promise<string | undefined> {
     const result = await dialog.showOpenDialog(mainWindow!, {
@@ -78,27 +95,118 @@ function registerIpc(): void {
     return jobManager.get(job.id);
   }
 
+  async function testLocalWhisperProvider(): Promise<{
+    providerId: string;
+    ok: boolean;
+    status: 'healthy' | 'degraded';
+    message: string;
+  }> {
+    const settings = await settingsStore.get();
+    const runtime = await whisperAssets.ensureRuntime({
+      modelId: settings.whisperModelId,
+      allowDownload: false,
+      preferCuda: settings.localWhisperUseCuda,
+      ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
+      useMultiThreadDownload: settings.enableMultiThreadDownload,
+      downloadScope: 'none'
+    });
+
+    const runnable = runtime.binary.verified && runtime.model.verified;
+    return {
+      providerId: 'local.whisper.cpp',
+      ok: runnable,
+      status: runnable ? 'healthy' : 'degraded',
+      message: localWhisperRuntimeMessage(runtime)
+    };
+  }
+
   async function exportSrt(payload: {
     document: SubtitleDocument;
     path: string;
-    variant: 'source' | 'translated' | 'bilingual';
-    bilingualOrder: 'source-first' | 'target-first';
+    variant: ExportVariant;
+    bilingualOrder: BilingualOrder;
   }): Promise<void> {
-    const response = await nativeBackend.serializeSrt({
-      segments: payload.document.segments,
+    const srt = serializeSrt(payload.document, {
       variant: payload.variant,
       bilingualOrder: payload.bilingualOrder
     });
-    if (!response.ok || !response.payload?.srt) {
-      throw new Error(response.error?.message ?? 'Native backend failed to serialize SRT.');
+    await writeFile(payload.path, srt, 'utf8');
+  }
+
+  async function selectExportDirectory(): Promise<string | undefined> {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Select subtitle export folder',
+      properties: ['openDirectory', 'createDirectory']
+    });
+    return result.canceled ? undefined : result.filePaths[0];
+  }
+
+  async function exportConfiguredSrt(payload: {
+    document: SubtitleDocument;
+    mediaPath: string;
+    variant: ExportVariant;
+  }): Promise<{ path?: string; cancelled: boolean }> {
+    const settings = await settingsStore.get();
+    const path = await resolveExportPath(payload.mediaPath, payload.variant, settings);
+    if (!path) return { cancelled: true };
+
+    if (existsSync(path)) {
+      const result = await dialog.showMessageBox(mainWindow!, {
+        type: 'warning',
+        buttons: ['Overwrite', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        title: 'Overwrite subtitle file?',
+        message: 'The target subtitle file already exists.',
+        detail: path
+      });
+      if (result.response !== 0) return { cancelled: true };
     }
-    await writeFile(payload.path, response.payload.srt, 'utf8');
+
+    await exportSrt({
+      document: payload.document,
+      path,
+      variant: payload.variant,
+      bilingualOrder: settings.exportBilingualOrder
+    });
+    return { path, cancelled: false };
+  }
+
+  async function resolveExportPath(
+    mediaPath: string,
+    variant: ExportVariant,
+    settings: Awaited<ReturnType<SettingsStore['get']>>
+  ): Promise<string | undefined> {
+    const defaultName = defaultSubtitleFileName(mediaPath, variant);
+    if (settings.exportDestinationMode === 'ask-each-time') {
+      const result = await dialog.showSaveDialog(mainWindow!, {
+        title: 'Export subtitle',
+        defaultPath: join(dirname(mediaPath), defaultName),
+        filters: [{ name: 'SubRip Subtitle', extensions: ['srt'] }]
+      });
+      return result.canceled ? undefined : result.filePath;
+    }
+
+    const targetDir =
+      settings.exportDestinationMode === 'selected-directory' && settings.exportDirectory
+        ? settings.exportDirectory
+        : dirname(mediaPath);
+    return join(targetDir, defaultName);
+  }
+
+  function defaultSubtitleFileName(mediaPath: string, variant: ExportVariant): string {
+    const extension = extname(mediaPath);
+    const name = basename(mediaPath, extension);
+    const suffix = variant === 'source' ? 'source' : variant === 'bilingual' ? 'bilingual' : 'translated';
+    return `${name}.${suffix}.srt`;
   }
 
   ipcMain.handle('selectVideo', async () => selectMedia());
+  ipcMain.handle('selectDirectory', async () => selectExportDirectory());
   ipcMain.handle('startTranscription', async (_event, request: CreateJobRequest) => startTranscription(request));
   ipcMain.handle('startTranslation', async (_event, jobId: string) => jobManager.translate(jobId));
   ipcMain.handle('exportSrt', async (_event, payload) => exportSrt(payload));
+  ipcMain.handle('exportConfiguredSrt', async (_event, payload) => exportConfiguredSrt(payload));
   ipcMain.handle('getSettings', async () => settingsStore.get());
   ipcMain.handle('saveSettings', async (_event, patch) => settingsStore.update(patch));
 
@@ -128,8 +236,8 @@ function registerIpc(): void {
       payload: {
         document: SubtitleDocument;
         path: string;
-        variant: 'source' | 'translated' | 'bilingual';
-        bilingualOrder: 'source-first' | 'target-first';
+        variant: ExportVariant;
+        bilingualOrder: BilingualOrder;
       }
     ) => {
       await exportSrt(payload);
@@ -146,19 +254,7 @@ function registerIpc(): void {
   ipcMain.handle('settings:set-secret', async (_event, providerId, secret) => settingsStore.setSecret(providerId, secret));
   ipcMain.handle('settings:test-provider', async (_event, providerId: string) => {
     if (providerId === 'local.whisper.cpp') {
-      const settings = await settingsStore.get();
-      const runtime = await whisperAssets.ensureRuntime({
-        modelId: settings.whisperModelId,
-        allowDownload: settings.allowWhisperAssetDownload,
-        preferCuda: false,
-        downloadScope: 'runtime'
-      });
-      return {
-        providerId,
-        ok: runtime.actionRequired === 'none',
-        status: runtime.actionRequired === 'none' ? 'healthy' : 'degraded',
-        message: runtime.message
-      };
+      return testLocalWhisperProvider();
     }
 
     const asrProvider = asrProviders.find((provider) => provider.id === providerId);
@@ -173,7 +269,42 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('assets:list-whisper-models', async () => whisperAssets.listModels());
-  ipcMain.handle('assets:ensure-whisper-runtime', async (_event, request) => whisperAssets.ensureRuntime(request));
+  ipcMain.handle('assets:ensure-whisper-model', async (_event, request) => {
+    const settings = await settingsStore.get();
+    return whisperAssets.ensureModel({
+      ...request,
+      useMultiThreadDownload: request.useMultiThreadDownload ?? settings.enableMultiThreadDownload
+    });
+  });
+  ipcMain.handle('assets:ensure-whisper-runtime', async (_event, request) => {
+    const settings = await settingsStore.get();
+    return whisperAssets.ensureRuntime({
+      ...request,
+      useMultiThreadDownload: request.useMultiThreadDownload ?? settings.enableMultiThreadDownload
+    });
+  });
+  ipcMain.handle('assets:ensure-ffmpeg', async (_event, request) => {
+    const settings = await settingsStore.get();
+    const status = await ffmpegAssets.ensureInstalled({
+      ...request,
+      useMultiThreadDownload: request.useMultiThreadDownload ?? settings.enableMultiThreadDownload
+    });
+    await nativeBackend.cancelRunningWork();
+    return status;
+  });
   ipcMain.handle('assets:delete-model', async (_event, modelId: string) => whisperAssets.deleteModel(modelId));
   ipcMain.handle('native:health', async () => nativeBackend.health());
+}
+
+function localWhisperRuntimeMessage(runtime: WhisperRuntimeStatus): string {
+  if (runtime.binary.verified && runtime.model.verified) {
+    return runtime.message ?? 'whisper.cpp is ready.';
+  }
+  if (!runtime.binary.verified) {
+    return runtime.message ?? 'whisper.cpp runtime binary is missing or cannot run.';
+  }
+  if (!runtime.model.verified) {
+    return runtime.message ?? 'Selected whisper model is missing.';
+  }
+  return runtime.message ?? 'Local whisper check failed.';
 }

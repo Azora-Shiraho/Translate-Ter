@@ -2,7 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AppSettingsPatch,
   AppSettingsPublic,
+  ExportVariant,
   CreateJobRequest,
+  FfmpegRequest,
+  FfmpegStatus,
   JobEvent,
   JobSnapshot,
   NativeHealth,
@@ -12,12 +15,15 @@ import type {
   SubtitleDocument,
   SubtitleSegment,
   WhisperModelInfo,
+  WhisperModelRequest,
+  WhisperModelStatus,
   WhisperRuntimeRequest,
   WhisperRuntimeStatus
 } from '@shared/models';
 
 const api = {
   selectVideo: () => ipcRenderer.invoke('selectVideo') as Promise<string | undefined>,
+  selectDirectory: () => ipcRenderer.invoke('selectDirectory') as Promise<string | undefined>,
   startTranscription: (input: CreateJobRequest) =>
     ipcRenderer.invoke('startTranscription', input) as Promise<JobSnapshot>,
   startTranslation: (jobId: string) => ipcRenderer.invoke('startTranslation', jobId) as Promise<JobSnapshot>,
@@ -27,6 +33,8 @@ const api = {
     variant: 'source' | 'translated' | 'bilingual',
     bilingualOrder: 'source-first' | 'target-first'
   ) => ipcRenderer.invoke('exportSrt', { document, path, variant, bilingualOrder }) as Promise<void>,
+  exportConfiguredSrt: (document: SubtitleDocument, mediaPath: string, variant: ExportVariant) =>
+    ipcRenderer.invoke('exportConfiguredSrt', { document, mediaPath, variant }) as Promise<{ path?: string; cancelled: boolean }>,
   getSettings: () => ipcRenderer.invoke('getSettings') as Promise<AppSettingsPublic>,
   saveSettings: (patch: AppSettingsPatch) => ipcRenderer.invoke('saveSettings', patch) as Promise<AppSettingsPublic>,
   desktop: {
@@ -67,8 +75,12 @@ const api = {
   },
   assets: {
     listWhisperModels: () => ipcRenderer.invoke('assets:list-whisper-models') as Promise<WhisperModelInfo[]>,
+    ensureWhisperModel: (request: WhisperModelRequest) =>
+      ipcRenderer.invoke('assets:ensure-whisper-model', request) as Promise<WhisperModelStatus>,
     ensureWhisperRuntime: (request: WhisperRuntimeRequest) =>
       ipcRenderer.invoke('assets:ensure-whisper-runtime', request) as Promise<WhisperRuntimeStatus>,
+    ensureFfmpeg: (request: FfmpegRequest) =>
+      ipcRenderer.invoke('assets:ensure-ffmpeg', request) as Promise<FfmpegStatus>,
     deleteModel: (modelId: string) => ipcRenderer.invoke('assets:delete-model', modelId) as Promise<void>,
     onEvent: (listener: (event: AssetEvent) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: AssetEvent) => listener(payload);

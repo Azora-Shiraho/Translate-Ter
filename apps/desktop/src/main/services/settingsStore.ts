@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { chmodSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { canonicalSourceLanguageCode, canonicalTargetLanguageCode } from '@shared/languages';
 import type { AppSettingsPatch, AppSettingsPublic, ProviderSecretInput } from '@shared/models';
 
 const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = {
@@ -13,14 +14,19 @@ const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = 
   targetLanguage: 'zh-CN',
   asrProviderId: 'local.whisper.cpp',
   whisperModelId: 'ggml-base',
+  localWhisperIgnoreCudaMismatch: false,
   allowWhisperAssetDownload: true,
+  enableMultiThreadDownload: false,
   allowCloudAsrUpload: false,
   translationProviderPriority: ['openai.compatible'],
   translationConcurrency: 2,
   translationRequestsPerMinute: 60,
   translationTokenBudgetPerMinute: 60_000,
   translationLinesPerRequest: 8,
-  translationBatchStride: 4
+  translationBatchStride: 4,
+  exportDestinationMode: 'source-directory',
+  exportDirectory: '',
+  exportBilingualOrder: 'source-first'
 };
 
 export class SettingsStore {
@@ -30,7 +36,7 @@ export class SettingsStore {
     const defaults = await this.defaults();
     try {
       const raw = await readFile(this.settingsPath(), 'utf8');
-      return { ...defaults, ...(JSON.parse(raw) as AppSettingsPublic), schemaVersion: 1 };
+      return normalizeSettings({ ...defaults, ...(JSON.parse(raw) as AppSettingsPublic), schemaVersion: 1 });
     } catch {
       await this.write(defaults);
       return defaults;
@@ -76,8 +82,9 @@ export class SettingsStore {
         defaults.translationBatchStride
       )
     };
-    await this.write(next);
-    return next;
+    const normalized = normalizeSettings(next);
+    await this.write(normalized);
+    return normalized;
   }
 
   async setSecret(providerId: string, secret: ProviderSecretInput): Promise<void> {
@@ -148,6 +155,17 @@ export class SettingsStore {
     const safeProviderId = providerId.replace(/[^a-z0-9._-]/gi, '_');
     return join(app.getPath('userData'), 'secrets', `${safeProviderId}.json`);
   }
+}
+
+function normalizeSettings(settings: AppSettingsPublic): AppSettingsPublic {
+  const usingCloudAsr = settings.asrProviderId === 'cloud.openai';
+  return {
+    ...settings,
+    allowCloudAsrUpload: usingCloudAsr ? true : Boolean(settings.allowCloudAsrUpload),
+    localWhisperIgnoreCudaMismatch: Boolean(settings.localWhisperIgnoreCudaMismatch),
+    sourceLanguage: canonicalSourceLanguageCode(settings.sourceLanguage),
+    targetLanguage: canonicalTargetLanguageCode(settings.targetLanguage)
+  };
 }
 
 function detectCudaSupport(): boolean {

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { access } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import type {
   NativeHealth,
   NativeProtocolError,
@@ -8,6 +9,7 @@ import type {
   NativeProtocolResponse,
   NativeProtocolType
 } from '@shared/models';
+import { ffmpegBinDir } from './mediaToolPaths';
 
 export type NativeTranscribePayload = {
   jobId?: string;
@@ -42,6 +44,7 @@ export class NativeBackendClient {
     }
   >();
   private stdoutBuffer = '';
+  private stderrBuffer = '';
 
   async health(): Promise<NativeHealth> {
     const response = await this.request<NativeHealth>('runtime.health', {});
@@ -53,6 +56,7 @@ export class NativeBackendClient {
       protocolVersion: 1,
       backendVersion: response.error?.code ?? 'missing-dev-build',
       status: 'degraded',
+      detail: response.error?.message,
       capabilities: ['runtime.health'],
       whisperRuntimeAvailable: false,
       ffmpegAvailable: false,
@@ -100,6 +104,7 @@ export class NativeBackendClient {
     this.processPromise = undefined;
     this.childProcess = undefined;
     this.stdoutBuffer = '';
+    this.stderrBuffer = '';
     if (!child) {
       return;
     }
@@ -259,6 +264,7 @@ export class NativeBackendClient {
   private async spawnProcess(executable: string) {
     return new Promise<import('node:child_process').ChildProcessWithoutNullStreams | undefined>((resolveChild) => {
       const child = spawn(executable, ['--stdio-json'], {
+        env: augmentedNativeBackendEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true
       });
@@ -275,8 +281,8 @@ export class NativeBackendClient {
         this.flushStdoutBuffer();
       });
 
-      child.stderr.on('data', () => {
-        // Protocol is stdout-only for now.
+      child.stderr.on('data', (chunk: Buffer | string) => {
+        this.stderrBuffer += chunkToString(chunk);
       });
 
       child.once('spawn', () => finalize(child));
@@ -284,7 +290,8 @@ export class NativeBackendClient {
         this.childProcess = child;
       });
       child.once('error', () => finalize(undefined));
-      child.once('close', () => {
+      child.once('close', (code, signal) => {
+        const stderrMessage = formatNativeBackendCloseDetail(this.stderrBuffer, code, signal);
         if (this.childProcess === child) {
           this.childProcess = undefined;
         }
@@ -292,12 +299,13 @@ export class NativeBackendClient {
           this.processPromise = undefined;
         }
         this.stdoutBuffer = '';
+        this.stderrBuffer = '';
         for (const [requestId, pending] of this.pending) {
           clearTimeout(pending.timeout);
           pending.resolve(
             this.errorResponse(pending.type, requestId, {
               code: 'MissingRuntime',
-              message: 'Native backend process exited unexpectedly.',
+              message: stderrMessage,
               retryable: true
             })
           );
@@ -324,5 +332,50 @@ export class NativeBackendClient {
         // Ignore malformed lines; caller timeout will surface the failure.
       }
     }
+  }
+}
+
+function augmentedNativeBackendEnv(): NodeJS.ProcessEnv {
+  const binDir = ffmpegBinDir();
+  if (!existsSync(binDir)) {
+    return process.env;
+  }
+  return {
+    ...process.env,
+    PATH: [binDir, process.env.PATH ?? ''].filter(Boolean).join(delimiter)
+  };
+}
+
+function chunkToString(chunk: unknown): string {
+  if (typeof chunk === 'string') return chunk;
+  if (chunk instanceof Buffer) return chunk.toString('utf8');
+  return String(chunk ?? '');
+}
+
+function formatNativeBackendCloseDetail(stderr: string, code: number | null, signal: NodeJS.Signals | null): string {
+  const trimmed = stderr.replace(/\s+/g, ' ').trim();
+  const suffixParts = [
+    code !== null ? `exit code ${code}${decodeWindowsExitCode(code)}` : undefined,
+    signal ? `signal ${signal}` : undefined
+  ].filter(Boolean);
+  const suffix = suffixParts.length > 0 ? ` (${suffixParts.join(', ')})` : '';
+  if (!trimmed) {
+    return `Native backend process exited unexpectedly${suffix}.`;
+  }
+  const excerpt = trimmed.length > 240 ? `${trimmed.slice(0, 240)}...` : trimmed;
+  return `Native backend process exited unexpectedly${suffix}: ${excerpt}`;
+}
+
+function decodeWindowsExitCode(code: number): string {
+  const unsigned = code >>> 0;
+  switch (unsigned) {
+    case 0xc0000409:
+      return ', 0xC0000409 stack buffer overrun / fast-fail';
+    case 0xc0000005:
+      return ', 0xC0000005 access violation';
+    case 0xc0000135:
+      return ', 0xC0000135 missing DLL dependency';
+    default:
+      return '';
   }
 }
