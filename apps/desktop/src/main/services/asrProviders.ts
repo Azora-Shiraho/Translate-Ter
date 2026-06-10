@@ -25,12 +25,12 @@ export const asrProviders: AsrProviderInfo[] = [
     id: 'cloud.openai',
     kind: 'cloud',
     displayName: 'Cloud ASR',
-    requiresConsentForUpload: true,
+    requiresConsentForUpload: false,
     health: async () => ({
       providerId: 'cloud.openai',
       ok: false,
       status: 'unconfigured',
-      message: 'Cloud ASR is an explicit opt-in adapter placeholder.'
+      message: 'Cloud ASR requires a valid service endpoint and credential configuration.'
     })
   }
 ];

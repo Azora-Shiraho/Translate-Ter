@@ -17,12 +17,14 @@ import { serializeSrt } from '@shared/srt';
 import { JobManager } from './services/jobManager';
 import { NativeBackendClient } from './services/nativeBackendClient';
 import { SettingsStore } from './services/settingsStore';
+import { FfmpegAssetManager } from './services/ffmpegAssets';
 import { WhisperAssetManager } from './services/whisperAssets';
 import { asrProviders } from './services/asrProviders';
 
 let mainWindow: BrowserWindow | undefined;
 const settingsStore = new SettingsStore();
 const whisperAssets = new WhisperAssetManager();
+const ffmpegAssets = new FfmpegAssetManager();
 const nativeBackend = new NativeBackendClient();
 const jobManager = new JobManager(settingsStore, whisperAssets, nativeBackend);
 
@@ -70,6 +72,9 @@ function registerIpc(): void {
   whisperAssets.on('asset-event', (event: AssetEvent) => {
     mainWindow?.webContents.send('assets:event', event);
   });
+  ffmpegAssets.on('asset-event', (event: AssetEvent) => {
+    mainWindow?.webContents.send('assets:event', event);
+  });
 
   async function selectMedia(): Promise<string | undefined> {
     const result = await dialog.showOpenDialog(mainWindow!, {
@@ -97,7 +102,7 @@ function registerIpc(): void {
     message: string;
   }> {
     const settings = await settingsStore.get();
-    let runtime = await whisperAssets.ensureRuntime({
+    const runtime = await whisperAssets.ensureRuntime({
       modelId: settings.whisperModelId,
       allowDownload: false,
       preferCuda: settings.localWhisperUseCuda,
@@ -105,25 +110,6 @@ function registerIpc(): void {
       useMultiThreadDownload: settings.enableMultiThreadDownload,
       downloadScope: 'none'
     });
-
-    if (runtime.actionRequired === 'download-runtime') {
-      await whisperAssets.ensureRuntime({
-        modelId: settings.whisperModelId,
-        allowDownload: true,
-        preferCuda: settings.localWhisperUseCuda,
-        ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
-        useMultiThreadDownload: settings.enableMultiThreadDownload,
-        downloadScope: 'runtime'
-      });
-      runtime = await whisperAssets.ensureRuntime({
-        modelId: settings.whisperModelId,
-        allowDownload: false,
-        preferCuda: settings.localWhisperUseCuda,
-        ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
-        useMultiThreadDownload: settings.enableMultiThreadDownload,
-        downloadScope: 'none'
-      });
-    }
 
     const runnable = runtime.binary.verified && runtime.model.verified;
     return {
@@ -283,12 +269,28 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('assets:list-whisper-models', async () => whisperAssets.listModels());
+  ipcMain.handle('assets:ensure-whisper-model', async (_event, request) => {
+    const settings = await settingsStore.get();
+    return whisperAssets.ensureModel({
+      ...request,
+      useMultiThreadDownload: request.useMultiThreadDownload ?? settings.enableMultiThreadDownload
+    });
+  });
   ipcMain.handle('assets:ensure-whisper-runtime', async (_event, request) => {
     const settings = await settingsStore.get();
     return whisperAssets.ensureRuntime({
       ...request,
       useMultiThreadDownload: request.useMultiThreadDownload ?? settings.enableMultiThreadDownload
     });
+  });
+  ipcMain.handle('assets:ensure-ffmpeg', async (_event, request) => {
+    const settings = await settingsStore.get();
+    const status = await ffmpegAssets.ensureInstalled({
+      ...request,
+      useMultiThreadDownload: request.useMultiThreadDownload ?? settings.enableMultiThreadDownload
+    });
+    await nativeBackend.cancelRunningWork();
+    return status;
   });
   ipcMain.handle('assets:delete-model', async (_event, modelId: string) => whisperAssets.deleteModel(modelId));
   ipcMain.handle('native:health', async () => nativeBackend.health());

@@ -5,6 +5,8 @@ import type {
   CreateJobRequest,
   ExportDestinationMode,
   ExportVariant,
+  FfmpegRequest,
+  FfmpegStatus,
   JobEvent,
   JobSnapshot,
   NativeHealth,
@@ -19,6 +21,8 @@ import type {
   SubtitleStatus,
   SubtitleWarning,
   WhisperModelInfo,
+  WhisperModelRequest,
+  WhisperModelStatus,
   WhisperRuntimeRequest,
   WhisperRuntimeStatus
 } from './models';
@@ -45,6 +49,8 @@ export type {
   CreateJobRequest,
   ExportDestinationMode,
   ExportVariant,
+  FfmpegRequest,
+  FfmpegStatus,
   JobEvent,
   JobSnapshot,
   NativeHealth,
@@ -55,6 +61,8 @@ export type {
   ProviderHealth,
   ProviderSecretInput,
   WhisperModelInfo,
+  WhisperModelRequest,
+  WhisperModelStatus,
   WhisperRuntimeRequest,
   WhisperRuntimeStatus
 };

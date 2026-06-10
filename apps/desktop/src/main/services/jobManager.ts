@@ -536,9 +536,9 @@ function dedupeWarnings(warnings: SubtitleWarning[]): SubtitleWarning[] {
   const seen = new Set<string>();
   return warnings.filter((warning) => {
     const key = [
-      warning.id ?? '',
-      warning.code,
-      warning.message,
+      warning.code.trim(),
+      warning.message.trim().toLowerCase(),
+      warning.batchId ?? '',
       warning.segmentId ?? '',
       warning.startIndex ?? '',
       warning.endIndex ?? '',

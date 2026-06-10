@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { access } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import type {
   NativeHealth,
   NativeProtocolError,
@@ -8,6 +9,7 @@ import type {
   NativeProtocolResponse,
   NativeProtocolType
 } from '@shared/models';
+import { ffmpegBinDir } from './mediaToolPaths';
 
 export type NativeTranscribePayload = {
   jobId?: string;
@@ -54,6 +56,7 @@ export class NativeBackendClient {
       protocolVersion: 1,
       backendVersion: response.error?.code ?? 'missing-dev-build',
       status: 'degraded',
+      detail: response.error?.message,
       capabilities: ['runtime.health'],
       whisperRuntimeAvailable: false,
       ffmpegAvailable: false,
@@ -261,6 +264,7 @@ export class NativeBackendClient {
   private async spawnProcess(executable: string) {
     return new Promise<import('node:child_process').ChildProcessWithoutNullStreams | undefined>((resolveChild) => {
       const child = spawn(executable, ['--stdio-json'], {
+        env: augmentedNativeBackendEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true
       });
@@ -329,6 +333,17 @@ export class NativeBackendClient {
       }
     }
   }
+}
+
+function augmentedNativeBackendEnv(): NodeJS.ProcessEnv {
+  const binDir = ffmpegBinDir();
+  if (!existsSync(binDir)) {
+    return process.env;
+  }
+  return {
+    ...process.env,
+    PATH: [binDir, process.env.PATH ?? ''].filter(Boolean).join(delimiter)
+  };
 }
 
 function chunkToString(chunk: unknown): string {

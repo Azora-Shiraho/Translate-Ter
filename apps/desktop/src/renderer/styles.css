@@ -285,24 +285,64 @@ button:disabled {
 }
 
 .workflowRail {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   padding: 14px 18px 0;
-  flex-wrap: wrap;
   min-width: 0;
+}
+
+.workflowRailLead {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.workflowRailCopy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.workflowRailCopy strong {
+  font-size: 14px;
+}
+
+.workflowRailCopy small {
+  overflow: hidden;
+  color: var(--tt-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflowRailTrack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.workflowRailMeta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
 }
 
 .summaryToggle {
   display: inline-grid;
-  width: 38px;
-  height: 38px;
+  width: 40px;
+  height: 40px;
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--tt-border-soft);
   border-radius: 50%;
   color: var(--tt-text-body);
-  background: var(--tt-surface-panel);
+  background: linear-gradient(180deg, var(--tt-surface-panel), var(--tt-surface-panel-soft));
   box-shadow: var(--tt-shadow-soft);
 }
 
@@ -310,12 +350,12 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 36px;
+  min-height: 38px;
   border: 1px solid var(--tt-border-soft);
   border-radius: var(--tt-radius-pill);
-  padding: 0 12px;
+  padding: 0 14px;
   color: var(--tt-text-muted);
-  background: var(--tt-surface-panel-soft);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent), var(--tt-surface-panel-soft);
 }
 
 .workflowStepDot {
@@ -331,7 +371,7 @@ button:disabled {
 
 .workflowStep.active {
   border-color: rgba(77, 163, 255, 0.34);
-  background: linear-gradient(180deg, rgba(77, 163, 255, 0.16), rgba(77, 163, 255, 0.1));
+  background: linear-gradient(180deg, rgba(77, 163, 255, 0.18), rgba(77, 163, 255, 0.1));
   color: var(--tt-text-strong);
   box-shadow: inset 0 0 0 1px rgba(77, 163, 255, 0.12);
 }
@@ -362,7 +402,7 @@ button:disabled {
 
 .workspaceLayout {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 304px;
   gap: 18px;
   min-height: 0;
   overflow: hidden;
@@ -384,13 +424,31 @@ button:disabled {
   box-shadow: var(--tt-shadow-soft);
 }
 
+.workspaceMain {
+  display: grid;
+  grid-column: 1;
+  order: 1;
+  grid-template-rows: auto minmax(360px, 1fr);
+  gap: 18px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+
 .statsRail {
   display: grid;
+  grid-column: 2;
   grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   padding: 12px;
   background: linear-gradient(180deg, var(--tt-surface-panel), var(--tt-surface-panel-muted));
+}
+
+.workspaceInspector {
+  position: relative;
+  order: 2;
 }
 
 .railContent {
@@ -399,12 +457,72 @@ button:disabled {
   gap: 12px;
   min-height: 0;
   overflow: auto;
-  padding-top: 10px;
+  padding-top: 4px;
 }
 
 .railMetrics {
   display: grid;
   gap: 12px;
+}
+
+.inspectorMetrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.railStatusStack {
+  display: grid;
+  gap: 12px;
+}
+
+.railHeader {
+  display: grid;
+  gap: 4px;
+}
+
+.railHeader strong {
+  font-size: 15px;
+}
+
+.railHeader span,
+.railHeader small {
+  color: var(--tt-text-muted);
+  font-size: 12px;
+}
+
+.workspaceInspectorNotice,
+.railNote {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid var(--tt-border-soft);
+  border-radius: var(--tt-radius-card);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 100%),
+    var(--tt-surface-panel-soft);
+  text-align: left;
+}
+
+.workspaceInspectorNotice.actionable {
+  cursor: pointer;
+}
+
+.workspaceInspectorNotice strong,
+.railNote strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.workspaceInspectorNotice small,
+.railNote small {
+  color: var(--tt-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.workspaceCompactNote {
+  min-height: 88px;
 }
 
 .warningPanel {
@@ -417,8 +535,10 @@ button:disabled {
 }
 
 .warningPanelHeader {
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .warningPanelHeader strong {
@@ -436,6 +556,9 @@ button:disabled {
 .warningList {
   display: grid;
   gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .warningItem,
@@ -454,6 +577,19 @@ button:disabled {
   text-align: left;
 }
 
+.warningItemBody {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.warningItemHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .warningItem.active {
   border-color: rgba(255, 191, 105, 0.34);
   box-shadow: inset 0 0 0 1px rgba(255, 191, 105, 0.12);
@@ -465,18 +601,56 @@ button:disabled {
   margin-bottom: 4px;
 }
 
+.warningItemHeader strong {
+  margin-bottom: 0;
+}
+
+.warningPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  border: 1px solid rgba(255, 191, 105, 0.24);
+  border-radius: 999px;
+  padding: 0 9px;
+  background: rgba(255, 191, 105, 0.1);
+  color: #ffd27a;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.warningItemMeta,
+.warningDetailBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.warningItemMeta {
+  color: var(--tt-text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .warningDetailCard {
   display: grid;
-  gap: 9px;
-  padding: 12px;
+  gap: 12px;
+  padding: 14px;
   border: 1px solid var(--tt-border-soft);
   border-radius: 16px;
   background: var(--tt-surface-panel);
 }
 
+.warningDetailCard.solo {
+  padding-top: 12px;
+}
+
 .warningMetaGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 8px;
 }
 
@@ -498,95 +672,57 @@ button:disabled {
 .warningMetaCard strong {
   display: block;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.railStatusStack {
-  display: grid;
-  gap: 12px;
-}
-
-.railHeader {
-  display: grid;
-  gap: 0;
-}
-
-.railHeader strong {
-  font-size: 14px;
-}
-
-.railHeader span {
-  color: var(--tt-text-muted);
-  font-size: 12px;
-}
-
-.railNote {
-  display: grid;
-  grid-template-columns: 10px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  padding: 12px;
-  border: 1px solid var(--tt-border-soft);
-  border-radius: var(--tt-radius-card);
-  background: var(--tt-surface-panel-soft);
-}
-
-.railNote strong {
-  display: block;
-  margin-bottom: 4px;
-}
-
-.workspaceMain {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 18px;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .workspaceHero {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr) 280px;
   align-items: stretch;
   gap: 12px;
   min-width: 0;
 }
 
 .jobMediaCard,
-.jobActionCard {
+.jobActionCard,
+.workspaceSignalDeck {
   display: grid;
   min-width: 0;
-  align-content: center;
-  gap: 10px;
-  min-height: 116px;
+  gap: 12px;
+  min-height: 0;
   border: 1px solid var(--tt-border-soft);
-  border-radius: var(--tt-radius-card);
-  padding: 14px 16px;
-  background: var(--tt-surface-panel-soft);
+  border-radius: calc(var(--tt-radius-card) + 2px);
+  padding: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 100%),
+    var(--tt-surface-panel-soft);
 }
 
 .jobMediaCard {
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-content: start;
+  background:
+    radial-gradient(circle at top right, rgba(77, 163, 255, 0.16), transparent 34%),
+    linear-gradient(180deg, rgba(77, 163, 255, 0.08), transparent 38%),
+    var(--tt-surface-panel-soft);
 }
 
 .jobActionCard {
-  grid-template-columns: repeat(3, minmax(120px, 1fr));
   align-content: start;
-  gap: 8px;
 }
 
-.jobActionCard .fieldLabel {
-  grid-column: 1 / -1;
-  margin-bottom: 2px;
+.workspaceSignalDeck {
+  grid-template-rows: auto minmax(0, 1fr);
+  background:
+    linear-gradient(180deg, rgba(255, 191, 105, 0.08), transparent 32%),
+    var(--tt-surface-panel-soft);
 }
 
-.jobActionCard button {
-  width: 100%;
-  min-width: 0;
-  padding-inline: 10px;
+.workspaceCardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .stageBadge,
@@ -598,7 +734,7 @@ button:disabled {
   min-height: 30px;
   border-radius: var(--tt-radius-pill);
   padding: 0 12px;
-  background: var(--tt-surface-panel-soft);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--tt-text-body);
   font-size: 12px;
 }
@@ -639,29 +775,116 @@ button:disabled {
   font-weight: 600;
 }
 
-.jobMediaCard strong {
+.jobMediaCard strong,
+.workspaceRoute,
+.subtitleTableIntro strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.jobMediaMeta {
+.workspacePath,
+.workspaceActionHint {
+  margin: 0;
+  color: var(--tt-text-muted);
+  line-height: 1.55;
+}
+
+.workspacePath {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.jobMediaMeta,
+.subtitleTableChips {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.jobMediaCard small {
-  overflow: hidden;
+.workspaceProgressPanel {
+  display: grid;
+  gap: 8px;
+}
+
+.workspaceProgressCopy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   color: var(--tt-text-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 12px;
+}
+
+.workspaceProgressCopy strong {
+  color: var(--tt-text-strong);
+  font-size: 14px;
+}
+
+.workspaceProgressTrack {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--tt-radius-pill);
+  background: var(--tt-track);
+}
+
+.workspaceProgressTrack span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--tt-accent), var(--tt-accent-strong));
+}
+
+.workspaceProgressTrack.active span {
+  background:
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.26) 0 8px, transparent 8px 16px),
+    linear-gradient(90deg, var(--tt-accent), var(--tt-accent-strong));
+  background-blend-mode: screen;
+  background-size: 24px 24px, 100% 100%;
+  animation: progressFlow 760ms linear infinite;
+}
+
+.workspaceRoute {
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.workspaceActionStack {
+  display: grid;
+  gap: 10px;
+}
+
+.workspaceActionRow,
+.workspaceSignalGrid,
+.workspaceHealthGrid {
+  display: grid;
+  gap: 10px;
+}
+
+.workspaceActionRow {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.jobActionCard button {
+  width: 100%;
+  min-width: 0;
+}
+
+.workspaceSignalGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workspaceSignalGrid .metricCard,
+.inspectorMetrics .metricCard {
+  min-height: 88px;
 }
 
 .subtitleWorkbench {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  min-height: 0;
+  min-height: 420px;
   overflow: hidden;
 }
 
@@ -670,12 +893,17 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 16px 18px;
+  padding: 18px;
   border-bottom: 1px solid var(--tt-border-soft);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent);
 }
 
 .panelHeaderMeta {
+  display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
   color: var(--tt-text-muted);
   font-size: 12px;
 }
@@ -696,18 +924,42 @@ h3 {
 
 .subtitleWorkspace {
   display: grid;
-  grid-template-columns: minmax(420px, 1.1fr) minmax(340px, 0.9fr);
+  grid-template-columns: minmax(0, 1.04fr) minmax(380px, 0.96fr);
   min-height: 0;
 }
 
-.subtitleTable,
+.subtitleTableShell,
 .segmentDetail {
   min-height: 0;
 }
 
+.subtitleTableShell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  border-right: 1px solid var(--tt-border-soft);
+}
+
+.subtitleTableIntro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--tt-border-soft);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent);
+}
+
+.subtitleTableIntro > div:first-child {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
 .subtitleTable {
   overflow: auto;
-  border-right: 1px solid var(--tt-border-soft);
+  padding: 12px;
+  background: var(--tt-surface-panel-muted);
 }
 
 .row {
@@ -716,8 +968,11 @@ h3 {
   gap: 10px;
   align-items: start;
   width: 100%;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--tt-border-soft);
+  margin-bottom: 10px;
+  border: 1px solid var(--tt-border-soft);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: var(--tt-surface-panel);
   color: var(--tt-text-body);
   font-size: 13px;
   text-align: left;
@@ -726,14 +981,12 @@ h3 {
 .row.head {
   position: sticky;
   top: 0;
-  z-index: 1;
-  background: var(--tt-surface-panel);
+  z-index: 2;
+  margin-bottom: 12px;
+  border-radius: 14px;
+  background: var(--tt-surface-panel-soft);
   color: var(--tt-text-muted);
   font-weight: 600;
-}
-
-.row.selectable {
-  background: transparent;
 }
 
 .row.selectable:hover {
@@ -741,18 +994,14 @@ h3 {
 }
 
 .row.selectable.selected {
-  background: var(--tt-surface-active);
+  border-color: rgba(77, 163, 255, 0.28);
+  background: linear-gradient(180deg, rgba(77, 163, 255, 0.12), rgba(77, 163, 255, 0.05));
   box-shadow: inset 3px 0 0 var(--tt-accent);
 }
 
 .rowStart,
 .rowEnd {
   white-space: nowrap;
-}
-
-.jobMediaCard small {
-  white-space: normal;
-  word-break: break-word;
 }
 
 .rowStatus {
@@ -774,10 +1023,11 @@ h3 {
 .segmentDetail {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 12px;
+  gap: 10px;
   padding: 16px;
   background:
-    linear-gradient(180deg, rgba(77, 163, 255, 0.08), transparent 22%),
+    radial-gradient(circle at top right, rgba(77, 163, 255, 0.16), transparent 30%),
+    linear-gradient(180deg, rgba(77, 163, 255, 0.08), transparent 24%),
     var(--tt-surface-panel-muted);
 }
 
@@ -860,7 +1110,7 @@ h3 {
 }
 
 .editorPane textarea {
-  min-height: 220px;
+  min-height: 180px;
 }
 
 .translatedPane {
@@ -874,40 +1124,409 @@ h3 {
 
 .settingsPage {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  overflow: auto;
   gap: 18px;
+  align-content: start;
   min-height: 0;
-  overflow: hidden;
-  padding: 14px 18px 18px;
+  padding: 18px 18px 28px;
 }
 
-.settingsIntro {
+.settingsSummaryBar {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--tt-border-soft);
+  border-radius: calc(var(--tt-radius-panel) + 2px);
+  padding: 16px 18px;
+  background:
+    linear-gradient(180deg, rgba(77, 163, 255, 0.08), transparent 100%),
+    linear-gradient(180deg, var(--tt-surface-panel), var(--tt-surface-panel-muted));
+  box-shadow: var(--tt-shadow-soft);
+}
+
+.settingsSummaryIntro {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 18px 20px;
+  gap: 14px;
+  flex-wrap: wrap;
 }
 
-.settingsGrid {
+.settingsSummaryCopy {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+}
+
+.settingsPanelLead span,
+.settingsOverviewEyebrow {
+  color: var(--tt-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.settingsSummaryCopy h2 {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.settingsSummaryCopy p,
+.settingsPanelLead p,
+.settingsMicrocopy {
+  margin: 0;
+  color: var(--tt-text-muted);
+  line-height: 1.6;
+}
+
+.settingsBadgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.settingsBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: var(--tt-radius-pill);
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--tt-text-body);
+  font-size: 12px;
+  font-weight: 700;
+  backdrop-filter: blur(8px);
+}
+
+.settingsBadge.tone-good {
+  color: var(--tt-status-success);
+}
+
+.settingsBadge.tone-accent {
+  color: var(--tt-accent);
+}
+
+.settingsBadge.tone-warn {
+  color: var(--tt-status-warning);
+}
+
+.settingsBadge.tone-error {
+  color: var(--tt-status-error);
+}
+
+.settingsSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.settingsSummaryCard {
+  --tt-summary-accent: rgba(77, 163, 255, 0.16);
+  position: relative;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  min-height: 176px;
+  overflow: hidden;
+  border: 1px solid var(--tt-border-soft);
+  border-radius: var(--tt-radius-card);
+  padding: 15px;
+  background:
+    radial-gradient(circle at top right, var(--tt-summary-accent), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 100%),
+    rgba(255, 255, 255, 0.02);
+  box-shadow: 0 18px 36px rgba(3, 8, 20, 0.2);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background 180ms ease;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.settingsSummaryCard::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06), transparent 38%);
+  pointer-events: none;
+}
+
+.settingsSummaryCard > * {
+  position: relative;
+  z-index: 1;
+}
+
+.settingsSummaryCard.tone-good {
+  --tt-summary-accent: rgba(79, 201, 135, 0.18);
+}
+
+.settingsSummaryCard.tone-accent {
+  --tt-summary-accent: rgba(77, 163, 255, 0.18);
+}
+
+.settingsSummaryCard.tone-warn {
+  --tt-summary-accent: rgba(255, 181, 71, 0.18);
+}
+
+.settingsSummaryCard.tone-error {
+  --tt-summary-accent: rgba(255, 107, 107, 0.18);
+}
+
+.settingsSummaryCard.tone-muted {
+  --tt-summary-accent: rgba(107, 132, 167, 0.16);
+}
+
+.settingsSummaryCard.interactive {
+  appearance: none;
+  cursor: pointer;
+}
+
+.settingsSummaryCard.interactive:hover {
+  transform: translateY(-3px);
+  border-color: rgba(77, 163, 255, 0.32);
+  box-shadow: 0 22px 42px rgba(3, 8, 20, 0.28);
+}
+
+.settingsSummaryCard.interactive:hover .settingsOverviewIcon {
+  background: rgba(77, 163, 255, 0.16);
+  color: #8bc6ff;
+}
+
+.settingsSummaryCard.interactive:focus-visible {
+  outline: none;
+  border-color: rgba(77, 163, 255, 0.5);
+  box-shadow:
+    0 0 0 3px rgba(77, 163, 255, 0.18),
+    0 22px 42px rgba(3, 8, 20, 0.28);
+}
+
+.settingsOverviewCard,
+.settingsFactCard {
+  width: 100%;
+}
+
+.settingsOverviewTop {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.settingsOverviewIcon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--tt-accent);
+  transition: background 180ms ease, color 180ms ease;
+}
+
+.settingsOverviewCard strong {
+  overflow: hidden;
+  font-size: 17px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settingsOverviewCard p {
+  margin: 0;
+  color: var(--tt-text-body);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.settingsFactCardTop {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.settingsFactCard strong {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-size: 18px;
+  line-height: 1.45;
+}
+
+.settingsFactCard p {
+  margin: 0;
+  color: var(--tt-text-body);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.settingsSummaryCardFooter {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: auto;
+}
+
+.settingsCardAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--tt-radius-pill);
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--tt-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: border-color 180ms ease, background 180ms ease, color 180ms ease;
+}
+
+.settingsSummaryCard.interactive:hover .settingsCardAction,
+.settingsSummaryCard.interactive:focus-visible .settingsCardAction {
+  border-color: rgba(77, 163, 255, 0.3);
+  background: rgba(77, 163, 255, 0.1);
+  color: var(--tt-text-body);
+}
+
+@media (min-width: 1180px) {
+  .settingsSummaryGrid .settingsOverviewCard.featured {
+    grid-column: span 2;
+  }
+}
+
+.settingsWorkbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
   gap: 18px;
   min-height: 0;
-  overflow: auto;
-  align-content: start;
   align-items: start;
 }
 
-.settingsColumn {
+.settingsRail {
   display: grid;
   gap: 18px;
   align-content: start;
+  min-width: 0;
 }
 
 .settingsPanel {
+  display: grid;
+  gap: 16px;
   min-height: fit-content;
-  padding: 16px 18px;
+  padding: 18px;
+  background: linear-gradient(180deg, var(--tt-surface-panel), var(--tt-surface-panel-muted));
+}
+
+.settingsPanelFeature {
+  gap: 18px;
+}
+
+.settingsPanelLead {
+  display: grid;
+  gap: 8px;
+}
+
+.settingsPanelHeading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settingsPanelLeadIcon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--tt-border-soft);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(77, 163, 255, 0.14), transparent 100%),
+    var(--tt-surface-panel-soft);
+  color: var(--tt-accent);
+}
+
+.settingsPanelHeading h3 {
+  min-width: 0;
+}
+
+.settingsPanelLead.compact h3 {
+  font-size: 18px;
+}
+
+.settingsShelf {
+  display: grid;
+  gap: 14px;
+}
+
+.settingsShelf.twoUp {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settingsGroupCard {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  scroll-margin-top: 24px;
+  border: 1px solid var(--tt-border-soft);
+  border-radius: calc(var(--tt-radius-card) + 2px);
+  padding: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 30%),
+    var(--tt-surface-panel-soft);
+  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+  outline: none;
+}
+
+.settingsGroupCardAccent {
+  background:
+    linear-gradient(180deg, rgba(77, 163, 255, 0.12), transparent 38%),
+    var(--tt-surface-panel-soft);
+}
+
+.settingsGroupCard.settingsJumpTargetActive {
+  border-color: rgba(77, 163, 255, 0.42);
+  background:
+    linear-gradient(180deg, rgba(77, 163, 255, 0.16), transparent 34%),
+    var(--tt-surface-panel-soft);
+  box-shadow:
+    0 0 0 1px rgba(77, 163, 255, 0.16),
+    0 20px 40px rgba(8, 17, 34, 0.18);
+  animation: settingsJumpPulse 1.4s ease;
+}
+
+.settingsGroupCardAccent.settingsJumpTargetActive {
+  background:
+    linear-gradient(180deg, rgba(77, 163, 255, 0.2), transparent 38%),
+    var(--tt-surface-panel-soft);
+}
+
+@keyframes settingsJumpPulse {
+  0% {
+    transform: translateY(0);
+    box-shadow:
+      0 0 0 0 rgba(77, 163, 255, 0),
+      0 12px 24px rgba(8, 17, 34, 0.12);
+  }
+
+  40% {
+    transform: translateY(-2px);
+    box-shadow:
+      0 0 0 4px rgba(77, 163, 255, 0.12),
+      0 22px 42px rgba(8, 17, 34, 0.18);
+  }
+
+  100% {
+    transform: translateY(0);
+    box-shadow:
+      0 0 0 1px rgba(77, 163, 255, 0.16),
+      0 20px 40px rgba(8, 17, 34, 0.18);
+  }
 }
 
 .inspectorSection {
@@ -1072,6 +1691,33 @@ input[type='checkbox'] {
   font-size: 12px;
 }
 
+.settingsActionButton {
+  flex: 0 0 auto;
+  min-width: 132px;
+  white-space: nowrap;
+  border-color: rgba(255, 255, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 100%),
+    var(--tt-surface-panel);
+  box-shadow: 0 10px 22px rgba(3, 8, 20, 0.12);
+}
+
+.settingsActionButton:hover:not(:disabled) {
+  border-color: rgba(77, 163, 255, 0.3);
+  background:
+    linear-gradient(180deg, rgba(77, 163, 255, 0.12), transparent 100%),
+    var(--tt-surface-panel);
+  box-shadow: 0 14px 26px rgba(8, 17, 34, 0.18);
+}
+
+.settingsActionButton svg {
+  color: var(--tt-accent);
+}
+
+.settingsActionButton:disabled {
+  box-shadow: none;
+}
+
 .textButton {
   min-height: 30px;
   border-radius: var(--tt-radius-pill);
@@ -1107,11 +1753,19 @@ input[type='checkbox'] {
   padding: 12px;
   border: 1px solid var(--tt-border-soft);
   border-radius: var(--tt-radius-card);
-  background: var(--tt-surface-panel-soft);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 32%),
+    rgba(255, 255, 255, 0.02);
 }
 
-.providerCard > div,
-.modelCard > div {
+.accentCard {
+  background:
+    linear-gradient(180deg, rgba(77, 163, 255, 0.14), transparent 42%),
+    rgba(255, 255, 255, 0.03);
+}
+
+.providerCard > div:first-child,
+.modelCard > div:first-child {
   display: grid;
   min-width: 0;
   grid-template-columns: 10px minmax(0, 1fr);
@@ -1144,6 +1798,13 @@ input[type='checkbox'] {
   word-break: break-word;
 }
 
+.settingsActionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
 .signal {
   width: 10px;
   height: 10px;
@@ -1153,6 +1814,10 @@ input[type='checkbox'] {
 
 .signal.good {
   background: var(--tt-status-success);
+}
+
+.signal.accent {
+  background: var(--tt-accent);
 }
 
 .signal.warn {
@@ -1210,6 +1875,13 @@ input[type='checkbox'] {
   font-size: 13px;
 }
 
+.runtimeGrid .statusLine {
+  min-height: 42px;
+  border-radius: 14px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .status {
   justify-content: center;
   min-width: 80px;
@@ -1220,6 +1892,10 @@ input[type='checkbox'] {
 .status.translated,
 .good {
   color: var(--tt-status-success);
+}
+
+.accent {
+  color: var(--tt-accent);
 }
 
 .error,
@@ -1581,26 +2257,40 @@ input[type='checkbox'] {
     min-width: 0;
   }
 
+  .settingsWorkbench,
+  .settingsShelf.twoUp {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settingsFieldGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .settingsSummaryBar,
+  .settingsPanel,
+  .settingsGroupCard {
+    padding: 16px;
+  }
+
   .workspaceLayout {
-    grid-template-columns: 236px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 280px;
     gap: 14px;
   }
 
-  .workspaceLayout.statsCollapsed {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .workspaceHero {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .jobActionCard {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .workspaceSignalDeck {
+    grid-column: 1 / -1;
+  }
+
+  .workspaceHealthGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 1200px) {
-  .settingsGrid,
   .subtitleWorkspace {
     grid-template-columns: 1fr;
   }
@@ -1610,97 +2300,37 @@ input[type='checkbox'] {
     gap: 12px;
   }
 
-  .workspaceLayout.statsCollapsed {
-    grid-template-columns: minmax(0, 1fr);
+  .settingsPage {
+    padding: 14px;
   }
 
   .statsRail {
     grid-column: 1;
-  }
-
-  .statsRail {
     padding: 10px;
   }
 
   .railContent {
-    display: flex;
-    gap: 10px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding: 0 0 2px;
-    scroll-snap-type: x proximity;
-  }
-
-  .railHeader,
-  .railMetrics,
-  .railStatusStack {
-    flex: 0 0 auto;
-  }
-
-  .railHeader {
-    min-width: 118px;
-    align-content: center;
-    border: 1px solid var(--tt-border-soft);
-    border-radius: var(--tt-radius-card);
-    padding: 12px;
-    background: var(--tt-surface-panel-soft);
-    scroll-snap-align: start;
-  }
-
-  .railMetrics,
-  .railStatusStack {
-    display: flex;
-    gap: 10px;
-  }
-
-  .railMetrics .metricCard,
-  .railNote {
-    width: clamp(154px, 24vw, 196px);
-    min-height: 76px;
-    scroll-snap-align: start;
-  }
-
-  .subtitleWorkspace {
-    display: flex;
-    min-height: auto;
-    flex-direction: column;
-  }
-
-  .subtitleTable {
-    flex: 0 0 clamp(240px, 38vh, 380px);
-    overflow: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--tt-border-soft);
-  }
-
-  .segmentDetail {
-    flex: 0 0 auto;
-    min-height: clamp(340px, 42vh, 420px);
-  }
-
-  .subtitleWorkbench {
-    overflow: auto;
-  }
-
-  .editorGrid {
-    grid-template-columns: 1fr;
-    grid-template-rows: none;
-  }
-
-  .workspaceHero {
-    grid-template-columns: minmax(0, 1fr) 82px;
+    padding-top: 0;
   }
 
   .workflowRail {
-    flex-wrap: nowrap;
+    grid-template-columns: 1fr;
+    padding-bottom: 4px;
+  }
+
+  .workflowRailTrack {
     overflow-x: auto;
-    overflow-y: hidden;
+    flex-wrap: nowrap;
     padding-bottom: 4px;
     scrollbar-width: none;
   }
 
-  .workflowRail::-webkit-scrollbar {
+  .workflowRailTrack::-webkit-scrollbar {
     display: none;
+  }
+
+  .workflowRailMeta {
+    justify-content: flex-start;
   }
 
   .summaryToggle,
@@ -1708,12 +2338,36 @@ input[type='checkbox'] {
     flex: 0 0 auto;
   }
 
-  .railContent {
-    padding-top: 0;
+  .workspaceHero {
+    grid-template-columns: 1fr;
   }
 
-  .railMetrics {
-    gap: 10px;
+  .workspaceSignalDeck {
+    grid-column: auto;
+  }
+
+  .workspaceSignalGrid,
+  .workspaceHealthGrid,
+  .workspaceActionRow,
+  .editorGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .subtitleTableShell {
+    border-right: 0;
+    border-bottom: 1px solid var(--tt-border-soft);
+  }
+
+  .subtitleTable {
+    min-height: clamp(240px, 38vh, 420px);
+  }
+
+  .segmentDetail {
+    min-height: clamp(340px, 42vh, 420px);
+  }
+
+  .subtitleWorkbench {
+    overflow: auto;
   }
 
   .row.head {
@@ -1727,48 +2381,6 @@ input[type='checkbox'] {
       "original original original original"
       "translated translated translated translated";
     gap: 8px;
-    margin: 10px 12px;
-    border: 1px solid var(--tt-border-soft);
-    border-radius: var(--tt-radius-card);
-    padding: 12px;
-    background: var(--tt-surface-panel);
-  }
-
-  .row.selectable.selected {
-    box-shadow: inset 3px 0 0 var(--tt-accent), var(--tt-shadow-soft);
-  }
-
-  .rowStart,
-  .rowEnd {
-    display: inline-flex;
-    align-items: center;
-    min-height: 26px;
-    border-radius: var(--tt-radius-pill);
-    padding: 0 9px;
-    background: var(--tt-surface-panel-soft);
-    color: var(--tt-text-muted);
-    font-size: 12px;
-  }
-
-  .rowStart {
-    grid-area: start;
-  }
-
-  .rowEnd {
-    grid-area: end;
-  }
-
-  .rowOriginal {
-    grid-area: original;
-  }
-
-  .rowTranslated {
-    grid-area: translated;
-  }
-
-  .rowStatus {
-    grid-area: status;
-    justify-self: end;
   }
 
   .previewText {
@@ -1789,6 +2401,19 @@ input[type='checkbox'] {
 }
 
 @media (max-width: 900px) {
+  .languagePair,
+  .settingsFieldGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .swapButton {
+    justify-self: start;
+  }
+
+  .settingsSummaryBar {
+    padding: 14px;
+  }
+
   .appShell {
     grid-template-rows: auto minmax(0, 1fr) auto;
   }
@@ -1811,6 +2436,12 @@ input[type='checkbox'] {
 
   .workflowRail {
     padding: 10px 12px 0;
+  }
+
+  .workflowRailLead,
+  .workflowRailMeta,
+  .subtitleTableIntro {
+    width: 100%;
   }
 
   .workflowStep {
@@ -1841,26 +2472,33 @@ input[type='checkbox'] {
   }
 
   .jobMediaCard,
-  .jobActionCard {
+  .jobActionCard,
+  .workspaceSignalDeck {
     min-height: 0;
     padding: 13px 14px;
   }
 
-  .workspaceHero {
+  .workspaceSignalGrid,
+  .workspaceHealthGrid {
     grid-template-columns: 1fr;
   }
 
-  .jobMediaCard {
-    order: 1;
-  }
-
-  .jobActionCard {
-    order: 2;
-    grid-template-columns: 1fr;
+  .workspaceRoute {
+    font-size: 18px;
   }
 
   .panelHeader p {
     white-space: normal;
+  }
+}
+
+@media (max-height: 920px) {
+  .settingsPage {
+    padding-bottom: 36px;
+  }
+
+  .settingsSummaryBar {
+    padding: 16px;
   }
 }
 
@@ -1871,7 +2509,9 @@ input[type='checkbox'] {
   }
 
   .panelHeader,
-  .segmentDetailHero {
+  .segmentDetailHero,
+  .subtitleTableIntro,
+  .workflowRailLead {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -1890,15 +2530,15 @@ input[type='checkbox'] {
   }
 
   .row {
-    margin: 8px 10px;
+    margin: 8px 0;
   }
 
   .status {
     justify-self: start;
   }
 
-  .editorGrid {
-    padding: 12px;
+  .subtitleTable {
+    padding: 10px;
   }
 
   .settingsFieldGrid {

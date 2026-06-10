@@ -112,6 +112,22 @@ export type WhisperRuntimeRequest = {
   downloadScope?: 'all' | 'runtime' | 'cuda-runtime' | 'model' | 'none';
 };
 
+export type WhisperModelRequest = {
+  modelId: string;
+  allowDownload: boolean;
+  useMultiThreadDownload?: boolean;
+};
+
+export type WhisperModelStatus = {
+  id: string;
+  cacheDir: string;
+  expectedPath: string;
+  installed: boolean;
+  verified: boolean;
+  actionRequired?: 'download-model' | 'manifest-not-configured' | 'none';
+  message?: string;
+};
+
 export type WhisperRuntimeStatus = {
   provider: 'whisper.cpp';
   platformKey: string;
@@ -131,6 +147,11 @@ export type WhisperRuntimeStatus = {
     requested: 'auto' | 'gpu' | 'cpu';
     selected: 'gpu' | 'cpu';
     cudaSupported: boolean;
+    hardwareDetected: boolean;
+    runtimeDetected: boolean;
+    versionMismatch: boolean;
+    requiredCudaVersion?: '11.8' | '12.8';
+    runtimeCudaVersion?: '11.8' | '12.8';
     runtimeVariant: 'cpu' | 'cuda' | 'metal' | 'vulkan';
     fallbackReason?: string;
   };
@@ -213,17 +234,35 @@ export type JobEvent =
   | { type: 'error'; jobId: string; code: string; message: string; retryable: boolean };
 
 export type AssetEvent =
-  | { type: 'download-start'; scope: 'runtime' | 'model'; message: string }
-  | { type: 'download-progress'; scope: 'runtime' | 'model'; message: string; receivedBytes?: number; totalBytes?: number }
-  | { type: 'verify'; scope: 'runtime' | 'model'; message: string }
-  | { type: 'extract'; scope: 'runtime'; message: string }
-  | { type: 'ready'; scope: 'runtime' | 'model'; message: string }
-  | { type: 'error'; scope: 'runtime' | 'model'; message: string };
+  | { type: 'download-start'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string }
+  | { type: 'download-progress'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string; receivedBytes?: number; totalBytes?: number }
+  | { type: 'verify'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string }
+  | { type: 'extract'; scope: 'runtime' | 'ffmpeg'; message: string }
+  | { type: 'ready'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string }
+  | { type: 'error'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string };
+
+export type FfmpegRequest = {
+  allowDownload: boolean;
+  useMultiThreadDownload?: boolean;
+};
+
+export type FfmpegStatus = {
+  cacheDir: string;
+  binDir: string;
+  ffmpegPath?: string;
+  ffprobePath?: string;
+  ffmpegAvailable: boolean;
+  ffprobeAvailable: boolean;
+  available: boolean;
+  source: 'managed' | 'system' | 'missing';
+  actionRequired?: 'download-required' | 'none';
+};
 
 export type NativeHealth = {
   protocolVersion: number;
   backendVersion: string;
   status: 'ok' | 'degraded';
+  detail?: string;
   capabilities: string[];
   whisperRuntimeAvailable: boolean;
   ffmpegAvailable?: boolean;

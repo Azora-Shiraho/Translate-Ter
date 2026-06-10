@@ -158,8 +158,10 @@ export class SettingsStore {
 }
 
 function normalizeSettings(settings: AppSettingsPublic): AppSettingsPublic {
+  const usingCloudAsr = settings.asrProviderId === 'cloud.openai';
   return {
     ...settings,
+    allowCloudAsrUpload: usingCloudAsr ? true : Boolean(settings.allowCloudAsrUpload),
     localWhisperIgnoreCudaMismatch: Boolean(settings.localWhisperIgnoreCudaMismatch),
     sourceLanguage: canonicalSourceLanguageCode(settings.sourceLanguage),
     targetLanguage: canonicalTargetLanguageCode(settings.targetLanguage)

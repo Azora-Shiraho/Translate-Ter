@@ -4,6 +4,8 @@ import type {
   AppSettingsPublic,
   ExportVariant,
   CreateJobRequest,
+  FfmpegRequest,
+  FfmpegStatus,
   JobEvent,
   JobSnapshot,
   NativeHealth,
@@ -13,6 +15,8 @@ import type {
   SubtitleDocument,
   SubtitleSegment,
   WhisperModelInfo,
+  WhisperModelRequest,
+  WhisperModelStatus,
   WhisperRuntimeRequest,
   WhisperRuntimeStatus
 } from '@shared/models';
@@ -71,8 +75,12 @@ const api = {
   },
   assets: {
     listWhisperModels: () => ipcRenderer.invoke('assets:list-whisper-models') as Promise<WhisperModelInfo[]>,
+    ensureWhisperModel: (request: WhisperModelRequest) =>
+      ipcRenderer.invoke('assets:ensure-whisper-model', request) as Promise<WhisperModelStatus>,
     ensureWhisperRuntime: (request: WhisperRuntimeRequest) =>
       ipcRenderer.invoke('assets:ensure-whisper-runtime', request) as Promise<WhisperRuntimeStatus>,
+    ensureFfmpeg: (request: FfmpegRequest) =>
+      ipcRenderer.invoke('assets:ensure-ffmpeg', request) as Promise<FfmpegStatus>,
     deleteModel: (modelId: string) => ipcRenderer.invoke('assets:delete-model', modelId) as Promise<void>,
     onEvent: (listener: (event: AssetEvent) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, payload: AssetEvent) => listener(payload);
