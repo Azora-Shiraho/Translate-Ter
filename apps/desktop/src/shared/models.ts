@@ -54,6 +54,8 @@ export type ExportDestinationMode = 'source-directory' | 'selected-directory' | 
 export type ExportVariant = 'source' | 'translated' | 'bilingual';
 export type BilingualOrder = 'source-first' | 'target-first';
 export type LocalAsrCpuMode = 'low' | 'balanced' | 'high';
+export type LocalAsrAcceleration = 'auto' | 'cpu' | 'gpu';
+export type RuntimeVariant = 'cpu' | 'cuda' | 'metal' | 'vulkan';
 export type AppLogLevel = 'debug' | 'info' | 'warning' | 'error';
 
 export type AppSettingsPublic = {
@@ -65,8 +67,13 @@ export type AppSettingsPublic = {
   targetLanguage: string;
   asrProviderId: string;
   whisperModelId: string;
+  localAsrAcceleration: LocalAsrAcceleration;
+  preferredRuntimeVariant?: RuntimeVariant;
   localWhisperUseCuda: boolean;
   localAsrCpuMode: LocalAsrCpuMode;
+  localAsrCompatibilityOverrides: {
+    ignoreCudaMismatch: boolean;
+  };
   localWhisperIgnoreCudaMismatch: boolean;
   allowWhisperAssetDownload: boolean;
   enableMultiThreadDownload: boolean;
