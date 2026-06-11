@@ -1,6 +1,6 @@
 {
   "name": "translate-ter",
-  "version": "0.2.0",
+  "version": "2.0.1",
   "description": "Local-first desktop workflow for transcription, subtitle editing, and translation.",
   "main": "out/main/index.js",
   "type": "module",
@@ -49,6 +49,10 @@
       {
         "from": "resources/whisper-manifest.json",
         "to": "whisper-manifest.json"
+      },
+      {
+        "from": "resources/faster-whisper-runner.py",
+        "to": "faster-whisper-runner.py"
       }
     ],
     "win": {

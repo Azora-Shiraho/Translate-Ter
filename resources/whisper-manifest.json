@@ -5,7 +5,7 @@
   "downloadPolicy": {
     "requiresUserConsent": true,
     "verifyBeforeInstall": true,
-    "installRoot": "appDir/runtime/whisper",
+    "installRoot": "appDir/runtime/whisper_cpp",
     "atomicInstall": true,
     "backendDownloadsAllowed": false
   },
@@ -40,13 +40,13 @@
     "cliKind": "whisper-cli",
     "platforms": {
       "win32-x64": {
-        "binary": "bin/Release/whisper-cli.exe",
+        "binary": "cpu/Release/whisper-cli.exe",
         "sha256": "d824b1e37599f882b396e73f1ee0bfd5d0529f700314c48311dcbd00b803321d",
         "url": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-bin-x64.zip",
         "acceleration": "cpu"
       },
       "win32-x64-cuda": {
-        "binary": "bin/Release/whisper-cli.exe",
+        "binary": "cuda/Release/whisper-cli.exe",
         "sha256": "a5ef69599305bdf3e135047b1a2151dcea79bc0fa201e3ea8681069c2abc7a8c",
         "url": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.3/whisper-cublas-11.8.0-bin-x64.zip",
         "acceleration": "cuda",
@@ -72,6 +72,7 @@
       "displayName": "Whisper tiny",
       "languageScope": "multilingual",
       "sizeBytes": 77691713,
+      "estimatedVramBytes": 536870912,
       "sha256": "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
       "path": "models/ggml-tiny.bin",
       "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
@@ -81,6 +82,7 @@
       "displayName": "Whisper base",
       "languageScope": "multilingual",
       "sizeBytes": 147951465,
+      "estimatedVramBytes": 805306368,
       "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
       "path": "models/ggml-base.bin",
       "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
@@ -90,6 +92,7 @@
       "displayName": "Whisper small",
       "languageScope": "multilingual",
       "sizeBytes": 487601967,
+      "estimatedVramBytes": 1610612736,
       "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
       "path": "models/ggml-small.bin",
       "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
@@ -99,6 +102,7 @@
       "displayName": "Whisper medium",
       "languageScope": "multilingual",
       "sizeBytes": 1533763059,
+      "estimatedVramBytes": 3221225472,
       "sha256": "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208",
       "path": "models/ggml-medium.bin",
       "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"
@@ -108,6 +112,7 @@
       "displayName": "Whisper large v3 turbo",
       "languageScope": "multilingual",
       "sizeBytes": 1624555275,
+      "estimatedVramBytes": 3758096384,
       "sha256": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
       "path": "models/ggml-large-v3-turbo.bin",
       "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin"

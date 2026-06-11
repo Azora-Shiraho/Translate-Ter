@@ -120,12 +120,12 @@ export class FfmpegAssetManager extends EventEmitter {
     this.emitAsset({ type: 'download-start', scope: 'ffmpeg', message: 'Downloading FFmpeg tools.' });
     await this.downloadHttp(FFMPEG_WINDOWS_ARCHIVE_URL, archivePath, useMultiThreadDownload);
 
-    this.emitAsset({ type: 'verify', scope: 'ffmpeg', message: 'Verifying FFmpeg archive.' });
+    this.emitAsset({ type: 'verify', scope: 'ffmpeg', message: 'Checking downloaded FFmpeg files.' });
     const verified = await verifySha256(archivePath, FFMPEG_WINDOWS_ARCHIVE_SHA256);
     if (!verified) {
       await this.removePathWithRetry(archivePath);
-      this.emitAsset({ type: 'error', scope: 'ffmpeg', message: 'Downloaded FFmpeg archive failed SHA-256 verification.' });
-      throw new Error('Downloaded FFmpeg archive failed SHA-256 verification.');
+      this.emitAsset({ type: 'error', scope: 'ffmpeg', message: 'The downloaded FFmpeg files did not pass the integrity check.' });
+      throw new Error('The downloaded FFmpeg files did not pass the integrity check. Please try again.');
     }
 
     this.emitAsset({ type: 'extract', scope: 'ffmpeg', message: 'Extracting FFmpeg tools.' });
@@ -190,8 +190,8 @@ export class FfmpegAssetManager extends EventEmitter {
   private async downloadHttpSingle(url: string, destination: string): Promise<void> {
     const response = await fetch(url);
     if (!response.ok || !response.body) {
-      this.emitAsset({ type: 'error', scope: 'ffmpeg', message: `FFmpeg download failed with HTTP ${response.status}.` });
-      throw new Error(`Failed to download FFmpeg archive: HTTP ${response.status}`);
+      this.emitAsset({ type: 'error', scope: 'ffmpeg', message: `FFmpeg download failed (HTTP ${response.status}).` });
+      throw new Error(`FFmpeg download failed (HTTP ${response.status}).`);
     }
 
     const totalBytes = Number.parseInt(response.headers.get('content-length') ?? '', 10);

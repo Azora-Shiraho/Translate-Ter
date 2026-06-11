@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -44,5 +44,21 @@ describe('SettingsStore secret storage', () => {
       apiKey: 'sk-secret',
       baseUrl: 'https://example.test/v1'
     });
+  });
+
+  it('normalizes the log level setting', async () => {
+    const store = new SettingsStore();
+    await store.update({ logLevel: 'debug' });
+    expect((await store.get()).logLevel).toBe('debug');
+
+    await store.update({ logLevel: 'warning' });
+    expect((await store.get()).logLevel).toBe('warning');
+
+    const settingsPath = join(electronState.userData, 'settings.json');
+    const parsed = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, unknown>;
+    parsed.logLevel = 'verbose';
+    await writeFile(settingsPath, JSON.stringify(parsed, null, 2), 'utf8');
+
+    expect((await store.get()).logLevel).toBe('warning');
   });
 });

@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -78,6 +79,13 @@ std::string json_escape(std::string_view input) {
     }
   }
   return stream.str();
+}
+
+int default_whisper_thread_count() {
+  const auto hardware_threads = std::thread::hardware_concurrency();
+  const auto resolved_threads = hardware_threads == 0 ? 4u : hardware_threads;
+  const auto suggested_threads = std::max(1u, std::min(16u, (resolved_threads + 1u) / 2u));
+  return static_cast<int>(suggested_threads);
 }
 
 std::string json_unescape(std::string_view input) {
@@ -786,7 +794,7 @@ std::string srt_serialize_payload(const std::string& request) {
 NativeResult media_probe_result(const std::string& request) {
   const auto media_path = extract_string(request, "mediaPath");
   if (!media_path || media_path->empty()) {
-    return {false, "", "MalformedRequest", "media.probe requires payload.mediaPath.", false};
+    return {false, "", "MalformedRequest", "The media file to check was not provided.", false};
   }
   if (!path_exists(*media_path)) {
     return {false, "", "MissingRuntime", "Input media file does not exist.", false};
@@ -798,7 +806,7 @@ NativeResult media_probe_result(const std::string& request) {
         false,
         "",
         "MissingRuntime",
-        "ffprobe is not configured or available on PATH. Provide payload.ffprobePath or install ffmpeg tooling.",
+        "FFprobe is missing, so this file cannot be checked yet.",
         false};
   }
 
@@ -811,7 +819,7 @@ NativeResult media_probe_result(const std::string& request) {
         false,
         "",
         "InternalError",
-        "ffprobe failed: " + output_excerpt(output.output),
+        "The media file could not be checked: " + output_excerpt(output.output),
         true};
   }
 
@@ -824,7 +832,7 @@ NativeResult media_probe_result(const std::string& request) {
 NativeResult audio_extract_result(const std::string& request) {
   const auto media_path = extract_string(request, "mediaPath");
   if (!media_path || media_path->empty()) {
-    return {false, "", "MalformedRequest", "audio.extract requires payload.mediaPath.", false};
+    return {false, "", "MalformedRequest", "The media file for audio extraction was not provided.", false};
   }
   if (!path_exists(*media_path)) {
     return {false, "", "MissingRuntime", "Input media file does not exist.", false};
@@ -836,7 +844,7 @@ NativeResult audio_extract_result(const std::string& request) {
         false,
         "",
         "MissingRuntime",
-        "ffmpeg is not configured or available on PATH. Provide payload.ffmpegPath or install ffmpeg tooling.",
+        "FFmpeg is missing, so audio cannot be extracted yet.",
         false};
   }
 
@@ -880,7 +888,7 @@ NativeResult audio_extract_result(const std::string& request) {
 
   const auto output = run_command_capture(command.str());
   if (output.exit_code != 0) {
-    return {false, "", "InternalError", "ffmpeg audio extraction failed: " + output_excerpt(output.output), true};
+    return {false, "", "InternalError", "Audio could not be extracted: " + output_excerpt(output.output), true};
   }
 
   std::vector<std::filesystem::path> files;
@@ -902,7 +910,7 @@ NativeResult audio_extract_result(const std::string& request) {
   }
 
   if (files.empty()) {
-    return {false, "", "InternalError", "ffmpeg completed but no audio output files were found.", true};
+    return {false, "", "InternalError", "Audio extraction finished, but no audio file was created.", true};
   }
 
   std::ostringstream payload;
@@ -936,9 +944,10 @@ NativeResult asr_transcribe_result(const std::string& request) {
   const auto target_language = extract_string(request, "targetLanguage").value_or("");
   const auto job_id = extract_string(request, "jobId").value_or("native-job");
   const bool prefer_cuda = extract_bool(request, "preferCuda").value_or(false);
+  const int cpu_thread_count = std::max(1, extract_int(request, "cpuThreadCount").value_or(default_whisper_thread_count()));
 
   if (!starts_with(asr_provider, "local.whisper")) {
-    return {false, "", "UnsupportedCommand", "Only local.whisper.cpp is supported by the native backend for offline transcription.", false};
+    return {false, "", "UnsupportedCommand", "This local helper currently supports only the local Whisper method.", false};
   }
 
   const auto binary_path = extract_string(request, "binaryPath");
@@ -948,7 +957,7 @@ NativeResult asr_transcribe_result(const std::string& request) {
         false,
         "",
         "MissingRuntime",
-        "asr.transcribe requires payload.runtime.binaryPath and payload.runtime.modelPath after SHA-256 verification.",
+        "The local Whisper program or model is missing.",
         false};
   }
   if (!path_exists(*binary_path) || !path_exists(*model_path)) {
@@ -956,11 +965,11 @@ NativeResult asr_transcribe_result(const std::string& request) {
         false,
         "",
         "DownloadRequired",
-        "Verified whisper.cpp runtime/model files are not available to the native backend.",
+        "The local Whisper program or model is not ready yet.",
         false};
   }
   if (media_path.empty() || !path_exists(media_path)) {
-    return {false, "", "MalformedRequest", "asr.transcribe requires an existing payload.mediaPath.", false};
+    return {false, "", "MalformedRequest", "The audio file to recognize could not be found.", false};
   }
   const bool cuda_supported = detect_cuda_support({std::filesystem::path(*binary_path).parent_path()});
 
@@ -1006,6 +1015,7 @@ NativeResult asr_transcribe_result(const std::string& request) {
   std::ostringstream command;
   command << quote_shell_value(*binary_path) << " -m " << quote_shell_value(*model_path)
           << " -f " << quote_shell_arg(whisper_input)
+          << " -t " << cpu_thread_count
           << " --output-srt --output-json-full --output-file " << quote_shell_arg(output_base);
   const auto whisper_language = normalize_whisper_language_code(source_language);
   if (whisper_language != "auto" && !whisper_language.empty()) {

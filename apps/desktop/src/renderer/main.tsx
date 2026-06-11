@@ -8,6 +8,8 @@ import {
   CheckCircle2,
   Clock3,
   Download,
+  Eye,
+  EyeOff,
   FileVideo,
   FolderOpen,
   Gauge,
@@ -29,9 +31,11 @@ import {
 import './i18n';
 import './styles.css';
 import type {
+  AppLogLevel,
   AppSettingsPublic,
   ExportDestinationMode,
   ExportVariant,
+  FasterWhisperCudaStatus,
   FfmpegStatus,
   JobSnapshot,
   NativeHealth,
@@ -44,12 +48,69 @@ import type {
   WhisperModelStatus,
   WhisperRuntimeStatus
 } from '@shared/types';
-import type { AssetEvent, JobStage } from '@shared/models';
+import type { AssetEvent, JobEvent, JobStage } from '@shared/models';
 import { formatTimestamp } from '@shared/srt';
 import { languageLabel, languageRegistry } from '@shared/languages';
 
 const steps = ['import', 'asr', 'subtitles', 'translate', 'export'] as const;
 const translationProviders = ['openai.compatible'] as const;
+
+type ProviderApiFieldKey = 'baseUrl' | 'apiKey' | 'model';
+type ProviderApiFieldConfig = {
+  key: ProviderApiFieldKey;
+  labelKey: 'baseUrl' | 'apiKey' | 'model';
+  placeholder: string;
+  type?: 'text' | 'password';
+  revealable?: boolean;
+};
+
+type ProviderApiFormatConfig = {
+  id: string;
+  labelKey: 'apiFormatOpenaiCompatible' | 'apiFormatOpenaiAudio';
+  detailKey: 'apiFormatOpenaiCompatibleDetail' | 'apiFormatOpenaiAudioDetail';
+  fields: ProviderApiFieldConfig[];
+};
+
+type ProviderApiSettingsConfig = {
+  sectionTitleKey: 'cloudProviderSettings' | 'llmProviderSettings';
+  defaultFormatId: string;
+  formats: ProviderApiFormatConfig[];
+};
+
+const providerApiSettingsConfig: Record<'cloud.openai' | 'openai.compatible', ProviderApiSettingsConfig> = {
+  'cloud.openai': {
+    sectionTitleKey: 'cloudProviderSettings',
+    defaultFormatId: 'openai-audio',
+    formats: [
+      {
+        id: 'openai-audio',
+        labelKey: 'apiFormatOpenaiAudio',
+        detailKey: 'apiFormatOpenaiAudioDetail',
+        fields: [
+          { key: 'baseUrl', labelKey: 'baseUrl', placeholder: 'https://api.openai.com/v1' },
+          { key: 'apiKey', labelKey: 'apiKey', placeholder: 'sk-...', type: 'password', revealable: true },
+          { key: 'model', labelKey: 'model', placeholder: 'whisper-1' }
+        ]
+      }
+    ]
+  },
+  'openai.compatible': {
+    sectionTitleKey: 'llmProviderSettings',
+    defaultFormatId: 'openai-compatible',
+    formats: [
+      {
+        id: 'openai-compatible',
+        labelKey: 'apiFormatOpenaiCompatible',
+        detailKey: 'apiFormatOpenaiCompatibleDetail',
+        fields: [
+          { key: 'baseUrl', labelKey: 'baseUrl', placeholder: 'https://api.openai.com/v1' },
+          { key: 'apiKey', labelKey: 'apiKey', placeholder: 'sk-...', type: 'password', revealable: true },
+          { key: 'model', labelKey: 'model', placeholder: 'gpt-4o-mini' }
+        ]
+      }
+    ]
+  }
+};
 
 type AppView = 'workspace' | 'settings';
 type RunningAction = 'transcribe' | 'translate' | 'export';
@@ -76,6 +137,7 @@ type SettingsJumpTarget = 'asr-provider' | 'ffmpeg' | 'cuda' | 'whisper-model' |
 
 const asrProviders = [
   { id: 'local.whisper.cpp', nameKey: 'localProvider', descriptionKey: 'localProviderDetail' },
+  { id: 'local.faster-whisper', nameKey: 'localProvider', descriptionKey: 'localFasterWhisperProviderDetail' },
   { id: 'cloud.openai', nameKey: 'cloudProvider', descriptionKey: 'cloudProviderDetail' }
 ] as const;
 
@@ -89,6 +151,7 @@ function App(): JSX.Element {
   const [nativeHealth, setNativeHealth] = useState<NativeHealth>();
   const [runtimeStatus, setRuntimeStatus] = useState<WhisperRuntimeStatus>();
   const [cudaStatus, setCudaStatus] = useState<WhisperRuntimeStatus>();
+  const [fasterWhisperCudaStatus, setFasterWhisperCudaStatus] = useState<FasterWhisperCudaStatus>();
   const [modelStatus, setModelStatus] = useState<WhisperModelStatus>();
   const [ffmpegStatus, setFfmpegStatus] = useState<FfmpegStatus>();
   const [providerHealth, setProviderHealth] = useState<Record<string, ProviderHealth>>({});
@@ -120,8 +183,39 @@ function App(): JSX.Element {
   const whisperModelSettingsRef = useRef<HTMLDivElement | null>(null);
   const translationProviderSettingsRef = useRef<HTMLDivElement | null>(null);
   const settingsJumpResetRef = useRef<number>();
+  const configuredLocalWhisperUseCuda = Boolean(settings?.localWhisperUseCuda);
   const cudaApproved = Boolean(cudaStatus?.acceleration.cudaSupported);
-  const effectiveLocalWhisperUseCuda = Boolean(settings?.localWhisperUseCuda && cudaApproved);
+  const fasterWhisperCudaApproved = Boolean(fasterWhisperCudaStatus?.cudaSupported);
+  const effectiveLocalWhisperUseCuda = Boolean(
+    configuredLocalWhisperUseCuda &&
+      (settings?.asrProviderId === 'local.faster-whisper' ? fasterWhisperCudaApproved : cudaApproved)
+  );
+  const writeUiLog = useCallback(
+    (level: AppLogLevel, event: string, details?: unknown, scope = 'renderer.ui', message?: string) => {
+      if (level === 'debug') {
+        window.translateTer.logs.debug(event, details, scope, message);
+        return;
+      }
+      if (level === 'info') {
+        window.translateTer.logs.info(event, details, scope, message);
+        return;
+      }
+      if (level === 'warning') {
+        window.translateTer.logs.warning(event, details, scope, message);
+        return;
+      }
+      window.translateTer.logs.error(event, details, scope, message);
+    },
+    []
+  );
+  const reportUiError = useCallback(
+    (event: string, error: unknown, details?: Record<string, unknown>, scope = 'renderer.ui'): string => {
+      const message = error instanceof Error ? error.message : String(error);
+      writeUiLog('error', event, { ...details, error }, scope, message);
+      return message;
+    },
+    [writeUiLog]
+  );
 
   const translateStage = useCallback((stage: JobStage) => i18n.t(stageLabel(stage)), [i18n]);
 
@@ -131,7 +225,7 @@ function App(): JSX.Element {
     void (async () => {
       const nextSettings = await window.translateTer.getSettings();
       const [nextModels, cloudAsrSecret, llmSecret] = await Promise.all([
-        window.translateTer.assets.listWhisperModels(),
+        window.translateTer.assets.listWhisperModels(nextSettings.asrProviderId),
         window.translateTer.settings.getSecret('cloud.openai'),
         window.translateTer.settings.getSecret('openai.compatible')
       ]);
@@ -154,15 +248,30 @@ function App(): JSX.Element {
         'openai.compatible': llmSecret ?? {}
       });
       await i18n.changeLanguage(nextSettings.uiLanguage);
-      if (mounted) setMessage(i18n.t('ready'));
+      if (mounted) {
+        setMessage(i18n.t('ready'));
+        writeUiLog(
+          'info',
+          'bootstrap.ready',
+          {
+            asrProviderId: nextSettings.asrProviderId,
+            whisperModelId: nextSettings.whisperModelId,
+            logLevel: nextSettings.logLevel
+          },
+          'renderer.app',
+          'Renderer bootstrap completed.'
+        );
+      }
     })();
 
     const unsubscribeJobs = window.translateTer.jobs.onEvent((event) => {
+      writeUiLog('debug', 'jobs.event-received', summarizeJobEventForLog(event), 'renderer.jobs');
       if (event.type === 'snapshot') setJob(event.job);
       if (event.type === 'progress') setMessage(event.message ?? translateStage(event.stage));
       if (event.type === 'error') pushStatus(event.message, 'error');
     });
     const unsubscribeAssets = window.translateTer.assets.onEvent((event) => {
+      writeUiLog('debug', 'assets.event-received', event, 'renderer.assets');
       const nextMessage = assetEventLabel(event, (key, options) => i18n.t(key, options));
       if (event.type === 'download-start' || event.type === 'download-progress') {
         setActiveDownload({
@@ -193,7 +302,45 @@ function App(): JSX.Element {
       unsubscribeJobs();
       unsubscribeAssets();
     };
-  }, [i18n, translateStage]);
+  }, [i18n, translateStage, writeUiLog]);
+
+  useEffect(() => {
+    if (settings?.logLevel !== 'debug') return;
+
+    const handleClick = (event: MouseEvent): void => {
+      writeUiLog(
+        'debug',
+        'dom.click',
+        {
+          target: describeDomTarget(event.target),
+          button: event.button,
+          detail: event.detail
+        },
+        'renderer.dom',
+        'Captured click event.'
+      );
+    };
+
+    const handleChange = (event: Event): void => {
+      writeUiLog(
+        'debug',
+        'dom.change',
+        {
+          target: describeDomTarget(event.target),
+          value: describeDomValue(event.target)
+        },
+        'renderer.dom',
+        'Captured change event.'
+      );
+    };
+
+    document.addEventListener('click', handleClick, true);
+    document.addEventListener('change', handleChange, true);
+    return () => {
+      document.removeEventListener('click', handleClick, true);
+      document.removeEventListener('change', handleChange, true);
+    };
+  }, [settings?.logLevel, writeUiLog]);
 
   useEffect(() => {
     return () => {
@@ -350,12 +497,19 @@ function App(): JSX.Element {
   }, [settings]);
 
   async function updateSettings(patch: Partial<AppSettingsPublic>): Promise<void> {
+    writeUiLog('info', 'settings.update', { patch }, 'renderer.settings', 'Saving settings changes.');
     setSettings((current) => (current ? { ...current, ...patch } : current));
-    const next = await window.translateTer.saveSettings(patch);
-    setSettings(next);
-    if (patch.uiLanguage) {
-      await i18n.changeLanguage(next.uiLanguage);
-      setMessage(i18n.t('ready'));
+    try {
+      const next = await window.translateTer.saveSettings(patch);
+      setSettings(next);
+      if (patch.uiLanguage) {
+        await i18n.changeLanguage(next.uiLanguage);
+        setMessage(i18n.t('ready'));
+      }
+    } catch (error) {
+      const nextMessage = reportUiError('settings.update-failed', error, { patch }, 'renderer.settings');
+      pushStatus(nextMessage, 'error');
+      throw error;
     }
   }
 
@@ -373,11 +527,17 @@ function App(): JSX.Element {
   }
 
   async function refreshModels(): Promise<void> {
-    setModels(await window.translateTer.assets.listWhisperModels());
+    setModels(await window.translateTer.assets.listWhisperModels(settings?.asrProviderId));
   }
+
+  useEffect(() => {
+    if (!settings?.asrProviderId) return;
+    void refreshModels();
+  }, [settings?.asrProviderId]);
 
   async function checkFfmpegTools(): Promise<void> {
     if (!settings) return;
+    writeUiLog('info', 'ffmpeg.check', { multiThreadDownload: settings.enableMultiThreadDownload }, 'renderer.runtime');
     setRuntimeOperation('ffmpeg-check');
     setActiveDownload(undefined);
     setFfmpegActivity(t('ffmpegChecking'));
@@ -393,7 +553,7 @@ function App(): JSX.Element {
       setFfmpegActivity(nextMessage);
       pushStatus(nextMessage, status.available ? 'success' : 'warning');
     } catch (error) {
-      const nextMessage = error instanceof Error ? error.message : String(error);
+      const nextMessage = reportUiError('ffmpeg.check-failed', error, undefined, 'renderer.runtime');
       setFfmpegActivity(nextMessage);
       pushStatus(nextMessage, 'error');
     } finally {
@@ -404,6 +564,7 @@ function App(): JSX.Element {
 
   async function downloadFfmpegTools(): Promise<void> {
     if (!settings) return;
+    writeUiLog('info', 'ffmpeg.download', { multiThreadDownload: settings.enableMultiThreadDownload }, 'renderer.runtime');
     setRuntimeOperation('ffmpeg-download');
     setActiveDownload(undefined);
     setFfmpegActivity(t('ffmpegChecking'));
@@ -419,7 +580,7 @@ function App(): JSX.Element {
       setFfmpegActivity(nextMessage);
       pushStatus(nextMessage, status.available ? 'success' : 'warning');
     } catch (error) {
-      const nextMessage = error instanceof Error ? error.message : String(error);
+      const nextMessage = reportUiError('ffmpeg.download-failed', error, undefined, 'renderer.runtime');
       setFfmpegActivity(nextMessage);
       pushStatus(nextMessage, 'error');
     } finally {
@@ -444,6 +605,7 @@ function App(): JSX.Element {
 
   async function checkLocalWhisperRuntime(): Promise<void> {
     if (!settings) return;
+    writeUiLog('info', 'whisper.runtime.check', { modelId: settings.whisperModelId }, 'renderer.runtime');
     setActiveDownload(undefined);
     setModelActivity(undefined);
     pushStatus(t('runtimeChecking'));
@@ -466,6 +628,7 @@ function App(): JSX.Element {
 
   async function downloadLocalWhisperRuntime(): Promise<void> {
     if (!settings || !settings.allowWhisperAssetDownload) return;
+    writeUiLog('info', 'whisper.runtime.download', { modelId: settings.whisperModelId }, 'renderer.runtime');
     setRuntimeOperation('runtime-download');
     setActiveDownload(undefined);
     pushStatus(t('runtimeDownloading'));
@@ -483,7 +646,76 @@ function App(): JSX.Element {
       const nextMessage = describeLocalWhisperTestResult(status, t);
       pushStatus(nextMessage, status.binary.verified ? 'success' : 'warning');
     } catch (error) {
-      pushStatus(error instanceof Error ? error.message : String(error), 'error');
+      pushStatus(reportUiError('whisper.runtime.download-failed', error, undefined, 'renderer.runtime'), 'error');
+    } finally {
+      setActiveDownload(undefined);
+      setRuntimeOperation(undefined);
+    }
+  }
+
+  async function downloadFasterWhisperRuntime(): Promise<void> {
+    if (!settings || !settings.allowWhisperAssetDownload) return;
+    writeUiLog('info', 'faster-whisper.runtime.download', { modelId: settings.whisperModelId }, 'renderer.runtime');
+    setRuntimeOperation('runtime-download');
+    setActiveDownload(undefined);
+    setModelActivity(undefined);
+    pushStatus(t('runtimeDownloading'));
+    try {
+      const health = await window.translateTer.assets.ensureFasterWhisperRuntime({
+        modelId: settings.whisperModelId,
+        allowDownload: true,
+        preferCuda: Boolean(settings.localWhisperUseCuda),
+        useMultiThreadDownload: settings.enableMultiThreadDownload,
+        forceManaged: true
+      });
+      setProviderHealth((current) => ({ ...current, 'local.faster-whisper': health }));
+      pushStatus(health.message ?? t('providerReady'), health.ok ? 'success' : 'warning');
+    } catch (error) {
+      pushStatus(reportUiError('faster-whisper.runtime.download-failed', error, undefined, 'renderer.runtime'), 'error');
+    } finally {
+      setActiveDownload(undefined);
+      setRuntimeOperation(undefined);
+    }
+  }
+
+  async function checkFasterWhisperCuda(): Promise<void> {
+    if (!settings) return;
+    writeUiLog('info', 'faster-whisper.cuda.check', undefined, 'renderer.runtime');
+    setRuntimeOperation('cuda-check');
+    setActiveDownload(undefined);
+    setModelActivity(undefined);
+    pushStatus(t('runtimeChecking'));
+    try {
+      const status = await window.translateTer.assets.ensureFasterWhisperCuda({
+        allowDownload: false,
+        useMultiThreadDownload: settings.enableMultiThreadDownload
+      });
+      setFasterWhisperCudaStatus(status);
+      pushStatus(status.message ?? t('runtimeNotChecked'), status.cudaSupported ? 'success' : 'warning');
+    } catch (error) {
+      pushStatus(reportUiError('faster-whisper.cuda.check-failed', error, undefined, 'renderer.runtime'), 'error');
+    } finally {
+      setActiveDownload(undefined);
+      setRuntimeOperation(undefined);
+    }
+  }
+
+  async function downloadFasterWhisperCudaRuntime(): Promise<void> {
+    if (!settings || !settings.allowWhisperAssetDownload) return;
+    writeUiLog('info', 'faster-whisper.cuda.download', undefined, 'renderer.runtime');
+    setRuntimeOperation('cuda-download');
+    setActiveDownload(undefined);
+    setModelActivity(undefined);
+    pushStatus(t('runtimeDownloading'));
+    try {
+      const status = await window.translateTer.assets.ensureFasterWhisperCuda({
+        allowDownload: true,
+        useMultiThreadDownload: settings.enableMultiThreadDownload
+      });
+      setFasterWhisperCudaStatus(status);
+      pushStatus(status.message ?? t('runtimeReady'), status.cudaSupported ? 'success' : 'warning');
+    } catch (error) {
+      pushStatus(reportUiError('faster-whisper.cuda.download-failed', error, undefined, 'renderer.runtime'), 'error');
     } finally {
       setActiveDownload(undefined);
       setRuntimeOperation(undefined);
@@ -492,6 +724,7 @@ function App(): JSX.Element {
 
   async function checkCuda(): Promise<void> {
     if (!settings) return;
+    writeUiLog('info', 'whisper.cuda.check', { modelId: settings.whisperModelId }, 'renderer.runtime');
     setRuntimeOperation('cuda-check');
     setActiveDownload(undefined);
     setModelActivity(undefined);
@@ -509,7 +742,7 @@ function App(): JSX.Element {
       const nextMessage = describeCudaStatusDetail(status, t, settings.localWhisperIgnoreCudaMismatch);
       pushStatus(nextMessage, status.acceleration.cudaSupported ? 'success' : 'warning');
     } catch (error) {
-      const nextMessage = error instanceof Error ? error.message : String(error);
+      const nextMessage = reportUiError('whisper.cuda.check-failed', error, undefined, 'renderer.runtime');
       setActiveDownload(undefined);
       pushStatus(nextMessage, 'error');
     } finally {
@@ -520,6 +753,7 @@ function App(): JSX.Element {
 
   async function downloadCudaRuntime(): Promise<void> {
     if (!settings || !settings.allowWhisperAssetDownload) return;
+    writeUiLog('info', 'whisper.cuda.download', { modelId: settings.whisperModelId }, 'renderer.runtime');
     setRuntimeOperation('cuda-download');
     setActiveDownload(undefined);
     setModelActivity(undefined);
@@ -537,7 +771,7 @@ function App(): JSX.Element {
       const nextMessage = describeCudaStatusDetail(status, t, settings.localWhisperIgnoreCudaMismatch);
       pushStatus(nextMessage, status.acceleration.cudaSupported ? 'success' : 'warning');
     } catch (error) {
-      const nextMessage = error instanceof Error ? error.message : String(error);
+      const nextMessage = reportUiError('whisper.cuda.download-failed', error, undefined, 'renderer.runtime');
       pushStatus(nextMessage, 'error');
     } finally {
       setActiveDownload(undefined);
@@ -547,6 +781,7 @@ function App(): JSX.Element {
 
   async function checkSelectedModel(): Promise<void> {
     if (!settings) return;
+    writeUiLog('info', 'whisper.model.check', { modelId: settings.whisperModelId }, 'renderer.runtime');
     setRuntimeOperation('model-check');
     setActiveDownload(undefined);
     setModelActivity(t('runtimeChecking'));
@@ -564,7 +799,7 @@ function App(): JSX.Element {
       setModelActivity(nextMessage);
       pushStatus(nextMessage, status.verified ? 'success' : 'warning');
     } catch (error) {
-      const nextMessage = error instanceof Error ? error.message : String(error);
+      const nextMessage = reportUiError('whisper.model.check-failed', error, undefined, 'renderer.runtime');
       setModelActivity(nextMessage);
       pushStatus(nextMessage, 'error');
     } finally {
@@ -575,6 +810,7 @@ function App(): JSX.Element {
 
   async function downloadSelectedModel(): Promise<void> {
     if (!settings || !settings.allowWhisperAssetDownload) return;
+    writeUiLog('info', 'whisper.model.download', { modelId: settings.whisperModelId }, 'renderer.runtime');
     setRuntimeOperation('model');
     setActiveDownload(undefined);
     setModelActivity(t('runtimeChecking'));
@@ -607,7 +843,7 @@ function App(): JSX.Element {
       setModelActivity(nextMessage);
       pushStatus(nextMessage, status.verified ? 'success' : 'warning');
     } catch (error) {
-      const nextMessage = error instanceof Error ? error.message : String(error);
+      const nextMessage = reportUiError('whisper.model.download-failed', error, undefined, 'renderer.runtime');
       setActiveDownload(undefined);
       setModelActivity(nextMessage);
       pushStatus(nextMessage, 'error');
@@ -618,10 +854,21 @@ function App(): JSX.Element {
   }
 
   async function testProvider(providerId: string): Promise<void> {
+    writeUiLog('info', 'provider.test', { providerId }, 'renderer.providers');
     setCheckingProvider(providerId);
     try {
       if (providerId === 'local.whisper.cpp' && settings) {
         await checkLocalWhisperRuntime();
+        return;
+      }
+      if (providerId === 'local.faster-whisper' && settings) {
+        const health = await window.translateTer.assets.ensureFasterWhisperRuntime({
+          modelId: settings.whisperModelId,
+          allowDownload: false,
+          preferCuda: Boolean(settings.localWhisperUseCuda)
+        });
+        setProviderHealth((current) => ({ ...current, [providerId]: health }));
+        pushStatus(health.message ?? t(providerStatusLabel(health.status)), health.ok ? 'success' : 'warning');
         return;
       }
 
@@ -637,19 +884,36 @@ function App(): JSX.Element {
           : health.message ?? t(providerStatusLabel(health.status));
       pushStatus(healthMessage, health.ok ? 'success' : 'warning');
     } catch (error) {
-      pushStatus(error instanceof Error ? error.message : String(error), 'error');
+      pushStatus(reportUiError('provider.test-failed', error, { providerId }, 'renderer.providers'), 'error');
     } finally {
       setCheckingProvider(undefined);
     }
   }
 
   async function pickMedia(): Promise<void> {
+    writeUiLog('info', 'media.pick.request', undefined, 'renderer.workspace');
     const selected = await window.translateTer.selectVideo();
-    if (selected) setMediaPath(selected);
+    if (selected) {
+      writeUiLog('info', 'media.pick.success', { mediaPath: selected }, 'renderer.workspace');
+      setMediaPath(selected);
+      return;
+    }
+    writeUiLog('debug', 'media.pick.cancelled', undefined, 'renderer.workspace');
   }
 
   async function createAndStart(): Promise<void> {
     if (!settings || !mediaPath.trim()) return;
+    writeUiLog(
+      'info',
+      'job.start-transcription',
+      {
+        mediaPath: mediaPath.trim(),
+        asrProviderId: settings.asrProviderId,
+        whisperModelId: settings.whisperModelId,
+        useCuda: effectiveLocalWhisperUseCuda
+      },
+      'renderer.workspace'
+    );
     const token = beginAction('transcribe');
     try {
       const nextJob = await window.translateTer.startTranscription({
@@ -659,6 +923,7 @@ function App(): JSX.Element {
         asrProviderId: settings.asrProviderId,
         whisperModelId: settings.whisperModelId,
         localWhisperUseCuda: effectiveLocalWhisperUseCuda,
+        localAsrCpuMode: settings.localAsrCpuMode,
         localWhisperIgnoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
         allowWhisperAssetDownload: settings.allowWhisperAssetDownload,
         allowCloudAsrUpload: settings.asrProviderId === 'cloud.openai' ? true : settings.allowCloudAsrUpload,
@@ -671,7 +936,12 @@ function App(): JSX.Element {
       });
       if (isCurrentAction(token)) setJob(nextJob);
     } catch (error) {
-      if (isCurrentAction(token)) pushStatus(error instanceof Error ? error.message : String(error), 'error');
+      if (isCurrentAction(token)) {
+        pushStatus(
+          reportUiError('job.start-transcription-failed', error, { mediaPath: mediaPath.trim() }, 'renderer.workspace'),
+          'error'
+        );
+      }
     } finally {
       endAction(token);
     }
@@ -679,12 +949,15 @@ function App(): JSX.Element {
 
   async function translateJob(): Promise<void> {
     if (!job) return;
+    writeUiLog('info', 'job.start-translation', { jobId: job.id }, 'renderer.workspace');
     const token = beginAction('translate');
     try {
       const nextJob = await window.translateTer.startTranslation(job.id);
       if (isCurrentAction(token)) setJob(nextJob);
     } catch (error) {
-      if (isCurrentAction(token)) pushStatus(error instanceof Error ? error.message : String(error), 'error');
+      if (isCurrentAction(token)) {
+        pushStatus(reportUiError('job.start-translation-failed', error, { jobId: job.id }, 'renderer.workspace'), 'error');
+      }
     } finally {
       endAction(token);
     }
@@ -692,24 +965,29 @@ function App(): JSX.Element {
 
   async function exportSrt(variant: ExportVariant): Promise<void> {
     if (!job?.subtitleDocument) return;
+    writeUiLog('info', 'job.export-srt', { jobId: job.id, variant }, 'renderer.workspace');
     const token = beginAction('export', variant);
     try {
       const result = await window.translateTer.exportConfiguredSrt(job.subtitleDocument, job.mediaPath, variant);
       if (isCurrentAction(token) && !result.cancelled) pushStatus(t('exported'), 'success');
     } catch (error) {
-      if (isCurrentAction(token)) pushStatus(error instanceof Error ? error.message : String(error), 'error');
+      if (isCurrentAction(token)) {
+        pushStatus(reportUiError('job.export-srt-failed', error, { jobId: job.id, variant }, 'renderer.workspace'), 'error');
+      }
     } finally {
       endAction(token);
     }
   }
 
   async function pickExportDirectory(): Promise<void> {
+    writeUiLog('info', 'export.pick-directory.request', undefined, 'renderer.settings');
     const selected = await window.translateTer.selectDirectory();
     if (selected) await updateSettings({ exportDirectory: selected, exportDestinationMode: 'selected-directory' });
   }
 
   async function updateSegment(segment: SubtitleSegment, patch: Partial<SubtitleSegment>): Promise<void> {
     if (!job) return;
+    writeUiLog('debug', 'subtitle.segment-update', { jobId: job.id, segmentId: segment.id, patch }, 'renderer.subtitles');
     const next = await window.translateTer.subtitles.updateSegment(job.id, { ...segment, ...patch });
     setJob(next);
   }
@@ -723,6 +1001,7 @@ function App(): JSX.Element {
   }
 
   async function saveProviderSecret(providerId: string): Promise<void> {
+    writeUiLog('info', 'provider.save-secret', { providerId }, 'renderer.providers');
     await window.translateTer.settings.setSecret(providerId, providerSecrets[providerId] ?? {});
     pushStatus(t('providerSaved'), 'success');
   }
@@ -735,6 +1014,62 @@ function App(): JSX.Element {
         ...patch
       }
     }));
+  }
+
+  function renderProviderApiSettings(providerId: 'cloud.openai' | 'openai.compatible'): JSX.Element {
+    const secret = providerSecrets[providerId] ?? {};
+    const config = providerApiSettingsConfig[providerId];
+    const selectedFormatId =
+      secret.apiFormat && config.formats.some((format) => format.id === secret.apiFormat)
+        ? secret.apiFormat
+        : config.defaultFormatId;
+    const selectedFormat =
+      config.formats.find((format) => format.id === selectedFormatId) ?? config.formats[0];
+
+    return (
+      <div className="settingsGroupCard">
+        <InspectorSection
+          icon={<KeyRound size={16} />}
+          title={t(config.sectionTitleKey)}
+        >
+          <label>
+            {t('apiFormat')}
+            <select
+              value={selectedFormatId}
+              onChange={(event) => updateProviderSecret(providerId, { apiFormat: event.target.value })}
+            >
+              {config.formats.map((format) => (
+                <option key={format.id} value={format.id}>
+                  {t(format.labelKey)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="settingsMicrocopy">{t(selectedFormat.detailKey)}</p>
+          {selectedFormat.fields.map((field) => (
+            <TextField
+              key={`${providerId}-${selectedFormat.id}-${field.key}`}
+              label={t(field.labelKey)}
+              value={secret[field.key] ?? ''}
+              placeholder={field.placeholder}
+              type={field.type}
+              revealable={field.revealable}
+              showToggleLabel={t('showSecret')}
+              hideToggleLabel={t('hideSecret')}
+              onChange={(value) => updateProviderSecret(providerId, { [field.key]: value })}
+            />
+          ))}
+          {providerId === 'cloud.openai' ? <p className="settingsMicrocopy">{t('cloudUploadNotice')}</p> : null}
+          <ProviderActionRow
+            savingLabel={t('saveProvider')}
+            testingLabel={checkingProvider === providerId ? t('checking') : t('test')}
+            onSave={() => void saveProviderSecret(providerId)}
+            onTest={() => void testProvider(providerId)}
+            testDisabled={checkingProvider === providerId}
+          />
+        </InspectorSection>
+      </div>
+    );
   }
 
   const currentStepIndex = useMemo(() => {
@@ -758,29 +1093,48 @@ function App(): JSX.Element {
   const selectedModelStatus = modelStatus && modelStatus.id === settings?.whisperModelId ? modelStatus : undefined;
   const selectedModelInstalled = selectedModelStatus?.installed ?? selectedModel?.installed ?? false;
   const selectedModelVerified = selectedModelStatus?.verified ?? false;
-  const supportsCuda = cudaApproved;
   const ignoreCudaMismatch = Boolean(settings?.localWhisperIgnoreCudaMismatch);
   const cudaBlockingMismatch = hasBlockingCudaMismatch(cudaStatus, ignoreCudaMismatch);
-  const cudaStatusDetail = describeCudaStatusDetail(cudaStatus, t, ignoreCudaMismatch);
-  const cudaStatusShort = describeCudaStatusShort(cudaStatus, t, ignoreCudaMismatch);
+  const cudaStatusDetail = configuredLocalWhisperUseCuda
+    ? describeCudaStatusDetail(cudaStatus, t, ignoreCudaMismatch)
+    : t('cudaDisabledUsesCpu');
+  const cudaStatusShort = configuredLocalWhisperUseCuda
+    ? describeCudaStatusShort(cudaStatus, t, ignoreCudaMismatch)
+    : t('disabledShort');
+  const fasterWhisperCudaDetail = fasterWhisperCudaStatus?.message ?? t('runtimeNotChecked');
+  const fasterWhisperCudaShort = fasterWhisperCudaStatus
+    ? fasterWhisperCudaStatus.cudaSupported
+      ? t('ok')
+      : fasterWhisperCudaStatus.actionRequired === 'download-cuda-runtime'
+        ? t('downloadCudaRuntime')
+        : t('degraded')
+    : t('notChecked');
   const ffmpegState = deriveFfmpegState({ t, ffmpegStatus, nativeHealth });
   const nativeBackendState = deriveNativeBackendState({ t, health: nativeHealth });
   const ffmpegAvailable = ffmpegStatus?.available ?? Boolean(nativeHealth?.ffmpegAvailable && nativeHealth?.ffprobeAvailable);
-  const cudaMismatchDetected = cudaBlockingMismatch;
-  const cudaRuntimeMissing = Boolean(cudaStatus?.acceleration.hardwareDetected && !cudaStatus.acceleration.runtimeDetected);
+  const cudaMismatchDetected = configuredLocalWhisperUseCuda && cudaBlockingMismatch;
+  const cudaRuntimeMissing = Boolean(
+    configuredLocalWhisperUseCuda &&
+      cudaStatus?.acceleration.hardwareDetected &&
+      !cudaStatus.acceleration.runtimeDetected
+  );
   const showCudaRuntimeDownload = Boolean(
-    settings?.allowWhisperAssetDownload && cudaRuntimeMissing && !cudaBlockingMismatch
+    settings?.allowWhisperAssetDownload && configuredLocalWhisperUseCuda && cudaRuntimeMissing && !cudaBlockingMismatch
+  );
+  const showFasterWhisperCudaDownload = Boolean(
+    settings?.allowWhisperAssetDownload && fasterWhisperCudaStatus?.actionRequired === 'download-cuda-runtime'
   );
   const showFfmpegDownload = !ffmpegAvailable;
   const llmHealth = providerHealth[translationProviderId];
   const asrHealth = providerHealth[asrProviderId];
-  const usingLocalWhisper = asrProviderId === 'local.whisper.cpp';
-  const cloudAsrSecret = providerSecrets['cloud.openai'] ?? {};
-  const llmSecret = providerSecrets['openai.compatible'] ?? {};
+  const usingWhisperCpp = asrProviderId === 'local.whisper.cpp';
+  const usingFasterWhisper = asrProviderId === 'local.faster-whisper';
+  const usingLocalAsr = usingWhisperCpp || usingFasterWhisper;
   const canForceStop = Boolean(job && !['completed', 'failed', 'cancelled'].includes(job.stage));
   const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) ?? segments[0];
   const selectedWarning = workflowWarnings.find((warning) => warning.id === selectedWarningId) ?? workflowWarnings[0];
   const showWarningList = workflowWarnings.length > 1;
+  const warningHint = deriveWarningHint(selectedWarning, t);
   const selectedMediaPath = job?.mediaPath ?? mediaPath.trim();
   const selectedMediaFileName =
     job?.fileName ?? selectedMediaPath.split(/[\\/]/).filter(Boolean).at(-1) ?? t('chooseMedia');
@@ -808,19 +1162,29 @@ function App(): JSX.Element {
     ? `${t('downloadProgress')}${downloadPercent === undefined ? '' : ` ${downloadPercent}%`}`
     : `${t('progress')} ${completion}%`;
   const footerMessage = activeDownload?.message ?? message;
+  const workspaceRailMessage = deriveWorkspaceRailMessage({
+    t,
+    asrProviderId,
+    activeDownload,
+    footerTitle,
+    stage: job?.stage ?? 'idle',
+    sourceLabel,
+    targetLabel
+  });
   const runtimeState = deriveRuntimeState({
     t,
     runtimeStatus,
     ffmpegStatus,
     nativeHealth,
     asrProviderId,
+    asrHealth,
     job
   });
   const backendAccelerationState = deriveBackendAccelerationState({
     t,
     runtimeStatus,
     asrProviderId,
-    useCuda: effectiveLocalWhisperUseCuda
+    useCuda: configuredLocalWhisperUseCuda
   });
   const runtimeModelState = deriveRuntimeModelState({
     t,
@@ -845,44 +1209,56 @@ function App(): JSX.Element {
   const asrProviderDescription = t(
     asrProviders.find((provider) => provider.id === asrProviderId)?.descriptionKey ?? 'providerReady'
   );
-  const asrProviderTone: HealthTone = usingLocalWhisper
-    ? runtimeState.tone
-    : !asrHealth
-      ? 'muted'
-      : asrHealth.ok
-        ? 'good'
-        : asrHealth.status === 'degraded'
-          ? 'warn'
-          : 'error';
-  const asrProviderStatusLabel = usingLocalWhisper
-    ? runtimeState.label
-    : asrHealth
-      ? t(providerStatusLabel(asrHealth.status))
-      : t('notChecked');
-  const asrProviderSummaryDetail = usingLocalWhisper ? asrProviderDescription : asrHealth?.message ?? asrProviderDescription;
-  const runtimeSummaryJumpTarget: SettingsJumpTarget =
-    !usingLocalWhisper
-      ? 'asr-provider'
-      : !ffmpegAvailable
-        ? 'ffmpeg'
+  const asrProviderState = deriveAsrProviderState({
+    t,
+    asrProviderId,
+    description: asrProviderDescription,
+    health: asrHealth,
+    runtimeState,
+    job
+  });
+  const asrProviderTone = asrProviderState.tone;
+  const asrProviderStatusLabel = asrProviderState.label;
+  const asrProviderSummaryDetail = asrProviderState.detail;
+  const workspaceRuntimeDetail = deriveWorkspaceRuntimeDetail({
+    t,
+    asrProviderId,
+    asrHealth,
+    useCuda: effectiveLocalWhisperUseCuda,
+    runtimeState,
+    ffmpegStatus,
+    nativeHealth
+  });
+  const fasterWhisperRuntimeMissing = usingFasterWhisper && !asrHealth?.ok;
+  const runtimeSummaryJumpTarget: SettingsJumpTarget = usingWhisperCpp
+    ? !ffmpegAvailable
+      ? 'ffmpeg'
       : !runtimeStatus?.binary.verified
         ? 'asr-provider'
         : !runtimeStatus?.model.verified
           ? 'whisper-model'
-          : runtimeStatus?.acceleration.requested === 'gpu' || cudaRuntimeMissing || cudaMismatchDetected
+          : (configuredLocalWhisperUseCuda &&
+              (runtimeStatus?.acceleration.requested === 'gpu' || cudaRuntimeMissing || cudaMismatchDetected))
             ? 'cuda'
-            : 'asr-provider';
+            : 'asr-provider'
+    : fasterWhisperRuntimeMissing
+      ? 'asr-provider'
+      : 'asr-provider';
   const backendJumpTarget: SettingsJumpTarget = ffmpegAvailable ? 'asr-provider' : 'ffmpeg';
   const ffmpegJumpTarget: SettingsJumpTarget = 'ffmpeg';
-  const accelerationJumpTarget: SettingsJumpTarget = usingLocalWhisper ? 'cuda' : 'asr-provider';
-  const modelJumpTarget: SettingsJumpTarget = usingLocalWhisper ? 'whisper-model' : 'asr-provider';
+  const accelerationJumpTarget: SettingsJumpTarget = usingWhisperCpp ? 'cuda' : 'asr-provider';
+  const modelJumpTarget: SettingsJumpTarget = usingLocalAsr ? 'whisper-model' : 'asr-provider';
   const translationJumpTarget: SettingsJumpTarget = 'translation-provider';
-  const showRuntimeDownloadAction = usingLocalWhisper && Boolean(settings?.allowWhisperAssetDownload);
+  const showRuntimeDownloadAction =
+    Boolean(settings?.allowWhisperAssetDownload) && (usingWhisperCpp || usingFasterWhisper) && !asrHealth?.ok;
   const runtimeDownloadDisabled =
-    runtimeOperation === 'runtime-download' || checkingProvider === 'local.whisper.cpp' || Boolean(runtimeStatus?.binary.verified);
+    runtimeOperation === 'runtime-download' ||
+    checkingProvider === asrProviderId ||
+    (usingWhisperCpp ? Boolean(runtimeStatus?.binary.verified) : Boolean(asrHealth?.ok));
 
   async function forceStop(): Promise<void> {
     if (!job) return;
+    writeUiLog('warning', 'job.force-stop', { jobId: job.id }, 'renderer.workspace');
     invalidateActiveAction();
     setActiveDownload(undefined);
     await window.translateTer.jobs.cancel(job.id);
@@ -973,6 +1349,7 @@ function App(): JSX.Element {
   }
 
   function jumpToSettingsTarget(target: SettingsJumpTarget): void {
+    writeUiLog('debug', 'settings.jump-target', { target }, 'renderer.settings');
     const element = (() => {
       switch (target) {
         case 'asr-provider':
@@ -1035,7 +1412,7 @@ function App(): JSX.Element {
             <div className="workflowRailLead">
               <div className="workflowRailCopy">
                 <strong>{t('workspace')}</strong>
-                <small title={footerMessage}>{footerMessage}</small>
+                <small title={footerMessage}>{workspaceRailMessage}</small>
               </div>
             </div>
             <div className="workflowRailTrack">
@@ -1104,7 +1481,7 @@ function App(): JSX.Element {
                         <span className="signal warn" />
                         <div>
                           <strong>{t('warningDetails')}</strong>
-                          <small>{t('warningFallbackHint')}</small>
+                          <small>{warningHint}</small>
                         </div>
                       </button>
                     ) : (
@@ -1121,7 +1498,7 @@ function App(): JSX.Element {
                       <div className="warningPanelHeader">
                         <div>
                           <strong>{t('warningDetails')}</strong>
-                          <small>{t('warningFallbackHint')}</small>
+                          <small>{warningHint}</small>
                         </div>
                         <button className="textButton" onClick={() => toggleWarningPanel()} type="button">
                           <AlertCircle size={14} />
@@ -1212,7 +1589,7 @@ function App(): JSX.Element {
                       <span className={`signal ${runtimeState.tone}`} />
                       <div>
                         <strong>{t('runtime')}</strong>
-                        <small>{runtimeState.detail}</small>
+                        <small title={runtimeState.detail}>{workspaceRuntimeDetail}</small>
                       </div>
                     </div>
                   </div>
@@ -1221,7 +1598,10 @@ function App(): JSX.Element {
             )}
 
             <section className="workspaceMain">
-              <section className="workspaceHero" aria-label={t('currentJob')}>
+              <section
+                className={`workspaceHero${usingFasterWhisper ? ' fasterWhisperHero' : ''}`}
+                aria-label={t('currentJob')}
+              >
                 <div className="jobMediaCard">
                   <div className="workspaceCardTop">
                     <span className="fieldLabel">{t('currentJob')}</span>
@@ -1319,7 +1699,7 @@ function App(): JSX.Element {
                       <span className={`signal ${runtimeState.tone}`} />
                       <div>
                         <strong>{t('runtime')}</strong>
-                        <small>{runtimeState.detail}</small>
+                        <small title={runtimeState.detail}>{workspaceRuntimeDetail}</small>
                       </div>
                     </div>
                   </div>
@@ -1468,7 +1848,7 @@ function App(): JSX.Element {
                 </div>
               </div>
               <div className="settingsSummaryGrid">
-                {usingLocalWhisper ? (
+                {usingWhisperCpp ? (
                   <>
                     <SettingsOverviewCard
                       icon={<ShieldCheck size={16} />}
@@ -1505,7 +1885,7 @@ function App(): JSX.Element {
                       icon={<Gauge size={16} />}
                       label={t('summaryCudaEnvironment')}
                       value={cudaStatusShort}
-                      tone={supportsCuda ? 'good' : cudaMismatchDetected ? 'warn' : 'muted'}
+                      tone={cudaApproved ? 'good' : cudaMismatchDetected || cudaRuntimeMissing ? 'warn' : 'muted'}
                       onClick={() => jumpToSettingsTarget(accelerationJumpTarget)}
                     />
                     <SettingsFactCard
@@ -1529,6 +1909,77 @@ function App(): JSX.Element {
                       title={selectedModelOverviewState.label}
                       detail={selectedModelOverviewState.detail}
                       tone={selectedModelOverviewState.tone}
+                      onClick={() => jumpToSettingsTarget(modelJumpTarget)}
+                    />
+                    <SettingsOverviewCard
+                      icon={<Languages size={16} />}
+                      eyebrow={t('summaryTranslationProvider')}
+                      title={providerLabel(translationProviderId, t)}
+                      detail={translationState.detail}
+                      tone={translationState.tone}
+                      onClick={() => jumpToSettingsTarget(translationJumpTarget)}
+                    />
+                  </>
+                ) : usingFasterWhisper ? (
+                  <>
+                    <SettingsOverviewCard
+                      icon={<MonitorCog size={16} />}
+                      eyebrow={t('summaryAsrProvider')}
+                      title={providerLabel(asrProviderId, t)}
+                      detail={asrProviderSummaryDetail}
+                      tone={asrProviderTone}
+                      featured
+                      onClick={() => jumpToSettingsTarget('asr-provider')}
+                    />
+                    <SettingsFactCard
+                      icon={<ShieldCheck size={16} />}
+                      label={t('summaryDesktopBackend')}
+                      value={nativeBackendState.label}
+                      detail={nativeBackendState.detail}
+                      tone={nativeBackendState.tone}
+                      onClick={() => jumpToSettingsTarget(backendJumpTarget)}
+                    />
+                    <SettingsFactCard
+                      icon={<Download size={16} />}
+                      label={t('summaryFfmpegTools')}
+                      value={ffmpegState.label}
+                      tone={ffmpegState.tone}
+                      onClick={() => jumpToSettingsTarget(ffmpegJumpTarget)}
+                    />
+                    <SettingsFactCard
+                      icon={<MonitorCog size={16} />}
+                      label={t('summaryBackendAcceleration')}
+                      value={effectiveLocalWhisperUseCuda && asrHealth?.ok ? 'CUDA' : 'CPU'}
+                      detail={asrHealth?.message ?? t('fasterWhisperCudaDetail')}
+                      tone={effectiveLocalWhisperUseCuda && asrHealth?.ok ? 'good' : 'accent'}
+                      onClick={() => jumpToSettingsTarget(modelJumpTarget)}
+                    />
+                    <SettingsFactCard
+                      icon={<Gauge size={16} />}
+                      label={t('summaryCudaEnvironment')}
+                      value={fasterWhisperCudaShort}
+                      detail={fasterWhisperCudaDetail}
+                      tone={
+                        fasterWhisperCudaStatus
+                          ? fasterWhisperCudaStatus.cudaSupported
+                            ? 'good'
+                            : fasterWhisperCudaStatus.hardwareDetected
+                              ? 'warn'
+                              : 'muted'
+                          : 'muted'
+                      }
+                      onClick={() => jumpToSettingsTarget('cuda')}
+                    />
+                    <SettingsOverviewCard
+                      icon={<HardDriveDownload size={16} />}
+                      eyebrow={t('summaryWhisperModel')}
+                      title={selectedModel?.displayName ?? t('whisperModel')}
+                      detail={
+                        selectedModel
+                          ? [describeModelFootprint(selectedModel, t), t('fasterWhisperModelManagedDetail')].join(' · ')
+                          : t('fasterWhisperModelManagedDetail')
+                      }
+                      tone="accent"
                       onClick={() => jumpToSettingsTarget(modelJumpTarget)}
                     />
                     <SettingsOverviewCard
@@ -1633,6 +2084,27 @@ function App(): JSX.Element {
                           checked={settings.enableMultiThreadDownload}
                           onChange={(checked) => void updateSettings({ enableMultiThreadDownload: checked })}
                         />
+                        <div className="settingsSubsection">
+                          <SectionTitle icon={<ListChecks size={15} />} title={t('activityLogs')} />
+                          <div className="settingsOptionStack">
+                            <label>
+                              {t('logLevel')}
+                              <select
+                                value={settings.logLevel}
+                                onChange={(event) =>
+                                  void updateSettings({ logLevel: event.target.value as AppLogLevel })
+                                }
+                              >
+                                {(['warning', 'error', 'info', 'debug'] as AppLogLevel[]).map((level) => (
+                                  <option key={level} value={level}>
+                                    {level.toUpperCase()}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <p className="settingsMicrocopy">{t(logLevelDetailLabel(settings.logLevel))}</p>
+                          </div>
+                        </div>
                       </InspectorSection>
                     </div>
 
@@ -1745,13 +2217,38 @@ function App(): JSX.Element {
                           loading={checkingProvider === settings.asrProviderId}
                           actionDisabled={runtimeOperation === 'runtime-download'}
                           onTest={() => void testProvider(settings.asrProviderId)}
-                          actionLabel={usingLocalWhisper ? t('checkRuntime') : t('test')}
+                          actionLabel={usingWhisperCpp ? t('checkRuntime') : t('test')}
                           secondaryActionLabel={showRuntimeDownloadAction ? t('downloadRuntime') : undefined}
                           secondaryActionLoading={runtimeOperation === 'runtime-download'}
                           secondaryActionDisabled={runtimeDownloadDisabled}
-                          onSecondaryAction={showRuntimeDownloadAction ? () => void downloadLocalWhisperRuntime() : undefined}
-                          showMessage={!usingLocalWhisper}
+                          onSecondaryAction={
+                            showRuntimeDownloadAction
+                              ? usingWhisperCpp
+                                ? () => void downloadLocalWhisperRuntime()
+                                : () => void downloadFasterWhisperRuntime()
+                              : undefined
+                          }
+                          showMessage
                         />
+                        {usingLocalAsr && (
+                          <div className="settingsOptionStack">
+                            <span className="fieldLabel">{t('localCpuUsage')}</span>
+                            <p className="settingsMicrocopy">{t('localCpuUsageDetail')}</p>
+                            <div className="segmented three">
+                              {(['low', 'balanced', 'high'] as const).map((mode) => (
+                                <button
+                                  key={mode}
+                                  className={settings.localAsrCpuMode === mode ? 'selected' : ''}
+                                  onClick={() => void updateSettings({ localAsrCpuMode: mode })}
+                                  type="button"
+                                >
+                                  {t(localCpuModeLabel(mode))}
+                                </button>
+                              ))}
+                            </div>
+                            <p className="settingsMicrocopy">{t(localCpuModeDetailLabel(settings.localAsrCpuMode))}</p>
+                          </div>
+                        )}
                       </InspectorSection>
                     </div>
 
@@ -1796,7 +2293,7 @@ function App(): JSX.Element {
                       </InspectorSection>
                     </div>
 
-                    {usingLocalWhisper && (
+                    {usingWhisperCpp && (
                       <div className="settingsShelf twoUp">
                         <div
                           className={`settingsGroupCard settingsGroupCardAccent${activeSettingsJumpTarget === 'cuda' ? ' settingsJumpTargetActive' : ''}`}
@@ -1806,7 +2303,7 @@ function App(): JSX.Element {
                           <InspectorSection icon={<Gauge size={16} />} title={t('cudaAcceleration')}>
                             <div className="modelCard accentCard">
                               <div>
-                                <span className={supportsCuda ? 'signal good' : 'signal'} />
+                                <span className={cudaApproved ? 'signal good' : 'signal'} />
                                 <strong>{t('cudaAcceleration')}</strong>
                                 <small>{cudaStatusDetail}</small>
                               </div>
@@ -1834,7 +2331,7 @@ function App(): JSX.Element {
                                 label={t('useCudaAcceleration')}
                                 detail={t('useCudaAccelerationDetail')}
                                 checked={effectiveLocalWhisperUseCuda}
-                                disabled={!supportsCuda}
+                                disabled={!cudaApproved}
                                 onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
                               />
                               <ToggleField
@@ -1867,7 +2364,8 @@ function App(): JSX.Element {
                               >
                                 {models.map((model) => (
                                   <option key={model.id} value={model.id}>
-                                    {model.displayName} · {model.installed ? t('installed') : t('missing')}
+                                    {model.displayName} · {describeModelFootprint(model, t)} ·{' '}
+                                    {model.installed ? t('installed') : t('missing')}
                                   </option>
                                 ))}
                               </select>
@@ -1903,8 +2401,22 @@ function App(): JSX.Element {
                                   }
                                 />
                                 <strong>{selectedModel?.displayName ?? t('whisperModel')}</strong>
-                                <small>{selectedModel ? formatBytes(selectedModel.sizeBytes) : t('missing')}</small>
+                                <small>{selectedModel ? describeModelFootprint(selectedModel, t) : t('missing')}</small>
                               </div>
+                              {selectedModel && (
+                                <div className="modelMetaRow">
+                                  {selectedModel.sizeBytes > 0 && (
+                                    <span className="modelMetaChip">
+                                      {t('modelSizeLabel')}: {formatBytes(selectedModel.sizeBytes)}
+                                    </span>
+                                  )}
+                                  {selectedModel.estimatedVramBytes && (
+                                    <span className="modelMetaChip">
+                                      {t('estimatedVramLabel')}: {formatBytes(selectedModel.estimatedVramBytes)}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                               {selectedModelStatus && (
                                 <p title={selectedModelStatus.message}>
                                   {t(modelActionLabel(selectedModelStatus.actionRequired))}
@@ -1919,38 +2431,94 @@ function App(): JSX.Element {
                       </div>
                     )}
 
-                    {settings.asrProviderId === 'cloud.openai' && (
-                      <div className="settingsGroupCard">
-                        <InspectorSection icon={<KeyRound size={16} />} title={t('cloudProviderSettings')}>
-                          <TextField
-                            label={t('baseUrl')}
-                            value={cloudAsrSecret.baseUrl ?? ''}
-                            placeholder="https://api.openai.com/v1"
-                            onChange={(value) => updateProviderSecret('cloud.openai', { baseUrl: value })}
-                          />
-                          <TextField
-                            label={t('apiKey')}
-                            value={cloudAsrSecret.apiKey ?? ''}
-                            placeholder="sk-..."
-                            type="password"
-                            onChange={(value) => updateProviderSecret('cloud.openai', { apiKey: value })}
-                          />
-                          <TextField
-                            label={t('model')}
-                            value={cloudAsrSecret.model ?? ''}
-                            placeholder="whisper-1"
-                            onChange={(value) => updateProviderSecret('cloud.openai', { model: value })}
-                          />
-                          <p className="settingsMicrocopy">{t('cloudUploadNotice')}</p>
-                          <ProviderActionRow
-                            savingLabel={t('saveProvider')}
-                            testingLabel={checkingProvider === 'cloud.openai' ? t('checking') : t('test')}
-                            onSave={() => void saveProviderSecret('cloud.openai')}
-                            onTest={() => void testProvider('cloud.openai')}
-                            testDisabled={checkingProvider === 'cloud.openai'}
-                          />
-                        </InspectorSection>
+                    {usingFasterWhisper && (
+                      <div className="settingsShelf twoUp">
+                        <div
+                          className={`settingsGroupCard settingsGroupCardAccent${activeSettingsJumpTarget === 'cuda' ? ' settingsJumpTargetActive' : ''}`}
+                          ref={cudaSettingsRef}
+                          tabIndex={-1}
+                        >
+                          <InspectorSection icon={<Gauge size={16} />} title={t('cudaAcceleration')}>
+                            <div className="modelCard accentCard">
+                              <div>
+                                <span className={fasterWhisperCudaApproved ? 'signal good' : 'signal'} />
+                                <strong>{t('cudaAcceleration')}</strong>
+                                <small>{fasterWhisperCudaDetail}</small>
+                              </div>
+                              <div className="settingsActionRow">
+                                <button
+                                  className="secondary compact settingsActionButton"
+                                  disabled={runtimeOperation === 'cuda-check' || runtimeOperation === 'cuda-download'}
+                                  onClick={() => void checkFasterWhisperCuda()}
+                                >
+                                  <Search size={16} />
+                                  {runtimeOperation === 'cuda-check' ? t('checking') : t('checkCuda')}
+                                </button>
+                                {showFasterWhisperCudaDownload && (
+                                  <button
+                                    className="secondary compact settingsActionButton"
+                                    disabled={runtimeOperation === 'cuda-check' || runtimeOperation === 'cuda-download'}
+                                    onClick={() => void downloadFasterWhisperCudaRuntime()}
+                                  >
+                                    <HardDriveDownload size={16} />
+                                    {runtimeOperation === 'cuda-download' ? t('downloadProgress') : t('downloadCudaRuntime')}
+                                  </button>
+                                )}
+                              </div>
+                              <ToggleField
+                                label={t('useCudaAcceleration')}
+                                detail={t('fasterWhisperCudaDetail')}
+                                checked={effectiveLocalWhisperUseCuda}
+                                disabled={!fasterWhisperCudaApproved}
+                                onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
+                              />
+                            </div>
+                          </InspectorSection>
+                        </div>
+
+                        <div
+                          className={`settingsGroupCard settingsGroupCardAccent${activeSettingsJumpTarget === 'whisper-model' ? ' settingsJumpTargetActive' : ''}`}
+                          ref={whisperModelSettingsRef}
+                          tabIndex={-1}
+                        >
+                          <InspectorSection icon={<HardDriveDownload size={16} />} title={t('whisperModel')}>
+                            <label>
+                              {t('whisperModel')}
+                              <select
+                                value={settings.whisperModelId}
+                                onChange={(event) => void updateSettings({ whisperModelId: event.target.value })}
+                              >
+                                {models.map((model) => (
+                                  <option key={model.id} value={model.id}>
+                                    {model.displayName} · {describeModelFootprint(model, t)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <div className="modelCard accentCard">
+                              <div>
+                                <span className="signal accent" />
+                                <strong>{selectedModel?.displayName ?? t('whisperModel')}</strong>
+                                <small>{selectedModel ? describeModelFootprint(selectedModel, t) : t('whisperModel')}</small>
+                              </div>
+                              {selectedModel && (
+                                <div className="modelMetaRow">
+                                  {selectedModel.estimatedVramBytes && (
+                                    <span className="modelMetaChip">
+                                      {t('estimatedVramLabel')}: {formatBytes(selectedModel.estimatedVramBytes)}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              <p>{t('fasterWhisperPythonDetail')}</p>
+                            </div>
+                          </InspectorSection>
+                        </div>
                       </div>
+                    )}
+
+                    {settings.asrProviderId === 'cloud.openai' && (
+                      renderProviderApiSettings('cloud.openai')
                     )}
                   </div>
                 </section>
@@ -2005,35 +2573,7 @@ function App(): JSX.Element {
 
                     {translationProviderId === 'openai.compatible' && (
                       <>
-                        <div className="settingsGroupCard">
-                          <InspectorSection icon={<KeyRound size={16} />} title={t('llmProviderSettings')}>
-                            <TextField
-                              label={t('baseUrl')}
-                              value={llmSecret.baseUrl ?? ''}
-                              placeholder="https://api.openai.com/v1"
-                              onChange={(value) => updateProviderSecret('openai.compatible', { baseUrl: value })}
-                            />
-                            <TextField
-                              label={t('apiKey')}
-                              value={llmSecret.apiKey ?? ''}
-                              placeholder="sk-..."
-                              type="password"
-                              onChange={(value) => updateProviderSecret('openai.compatible', { apiKey: value })}
-                            />
-                            <TextField
-                              label={t('model')}
-                              value={llmSecret.model ?? ''}
-                              placeholder="gpt-4o-mini"
-                              onChange={(value) => updateProviderSecret('openai.compatible', { model: value })}
-                            />
-                            <TextField
-                              label={t('organization')}
-                              value={llmSecret.organization ?? ''}
-                              placeholder={t('optional')}
-                              onChange={(value) => updateProviderSecret('openai.compatible', { organization: value })}
-                            />
-                          </InspectorSection>
-                        </div>
+                        {renderProviderApiSettings('openai.compatible')}
 
                         <div className="settingsGroupCard">
                           <InspectorSection icon={<SlidersHorizontal size={16} />} title={t('translationRateLimits')}>
@@ -2091,14 +2631,6 @@ function App(): JSX.Element {
                             </div>
                           </InspectorSection>
                         </div>
-
-                        <ProviderActionRow
-                          savingLabel={t('saveProvider')}
-                          testingLabel={checkingProvider === 'openai.compatible' ? t('checking') : t('test')}
-                          onSave={() => void saveProviderSecret('openai.compatible')}
-                          onTest={() => void testProvider('openai.compatible')}
-                          testDisabled={checkingProvider === 'openai.compatible'}
-                        />
                       </>
                     )}
                   </div>
@@ -2442,16 +2974,36 @@ function TextField(props: {
   onChange: (value: string) => void;
   placeholder?: string;
   type?: 'text' | 'password';
+  revealable?: boolean;
+  showToggleLabel?: string;
+  hideToggleLabel?: string;
 }): JSX.Element {
+  const [revealed, setRevealed] = useState(false);
+  const effectiveType = props.revealable ? (revealed ? 'text' : props.type ?? 'password') : props.type ?? 'text';
   return (
     <label>
       {props.label}
-      <input
-        type={props.type ?? 'text'}
-        value={props.value}
-        placeholder={props.placeholder}
-        onChange={(event) => props.onChange(event.target.value)}
-      />
+      <div className="textFieldControl">
+        <input
+          className="textFieldInput"
+          type={effectiveType}
+          value={props.value}
+          placeholder={props.placeholder}
+          onChange={(event) => props.onChange(event.target.value)}
+        />
+        {props.revealable ? (
+          <button
+            type="button"
+            className="textFieldActionButton"
+            aria-label={revealed ? props.hideToggleLabel ?? 'Hide' : props.showToggleLabel ?? 'Show'}
+            title={revealed ? props.hideToggleLabel ?? 'Hide' : props.showToggleLabel ?? 'Show'}
+            onClick={() => setRevealed((current) => !current)}
+          >
+            {revealed ? <EyeOff size={15} /> : <Eye size={15} />}
+            <span>{revealed ? props.hideToggleLabel ?? 'Hide' : props.showToggleLabel ?? 'Show'}</span>
+          </button>
+        ) : null}
+      </div>
     </label>
   );
 }
@@ -2612,6 +3164,8 @@ function providerLabel(providerId: string, t: (key: string) => string): string {
   switch (providerId) {
     case 'local.whisper.cpp':
       return t('localWhisperCppProvider');
+    case 'local.faster-whisper':
+      return t('localFasterWhisperProvider');
     case 'cloud.openai':
       return t('cloudOpenaiProvider');
     case 'openai.compatible':
@@ -2619,6 +3173,120 @@ function providerLabel(providerId: string, t: (key: string) => string): string {
     default:
       return providerId;
   }
+}
+
+function summarizeJobEventForLog(event: JobEvent): Record<string, unknown> {
+  if (event.type === 'snapshot') {
+    return {
+      type: event.type,
+      jobId: event.job.id,
+      stage: event.job.stage,
+      step: event.job.step,
+      progress: event.job.progress
+    };
+  }
+  if (event.type === 'progress') {
+    return {
+      type: event.type,
+      jobId: event.jobId,
+      stage: event.stage,
+      progress: event.progress,
+      message: event.message
+    };
+  }
+  return {
+    type: event.type,
+    jobId: event.jobId,
+    code: event.code,
+    message: event.message,
+    retryable: event.retryable
+  };
+}
+
+function describeDomTarget(target: EventTarget | null): Record<string, unknown> {
+  if (!(target instanceof HTMLElement)) {
+    return {
+      tag: 'unknown'
+    };
+  }
+
+  return {
+    tag: target.tagName.toLowerCase(),
+    id: target.id || undefined,
+    role: target.getAttribute('role') || undefined,
+    name: target.getAttribute('name') || undefined,
+    type: target instanceof HTMLInputElement ? target.type : undefined,
+    text: target.textContent?.trim().slice(0, 80) || undefined,
+    classes: target.className || undefined
+  };
+}
+
+function describeDomValue(target: EventTarget | null): unknown {
+  if (target instanceof HTMLInputElement) {
+    if (target.type === 'checkbox' || target.type === 'radio') {
+      return target.checked;
+    }
+    if (target.type === 'password') {
+      return '[REDACTED]';
+    }
+    return target.value;
+  }
+  if (target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement) {
+    return target.value;
+  }
+  return undefined;
+}
+
+function deriveWorkspaceRailMessage(input: {
+  t: (key: string, options?: Record<string, unknown>) => string;
+  asrProviderId: string;
+  activeDownload?: ActiveDownload;
+  footerTitle: string;
+  stage: JobStage;
+  sourceLabel: string;
+  targetLabel: string;
+}): string {
+  const { t, asrProviderId, activeDownload, footerTitle, stage, sourceLabel, targetLabel } = input;
+  if (activeDownload) {
+    return footerTitle;
+  }
+  if (stage !== 'idle') {
+    return t('workspaceActiveSummary', {
+      asr: providerLabel(asrProviderId, t),
+      stage: t(stageLabel(stage))
+    });
+  }
+  return t('workspaceIdleSummary', {
+    asr: providerLabel(asrProviderId, t),
+    source: sourceLabel,
+    target: targetLabel
+  });
+}
+
+function deriveWorkspaceRuntimeDetail(input: {
+  t: (key: string) => string;
+  asrProviderId: string;
+  asrHealth?: ProviderHealth;
+  useCuda: boolean;
+  runtimeState: DerivedHealthState;
+  ffmpegStatus?: FfmpegStatus;
+  nativeHealth?: NativeHealth;
+}): string {
+  const { t, asrProviderId, asrHealth, useCuda, runtimeState, ffmpegStatus, nativeHealth } = input;
+  const ffmpegAvailable = ffmpegStatus?.available ?? Boolean(nativeHealth?.ffmpegAvailable && nativeHealth?.ffprobeAvailable);
+  if (!ffmpegAvailable || asrProviderId !== 'local.faster-whisper') {
+    return runtimeState.detail;
+  }
+  if (!asrHealth) {
+    return t('fasterWhisperWorkspaceSetupHint');
+  }
+  if (asrHealth.ok) {
+    return t(useCuda ? 'fasterWhisperWorkspaceReadyCuda' : 'fasterWhisperWorkspaceReadyCpu');
+  }
+  if (useCuda && asrHealth.status === 'degraded') {
+    return t('fasterWhisperWorkspaceCudaFallback');
+  }
+  return t('fasterWhisperWorkspaceSetupHint');
 }
 
 function describeLocalWhisperTestResult(status: WhisperRuntimeStatus, t: (key: string) => string): string {
@@ -2734,11 +3402,18 @@ function deriveWorkflowWarnings(job?: JobSnapshot): SubtitleWarning[] {
   return warnings
     .map((warning, index) => enrichWarning(warning, segments, index))
     .filter((warning) => {
+      if (!isActionableWorkflowWarning(warning)) {
+        return false;
+      }
       const key = warningFingerprint(warning);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
+}
+
+function isActionableWorkflowWarning(warning: SubtitleWarning): boolean {
+  return warning.code !== 'NativeFasterWhisperRuntime';
 }
 
 function enrichWarning(warning: SubtitleWarning, segments: SubtitleSegment[], index: number): SubtitleWarning {
@@ -2773,6 +3448,7 @@ function warningFingerprint(warning: SubtitleWarning): string {
 function warningSummaryLabel(warning: SubtitleWarning, t: (key: string) => string): string {
   if (warning.stage === 'translate') return t('warningFallbackSummary');
   switch (warning.code) {
+    case 'CudaFallback':
     case 'CudaTranscriptionCrashFallback':
       return t('warningSummaryCudaFallback');
     case 'NativeCapabilityUnavailable':
@@ -2788,6 +3464,16 @@ function warningSummaryLabel(warning: SubtitleWarning, t: (key: string) => strin
     default:
       return humanizeWarningCode(warning.code);
   }
+}
+
+function deriveWarningHint(
+  warning: SubtitleWarning | undefined,
+  t: (key: string) => string
+): string {
+  if (warning?.stage === 'translate') {
+    return t('warningFallbackHint');
+  }
+  return t('warningReviewHint');
 }
 
 function warningCategoryLabel(warning: SubtitleWarning, t: (key: string) => string): string {
@@ -2900,6 +3586,42 @@ function deriveTranslationState(input: {
   };
 }
 
+function deriveAsrProviderState(input: {
+  t: (key: string) => string;
+  asrProviderId: string;
+  description: string;
+  health?: ProviderHealth;
+  runtimeState: DerivedHealthState;
+  job?: JobSnapshot;
+}): DerivedHealthState {
+  const { t, asrProviderId, description, health, runtimeState, job } = input;
+  if (asrProviderId === 'local.whisper.cpp') {
+    return runtimeState;
+  }
+  if (job?.stage === 'failed' && job.error && (job.step === 'asr' || job.step === 'subtitles')) {
+    return { tone: 'error', label: t('error'), detail: job.error.message };
+  }
+  if (!health) {
+    return {
+      tone: 'muted',
+      label: t('notChecked'),
+      detail: description
+    };
+  }
+  if (health.ok) {
+    return {
+      tone: 'good',
+      label: t(providerStatusLabel(health.status)),
+      detail: health.message ?? description
+    };
+  }
+  return {
+    tone: health.status === 'degraded' ? 'warn' : 'error',
+    label: t(providerStatusLabel(health.status)),
+    detail: health.message ?? description
+  };
+}
+
 function deriveFfmpegState(input: {
   t: (key: string) => string;
   ffmpegStatus?: FfmpegStatus;
@@ -3005,9 +3727,10 @@ function deriveRuntimeState(input: {
   ffmpegStatus?: FfmpegStatus;
   nativeHealth?: NativeHealth;
   asrProviderId: string;
+  asrHealth?: ProviderHealth;
   job?: JobSnapshot;
 }): DerivedHealthState {
-  const { t, runtimeStatus, ffmpegStatus, nativeHealth, asrProviderId, job } = input;
+  const { t, runtimeStatus, ffmpegStatus, nativeHealth, asrProviderId, asrHealth, job } = input;
   if (job?.stage === 'failed' && job.error && (job.step === 'asr' || job.step === 'subtitles')) {
     return { tone: 'error', label: t('error'), detail: job.error.message };
   }
@@ -3019,8 +3742,47 @@ function deriveRuntimeState(input: {
       detail: describeFfmpegStatusDetail(ffmpegStatus, t)
     };
   }
+  if (asrProviderId === 'local.faster-whisper') {
+    if (!asrHealth) {
+      return {
+        tone: 'muted',
+        label: t('notChecked'),
+        detail: t('fasterWhisperPythonDetail')
+      };
+    }
+    if (asrHealth.ok) {
+      return {
+        tone: 'good',
+        label: t(providerStatusLabel(asrHealth.status)),
+        detail: asrHealth.message ?? t('providerReady')
+      };
+    }
+    return {
+      tone: asrHealth.status === 'degraded' ? 'warn' : 'error',
+      label: t(providerStatusLabel(asrHealth.status)),
+      detail: asrHealth.message ?? t('fasterWhisperPythonDetail')
+    };
+  }
   if (asrProviderId !== 'local.whisper.cpp') {
-    return { tone: 'good', label: t('providerReady'), detail: t('cloudProviderDetail') };
+    if (!asrHealth) {
+      return {
+        tone: 'muted',
+        label: t('notChecked'),
+        detail: t('cloudProviderDetail')
+      };
+    }
+    if (asrHealth.ok) {
+      return {
+        tone: 'good',
+        label: t(providerStatusLabel(asrHealth.status)),
+        detail: asrHealth.message ?? t('cloudProviderDetail')
+      };
+    }
+    return {
+      tone: asrHealth.status === 'degraded' ? 'warn' : 'error',
+      label: t(providerStatusLabel(asrHealth.status)),
+      detail: asrHealth.message ?? t('cloudProviderDetail')
+    };
   }
   if (!runtimeStatus) {
     return { tone: 'muted', label: t('notChecked'), detail: t('runtimeNotChecked') };
@@ -3074,6 +3836,9 @@ function deriveBackendAccelerationState(input: {
   if (asrProviderId !== 'local.whisper.cpp') {
     return { tone: 'muted', label: t('unknown'), detail: t('localWhisperNotRequiredDetail') };
   }
+  if (!useCuda) {
+    return { tone: 'accent', label: 'CPU', detail: t('cudaDisabledUsesCpu') };
+  }
   if (!runtimeStatus || !runtimeStatus.binary.verified || !runtimeStatus.model.verified) {
     return { tone: 'muted', label: t('unknown'), detail: t('runtimeNotChecked') };
   }
@@ -3125,6 +3890,7 @@ function deriveSelectedModelOverviewState(input: {
   asrProviderId: string;
 }): DerivedHealthState {
   const { t, selectedModel, selectedModelInstalled, selectedModelVerified, asrProviderId } = input;
+  const footprint = selectedModel ? describeModelFootprint(selectedModel, t) : undefined;
   if (asrProviderId !== 'local.whisper.cpp') {
     return {
       tone: 'muted',
@@ -3136,21 +3902,59 @@ function deriveSelectedModelOverviewState(input: {
     return {
       tone: 'good',
       label: selectedModel?.displayName ?? t('whisperModel'),
-      detail: t('modelReady')
+      detail: [t('modelReady'), footprint].filter(Boolean).join(' · ')
     };
   }
   if (selectedModelInstalled) {
     return {
       tone: 'warn',
       label: selectedModel?.displayName ?? t('whisperModel'),
-      detail: t('modelInstalledPendingCheck')
+      detail: [t('modelInstalledPendingCheck'), footprint].filter(Boolean).join(' · ')
     };
   }
   return {
     tone: 'muted',
     label: selectedModel?.displayName ?? t('whisperModel'),
-    detail: t('runtimeModelMissingDetail')
+    detail: [t('runtimeModelMissingDetail'), footprint].filter(Boolean).join(' · ')
   };
+}
+
+function localCpuModeLabel(mode: AppSettingsPublic['localAsrCpuMode']): string {
+  switch (mode) {
+    case 'low':
+      return 'cpuModeLow';
+    case 'high':
+      return 'cpuModeHigh';
+    case 'balanced':
+    default:
+      return 'cpuModeBalanced';
+  }
+}
+
+function localCpuModeDetailLabel(mode: AppSettingsPublic['localAsrCpuMode']): string {
+  switch (mode) {
+    case 'low':
+      return 'cpuModeLowDetail';
+    case 'high':
+      return 'cpuModeHighDetail';
+    case 'balanced':
+    default:
+      return 'cpuModeBalancedDetail';
+  }
+}
+
+function logLevelDetailLabel(level: AppLogLevel): string {
+  switch (level) {
+    case 'debug':
+      return 'logLevelDebugDetail';
+    case 'warning':
+      return 'logLevelWarningDetail';
+    case 'error':
+      return 'logLevelErrorDetail';
+    case 'info':
+    default:
+      return 'logLevelInfoDetail';
+  }
 }
 
 function shortLanguage(code: string): string {
@@ -3167,6 +3971,20 @@ function formatBytes(value: number): string {
     index += 1;
   }
   return `${next.toFixed(index <= 1 ? 0 : 1)} ${units[index]}`;
+}
+
+function describeModelFootprint(
+  model: WhisperModelInfo,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string {
+  const parts: string[] = [];
+  if (model.sizeBytes > 0) {
+    parts.push(formatBytes(model.sizeBytes));
+  }
+  if (model.estimatedVramBytes && model.estimatedVramBytes > 0) {
+    parts.push(t('estimatedVramInline', { value: formatBytes(model.estimatedVramBytes) }));
+  }
+  return parts.join(' · ') || t('modelFootprintPending');
 }
 
 createRoot(document.getElementById('root')!).render(<App />);

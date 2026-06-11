@@ -14,6 +14,7 @@ import type {
   WhisperRuntimeRequest,
   WhisperRuntimeStatus
 } from '@shared/models';
+import { legacyWhisperCudaRuntimeDirs, sharedCudaRuntimeDir } from './cudaRuntimePaths';
 
 const NVIDIA_CUDA_REDIST_BASE_URL = 'https://developer.download.nvidia.com/compute/cuda/redist/';
 const NVIDIA_CUDA_REDIST_MANIFEST_URLS = {
@@ -55,11 +56,14 @@ type WhisperManifest = {
     displayName: string;
     languageScope: 'multilingual' | 'english-only';
     sizeBytes: number;
+    estimatedVramBytes?: number;
     sha256: string;
     path: string;
     url: string | null;
   }>;
 };
+
+type WhisperManifestRuntime = WhisperManifest['runtime']['platforms'][string];
 
 type CudaRedistribManifest = {
   libcublas?: Record<
@@ -94,6 +98,7 @@ export class WhisperAssetManager extends EventEmitter {
           displayName: model.displayName,
           languageScope: model.languageScope,
           sizeBytes: model.sizeBytes,
+          estimatedVramBytes: model.estimatedVramBytes,
           sha256: model.sha256,
           installed: Boolean(modelPath)
         };
@@ -140,14 +145,14 @@ export class WhisperAssetManager extends EventEmitter {
         actionRequired: 'manifest-not-configured',
         message:
           manifest.note ??
-          'The checked-in whisper manifest is a disabled sample. Provide a pinned runtime/model manifest before transcription.'
+          'This build does not include the download information needed for local Whisper files yet. Please update the app or use a complete package.'
       });
     }
 
     if (!hashesPinned) {
       return this.modelStatus(resolvedModelPath, model.id, resolvedModelInstalled, false, {
         actionRequired: 'manifest-not-configured',
-        message: 'Model hash is not pinned. Provide a trusted SHA-256 value before enabling download or verification.'
+        message: 'The model download information is incomplete right now, so the app cannot verify or download this model automatically.'
       });
     }
 
@@ -224,7 +229,7 @@ export class WhisperAssetManager extends EventEmitter {
           actionRequired: 'manifest-not-configured',
           message:
             manifest.note ??
-            'The checked-in whisper manifest is a disabled sample. Provide a pinned runtime/model manifest before transcription.'
+            'This build does not include the download information needed for local Whisper files yet. Please update the app or use a complete package.'
         }
       );
     }
@@ -249,25 +254,21 @@ export class WhisperAssetManager extends EventEmitter {
         false,
         {
           actionRequired: 'download-runtime',
-          message: compatibilityMessage ?? `No whisper.cpp runtime is pinned for ${platformKey}.`
+          message: compatibilityMessage ?? 'This version does not provide a local Whisper program for your computer yet.'
         }
       );
     }
 
-    const managedBinaryPath = join(this.cacheDir(), runtime.binary);
-    const systemBinaryPath = await this.findSystemWhisperBinary(runtime.binary);
-    const binaryPath = systemBinaryPath ?? managedBinaryPath;
+    const managedBinary = await this.probeManagedRuntimeBinary(runtime);
+    const systemBinaryPath = managedBinary.verifiedPath ? undefined : await this.findSystemWhisperBinary(runtime);
+    const binaryPath = managedBinary.verifiedPath ?? systemBinaryPath ?? managedBinary.existingPath ?? managedBinary.installPath;
     const managedModelPath = join(this.cacheDir(), model.path);
     const existingModelPath = await this.findExistingModelPath(model.path);
     const modelPath = existingModelPath ?? managedModelPath;
     const hashesPinned = isPinnedSha256(runtime.sha256) && isPinnedSha256(model.sha256);
-    const binaryExists = await this.exists(binaryPath);
+    const binaryExists = Boolean(systemBinaryPath) || Boolean(managedBinary.existingPath);
     const modelExists = await this.exists(modelPath);
-    const binaryVerified = systemBinaryPath
-      ? true
-      : hashesPinned && binaryExists
-        ? await this.verifyRuntime(binaryPath, runtime.url, runtime.sha256)
-        : false;
+    const binaryVerified = Boolean(systemBinaryPath) || Boolean(managedBinary.verifiedPath);
     const modelVerified = hashesPinned && modelExists ? await this.verifySha256(modelPath, model.sha256) : false;
 
     if (!hashesPinned) {
@@ -290,7 +291,7 @@ export class WhisperAssetManager extends EventEmitter {
         false,
         {
           actionRequired: 'manifest-not-configured',
-          message: 'Runtime/model hashes are not pinned. Provide trusted SHA-256 values before enabling download or execution.'
+          message: 'The local Whisper download information is incomplete right now, so the app cannot verify or download these files automatically.'
         }
       );
     }
@@ -299,7 +300,7 @@ export class WhisperAssetManager extends EventEmitter {
       await this.downloadAndInstall(
         'runtime',
         runtime.url,
-        managedBinaryPath,
+        managedBinary.installPath,
         runtime.sha256,
         Boolean(request.useMultiThreadDownload)
       );
@@ -314,14 +315,17 @@ export class WhisperAssetManager extends EventEmitter {
       );
     }
 
-    const resolvedSystemBinaryPath = systemBinaryPath ?? (await this.findSystemWhisperBinary(runtime.binary));
-    const resolvedBinaryPath = resolvedSystemBinaryPath ?? managedBinaryPath;
+    const resolvedManagedBinary = await this.probeManagedRuntimeBinary(runtime);
+    const resolvedSystemBinaryPath = resolvedManagedBinary.verifiedPath ? undefined : await this.findSystemWhisperBinary(runtime);
+    const resolvedBinaryPath =
+      resolvedManagedBinary.verifiedPath ??
+      resolvedSystemBinaryPath ??
+      resolvedManagedBinary.existingPath ??
+      resolvedManagedBinary.installPath;
     const resolvedModelPath = (await this.findExistingModelPath(model.path)) ?? managedModelPath;
-    const resolvedBinaryInstalled = await this.exists(resolvedBinaryPath);
+    const resolvedBinaryInstalled = Boolean(resolvedSystemBinaryPath) || Boolean(resolvedManagedBinary.existingPath);
     const resolvedModelInstalled = await this.exists(resolvedModelPath);
-    const resolvedBinaryVerified = resolvedSystemBinaryPath
-      ? true
-      : await this.verifyRuntime(resolvedBinaryPath, runtime.url, runtime.sha256);
+    const resolvedBinaryVerified = Boolean(resolvedSystemBinaryPath) || Boolean(resolvedManagedBinary.verifiedPath);
     const resolvedModelVerified = await this.verifyIfPresent(resolvedModelPath, model.sha256);
 
     return this.status(
@@ -362,13 +366,25 @@ export class WhisperAssetManager extends EventEmitter {
 
   cacheDir(): string {
     if (app.isPackaged) {
-      return join(dirname(process.execPath), 'runtime', 'whisper');
+      return join(dirname(process.execPath), 'runtime', 'whisper_cpp');
     }
-    return join(resolve('.'), '.runtime', 'whisper');
+    return join(resolve('.'), '.runtime', 'whisper_cpp');
+  }
+
+  cudaRuntimeDir(cudaVersion: SupportedCudaVersion): string {
+    return sharedCudaRuntimeDir(cudaVersion);
   }
 
   private legacyCacheDir(): string {
     return join(app.getPath('userData'), 'runtime', 'whisper');
+  }
+
+  private legacyRuntimeDirs(): string[] {
+    return [
+      this.legacyCacheDir(),
+      join(dirname(process.execPath), 'runtime', 'whisper'),
+      join(resolve('.'), '.runtime', 'whisper')
+    ];
   }
 
   private cudaRuntimeSearchRoots(manifest: WhisperManifest, cudaVersion?: SupportedCudaVersion): string[] {
@@ -380,7 +396,13 @@ export class WhisperAssetManager extends EventEmitter {
         ]
       : runtimes;
 
-    return [...new Set(ordered.map((runtime) => dirname(join(this.cacheDir(), runtime.binary))))];
+    return uniquePaths(
+      ordered.flatMap((runtime) => [
+        ...(runtime.cudaVersion ? [this.cudaRuntimeDir(runtime.cudaVersion)] : []),
+        ...legacyWhisperCudaRuntimeDirs(),
+        ...this.runtimeBinarySearchRoots(runtime)
+      ])
+    );
   }
 
   private async downloadAndInstall(
@@ -392,7 +414,7 @@ export class WhisperAssetManager extends EventEmitter {
   ): Promise<void> {
     if (!url || url.startsWith('disabled://')) return;
     if (!isPinnedSha256(sha256)) {
-      throw new Error('Refusing to download whisper asset without a pinned SHA-256 hash.');
+      throw new Error('The download information for this file is incomplete, so it cannot be downloaded right now.');
     }
 
     const tmpPath = this.shouldExtractArchive(url, destination) ? `${destination}.download.zip` : `${destination}.tmp`;
@@ -402,7 +424,7 @@ export class WhisperAssetManager extends EventEmitter {
     this.emitAsset({
       type: 'download-start',
       scope,
-      message: scope === 'runtime' ? 'Downloading whisper runtime.' : 'Downloading whisper model.'
+      message: scope === 'runtime' ? 'Downloading local Whisper files.' : 'Downloading Whisper model.'
     });
 
     if (url.startsWith('file://')) {
@@ -411,29 +433,29 @@ export class WhisperAssetManager extends EventEmitter {
     } else if (url.startsWith('https://')) {
       await this.downloadHttp(scope, url, tmpPath, useMultiThreadDownload);
     } else {
-      throw new Error(`Unsupported whisper asset URL scheme: ${url}`);
+      throw new Error('This download link is not supported by the app.');
     }
 
-    this.emitAsset({ type: 'verify', scope, message: scope === 'runtime' ? 'Verifying runtime checksum.' : 'Verifying model checksum.' });
+    this.emitAsset({ type: 'verify', scope, message: scope === 'runtime' ? 'Checking downloaded Whisper files.' : 'Checking downloaded model file.' });
     const verified = await this.verifySha256(tmpPath, sha256);
     if (!verified) {
       await this.removePathWithRetry(tmpPath);
-      this.emitAsset({ type: 'error', scope, message: 'Downloaded file failed checksum verification.' });
-      throw new Error('Downloaded asset failed SHA-256 verification.');
+      this.emitAsset({ type: 'error', scope, message: 'The downloaded file did not pass the integrity check.' });
+      throw new Error('The downloaded file did not pass the integrity check. Please try again.');
     }
     if (this.shouldExtractArchive(url, destination)) {
       const extractDir = this.archiveExtractDir(destination);
       await mkdir(extractDir, { recursive: true });
-      this.emitAsset({ type: 'extract', scope: 'runtime', message: 'Extracting runtime archive.' });
+      this.emitAsset({ type: 'extract', scope: 'runtime', message: 'Preparing local Whisper files.' });
       await this.extractZip(tmpPath, extractDir);
       await writeFile(this.archiveMarkerPath(destination), sha256, 'utf8');
       await this.removePathWithRetry(tmpPath);
-      this.emitAsset({ type: 'ready', scope, message: 'Runtime download complete.' });
+      this.emitAsset({ type: 'ready', scope, message: 'Local Whisper files are ready.' });
       return;
     }
 
     await rename(tmpPath, destination);
-    this.emitAsset({ type: 'ready', scope, message: scope === 'runtime' ? 'Runtime download complete.' : 'Model download complete.' });
+    this.emitAsset({ type: 'ready', scope, message: scope === 'runtime' ? 'Local Whisper files are ready.' : 'Model download complete.' });
   }
 
   private async downloadHttp(
@@ -457,8 +479,8 @@ export class WhisperAssetManager extends EventEmitter {
   private async downloadHttpSingle(scope: 'runtime' | 'model', url: string, destination: string): Promise<void> {
     const response = await fetch(url);
     if (!response.ok || !response.body) {
-      this.emitAsset({ type: 'error', scope, message: `Download failed with HTTP ${response.status}.` });
-      throw new Error(`Failed to download whisper asset: HTTP ${response.status}`);
+      this.emitAsset({ type: 'error', scope, message: `Download failed (HTTP ${response.status}).` });
+      throw new Error(`Download failed (HTTP ${response.status}).`);
     }
     const totalBytes = Number.parseInt(response.headers.get('content-length') ?? '', 10);
 
@@ -495,7 +517,7 @@ export class WhisperAssetManager extends EventEmitter {
             this.emitAsset({
               type: 'download-progress',
               scope,
-              message: scope === 'runtime' ? 'Downloading whisper runtime...' : 'Downloading whisper model...',
+              message: scope === 'runtime' ? 'Downloading local Whisper files...' : 'Downloading Whisper model...',
               receivedBytes,
               totalBytes: Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : undefined
             });
@@ -529,7 +551,7 @@ export class WhisperAssetManager extends EventEmitter {
         this.emitAsset({
           type: 'download-progress',
           scope,
-          message: scope === 'runtime' ? 'Downloading whisper runtime...' : 'Downloading whisper model...',
+          message: scope === 'runtime' ? 'Downloading local Whisper files...' : 'Downloading Whisper model...',
           receivedBytes,
           totalBytes: plan.totalBytes
         });
@@ -610,14 +632,14 @@ export class WhisperAssetManager extends EventEmitter {
       preferCuda && versionMismatch
         ? extra.message
         : preferCuda && cudaHardwareSupported && !cudaRuntimeDetected
-          ? 'NVIDIA hardware is present, but the required CUDA runtime DLLs for whisper.cpp were not found.'
+          ? 'An NVIDIA GPU was found, but the required CUDA files for whisper.cpp are missing.'
           : preferCuda && !cudaHardwareSupported
-            ? 'CUDA was requested but no supported NVIDIA runtime was detected on this machine.'
+            ? 'GPU mode was requested, but no supported NVIDIA environment was found on this computer.'
           : preferCuda && runtimeAcceleration !== 'cuda'
-            ? 'The selected whisper runtime build does not include CUDA acceleration.'
+            ? 'The selected local Whisper program does not support GPU acceleration.'
           : runtimeAcceleration === 'cuda' && !cudaSupported
-            ? 'This runtime can use CUDA, but no supported NVIDIA runtime was detected on this machine.'
-            : 'Using CPU execution for the selected whisper runtime.';
+            ? 'This local Whisper program can use GPU acceleration, but the required NVIDIA environment was not found.'
+            : 'Using CPU mode for local Whisper.';
 
     return {
       provider: 'whisper.cpp',
@@ -668,7 +690,7 @@ export class WhisperAssetManager extends EventEmitter {
       }
     }
     if (!raw) {
-      throw new Error('Whisper manifest was not found in packaged resources or workspace resources.');
+      throw new Error('The local Whisper file list is missing. Please reinstall or update the app.');
     }
     this.manifestCache = JSON.parse(raw) as WhisperManifest;
     return this.manifestCache;
@@ -737,7 +759,12 @@ export class WhisperAssetManager extends EventEmitter {
     }
   }
 
-  private async findSystemWhisperBinary(manifestBinaryPath: string): Promise<string | undefined> {
+  private async findSystemWhisperBinary(runtime: WhisperManifestRuntime): Promise<string | undefined> {
+    if (runtime.acceleration !== 'cpu') {
+      return undefined;
+    }
+
+    const manifestBinaryPath = runtime.binary;
     const names = new Set([
       basename(manifestBinaryPath),
       process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli'
@@ -755,6 +782,43 @@ export class WhisperAssetManager extends EventEmitter {
     return undefined;
   }
 
+  private runtimeBinaryInstallPath(runtime: WhisperManifestRuntime): string {
+    return join(this.cacheDir(), runtime.binary);
+  }
+
+  private runtimeBinarySearchRoots(runtime: WhisperManifestRuntime): string[] {
+    return uniquePaths(this.runtimeBinarySearchPaths(runtime).map((candidate) => dirname(candidate)));
+  }
+
+  private runtimeBinarySearchPaths(runtime: WhisperManifestRuntime): string[] {
+    const fileName = basename(runtime.binary);
+    const cacheRoots = uniquePaths([this.cacheDir(), ...this.legacyRuntimeDirs()]);
+    return uniquePaths([
+      this.runtimeBinaryInstallPath(runtime),
+      ...cacheRoots.map((root) => join(root, runtime.binary)),
+      ...cacheRoots.map((root) => join(root, 'bin', 'Release', fileName))
+    ]);
+  }
+
+  private async probeManagedRuntimeBinary(
+    runtime: WhisperManifestRuntime
+  ): Promise<{ installPath: string; existingPath?: string; verifiedPath?: string }> {
+    const installPath = this.runtimeBinaryInstallPath(runtime);
+    let existingPath: string | undefined;
+
+    for (const candidate of this.runtimeBinarySearchPaths(runtime)) {
+      if (!(await this.exists(candidate))) {
+        continue;
+      }
+      existingPath ??= candidate;
+      if (await this.verifyRuntime(candidate, runtime.url, runtime.sha256)) {
+        return { installPath, existingPath: candidate, verifiedPath: candidate };
+      }
+    }
+
+    return { installPath, existingPath };
+  }
+
   private async findExistingModelPath(manifestModelPath: string): Promise<string | undefined> {
     const configuredPath = process.env.WHISPER_MODEL_PATH?.trim();
     if (configuredPath && existsSync(configuredPath)) {
@@ -766,12 +830,14 @@ export class WhisperAssetManager extends EventEmitter {
       process.env.WHISPER_MODEL_DIR?.trim(),
       join(this.cacheDir(), dirname(manifestModelPath)),
       join(this.legacyCacheDir(), dirname(manifestModelPath)),
+      ...this.legacyRuntimeDirs().map((entry) => join(entry, dirname(manifestModelPath))),
       join(dirname(process.execPath), 'runtime', 'whisper', dirname(manifestModelPath)),
       join(dirname(process.execPath), dirname(manifestModelPath)),
       join(dirname(process.execPath), 'models'),
       resolve(dirname(manifestModelPath)),
       resolve('models'),
-      resolve('.runtime', 'whisper', dirname(manifestModelPath))
+      resolve('.runtime', 'whisper', dirname(manifestModelPath)),
+      resolve('.runtime', 'whisper_cpp', dirname(manifestModelPath))
     ].filter((entry): entry is string => Boolean(entry));
 
     for (const dir of uniquePaths(candidateDirs)) {
@@ -786,6 +852,7 @@ export class WhisperAssetManager extends EventEmitter {
       dirname(process.execPath),
       this.cacheDir(),
       this.legacyCacheDir(),
+      ...this.legacyRuntimeDirs(),
       resolve('.')
     ].filter((entry): entry is string => Boolean(entry)));
 
@@ -881,16 +948,18 @@ export class WhisperAssetManager extends EventEmitter {
 
   private async migrateLegacyCacheIfNeeded(): Promise<void> {
     const nextCacheDir = this.cacheDir();
-    const legacyCacheDir = this.legacyCacheDir();
-    if (nextCacheDir === legacyCacheDir) return;
     if (await this.exists(nextCacheDir)) return;
-    if (!(await this.exists(legacyCacheDir))) return;
+    for (const legacyCacheDir of uniquePaths(this.legacyRuntimeDirs())) {
+      if (nextCacheDir === legacyCacheDir) continue;
+      if (!(await this.exists(legacyCacheDir))) continue;
 
-    await mkdir(dirname(nextCacheDir), { recursive: true });
-    try {
-      await rename(legacyCacheDir, nextCacheDir);
-    } catch {
-      // Fall back to copy-on-demand via normal download/install flow if move fails.
+      await mkdir(dirname(nextCacheDir), { recursive: true });
+      try {
+        await rename(legacyCacheDir, nextCacheDir);
+        return;
+      } catch {
+        // Fall back to copy-on-demand via normal download/install flow if move fails.
+      }
     }
   }
 
@@ -906,12 +975,12 @@ export class WhisperAssetManager extends EventEmitter {
       ) ?? Object.values(manifest.runtime.platforms).find((candidate) => candidate.acceleration === 'cuda');
     if (!runtime) return;
 
-    const runtimeDir = dirname(join(this.cacheDir(), runtime.binary));
+    const runtimeDir = this.cudaRuntimeDir(cudaVersion);
     if (hasWindowsCudaRuntime(cudaVersion, [runtimeDir])) return;
 
     const packageInfo = await this.fetchCudaLibcublasPackage(cudaVersion);
     if (!packageInfo.relative_path || !packageInfo.sha256 || !isPinnedSha256(packageInfo.sha256)) {
-      throw new Error('NVIDIA CUDA libcublas redistributable metadata is missing a pinned SHA-256 hash.');
+      throw new Error('The CUDA download information is incomplete right now.');
     }
 
     const downloadDir = join(this.cacheDir(), 'downloads');
@@ -922,7 +991,7 @@ export class WhisperAssetManager extends EventEmitter {
     await this.removePathWithRetry(archivePath);
     await this.removePathWithRetry(extractDir, { recursive: true });
 
-    this.emitAsset({ type: 'download-start', scope: 'runtime', message: 'Downloading CUDA cuBLAS runtime.' });
+    this.emitAsset({ type: 'download-start', scope: 'runtime', message: 'Downloading CUDA components.' });
     await this.downloadHttp(
       'runtime',
       `${NVIDIA_CUDA_REDIST_BASE_URL}${packageInfo.relative_path}`,
@@ -930,14 +999,14 @@ export class WhisperAssetManager extends EventEmitter {
       useMultiThreadDownload
     );
 
-    this.emitAsset({ type: 'verify', scope: 'runtime', message: 'Verifying CUDA cuBLAS runtime checksum.' });
+    this.emitAsset({ type: 'verify', scope: 'runtime', message: 'Checking downloaded CUDA components.' });
     const verified = await this.verifySha256(archivePath, packageInfo.sha256);
     if (!verified) {
       await this.removePathWithRetry(archivePath);
-      throw new Error('Downloaded CUDA cuBLAS runtime failed SHA-256 verification.');
+      throw new Error('The downloaded CUDA files did not pass the integrity check. Please try again.');
     }
 
-    this.emitAsset({ type: 'extract', scope: 'runtime', message: 'Extracting CUDA cuBLAS runtime.' });
+    this.emitAsset({ type: 'extract', scope: 'runtime', message: 'Preparing CUDA components.' });
     await mkdir(extractDir, { recursive: true });
     await this.extractZip(archivePath, extractDir);
 
@@ -946,14 +1015,14 @@ export class WhisperAssetManager extends EventEmitter {
     for (const dllName of runtimeDlls) {
       const sourcePath = dllPaths.get(dllName.toLowerCase());
       if (!sourcePath) {
-        throw new Error(`CUDA cuBLAS runtime archive did not contain ${dllName}.`);
+        throw new Error('The downloaded CUDA package is incomplete.');
       }
       await copyFile(sourcePath, join(runtimeDir, dllName));
     }
 
     await this.removePathWithRetry(archivePath);
     await this.removePathWithRetry(extractDir, { recursive: true });
-    this.emitAsset({ type: 'ready', scope: 'runtime', message: 'CUDA cuBLAS runtime is ready.' });
+    this.emitAsset({ type: 'ready', scope: 'runtime', message: 'CUDA components are ready.' });
   }
 
   private async removePathWithRetry(path: string, options: { recursive?: boolean } = {}): Promise<void> {
@@ -975,12 +1044,12 @@ export class WhisperAssetManager extends EventEmitter {
   private async fetchCudaLibcublasPackage(cudaVersion: SupportedCudaVersion): Promise<NonNullable<CudaRedistribManifest['libcublas']>[string]> {
     const response = await fetch(NVIDIA_CUDA_REDIST_MANIFEST_URLS[cudaVersion]);
     if (!response.ok) {
-      throw new Error(`Failed to fetch NVIDIA CUDA redistributable manifest: HTTP ${response.status}`);
+      throw new Error(`Failed to get the required CUDA download information (HTTP ${response.status}).`);
     }
     const manifest = (await response.json()) as CudaRedistribManifest;
     const packageInfo = manifest.libcublas?.['windows-x86_64'];
     if (!packageInfo) {
-      throw new Error('NVIDIA CUDA redistributable manifest does not list libcublas for windows-x86_64.');
+      throw new Error('The required CUDA download information is incomplete.');
     }
     return packageInfo;
   }
@@ -1153,7 +1222,7 @@ function isCudaRuntimeCompatibleWithGpu(
   if (requiredCudaVersion === CUDA_12_8 && runtimeCudaVersion === CUDA_11_8) {
     return {
       ok: false,
-      message: `Detected ${gpuInfo.name}${gpuInfo.computeCapability ? ` (compute capability ${gpuInfo.computeCapability})` : ''}. This GPU generation requires CUDA 12.8+ for local whisper CUDA, but the pinned runtime is CUDA ${runtimeCudaVersion}. Falling back to CPU until a matching whisper CUDA runtime is provided.`
+      message: `Detected ${gpuInfo.name}. This graphics card works better with CUDA 12.8, but the current local Whisper CUDA files are ${runtimeCudaVersion}. The app will use CPU until matching CUDA files are available.`
     };
   }
 

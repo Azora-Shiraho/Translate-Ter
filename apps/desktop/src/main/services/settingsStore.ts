@@ -4,16 +4,18 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { chmodSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { canonicalSourceLanguageCode, canonicalTargetLanguageCode } from '@shared/languages';
-import type { AppSettingsPatch, AppSettingsPublic, ProviderSecretInput } from '@shared/models';
+import type { AppLogLevel, AppSettingsPatch, AppSettingsPublic, ProviderSecretInput } from '@shared/models';
 
 const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = {
   schemaVersion: 1,
   uiLanguage: 'en-US',
   theme: 'system',
+  logLevel: 'warning',
   sourceLanguage: 'auto',
   targetLanguage: 'zh-CN',
   asrProviderId: 'local.whisper.cpp',
   whisperModelId: 'ggml-base',
+  localAsrCpuMode: 'balanced',
   localWhisperIgnoreCudaMismatch: false,
   allowWhisperAssetDownload: true,
   enableMultiThreadDownload: false,
@@ -162,6 +164,8 @@ function normalizeSettings(settings: AppSettingsPublic): AppSettingsPublic {
   return {
     ...settings,
     allowCloudAsrUpload: usingCloudAsr ? true : Boolean(settings.allowCloudAsrUpload),
+    logLevel: normalizeAppLogLevel(settings.logLevel),
+    localAsrCpuMode: normalizeLocalAsrCpuMode(settings.localAsrCpuMode),
     localWhisperIgnoreCudaMismatch: Boolean(settings.localWhisperIgnoreCudaMismatch),
     sourceLanguage: canonicalSourceLanguageCode(settings.sourceLanguage),
     targetLanguage: canonicalTargetLanguageCode(settings.targetLanguage)
@@ -213,7 +217,7 @@ type SecretRecord =
     };
 
 function hasSecretValue(secret: ProviderSecretInput): boolean {
-  return Boolean(secret.apiKey || secret.baseUrl || secret.organization || secret.model);
+  return Boolean(secret.apiFormat || secret.apiKey || secret.baseUrl || secret.model);
 }
 
 function clampConcurrency(value: number): number {
@@ -224,4 +228,12 @@ function clampConcurrency(value: number): number {
 function clampPositiveInteger(value: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function normalizeLocalAsrCpuMode(value: AppSettingsPublic['localAsrCpuMode'] | undefined): AppSettingsPublic['localAsrCpuMode'] {
+  return value === 'low' || value === 'high' ? value : 'balanced';
+}
+
+function normalizeAppLogLevel(value: AppLogLevel | undefined): AppLogLevel {
+  return value === 'debug' || value === 'info' || value === 'error' ? value : 'warning';
 }

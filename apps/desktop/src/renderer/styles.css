@@ -286,7 +286,7 @@ button:disabled {
 
 .workflowRail {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 240px) minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
   padding: 14px 18px 0;
@@ -297,6 +297,8 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
+  max-width: 240px;
   min-width: 0;
 }
 
@@ -311,6 +313,7 @@ button:disabled {
 }
 
 .workflowRailCopy small {
+  display: block;
   overflow: hidden;
   color: var(--tt-text-muted);
   font-size: 12px;
@@ -514,11 +517,21 @@ button:disabled {
   margin-bottom: 4px;
 }
 
+.workspaceInspectorNotice > div,
+.railNote > div {
+  min-width: 0;
+}
+
 .workspaceInspectorNotice small,
 .railNote small {
+  display: -webkit-box;
+  overflow: hidden;
   color: var(--tt-text-muted);
   font-size: 12px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .workspaceCompactNote {
@@ -684,6 +697,10 @@ button:disabled {
   min-width: 0;
 }
 
+.workspaceHero.fasterWhisperHero {
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+}
+
 .jobMediaCard,
 .jobActionCard,
 .workspaceSignalDeck {
@@ -716,6 +733,14 @@ button:disabled {
   background:
     linear-gradient(180deg, rgba(255, 191, 105, 0.08), transparent 32%),
     var(--tt-surface-panel-soft);
+}
+
+.workspaceHero.fasterWhisperHero .workspaceSignalDeck {
+  grid-column: 1 / -1;
+}
+
+.workspaceHero.fasterWhisperHero .workspaceHealthGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .workspaceCardTop {
@@ -1024,6 +1049,9 @@ h3 {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
   padding: 16px;
   background:
     radial-gradient(circle at top right, rgba(77, 163, 255, 0.16), transparent 30%),
@@ -1036,6 +1064,7 @@ h3 {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
 }
 
 .segmentTitleStack {
@@ -1067,23 +1096,31 @@ h3 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
 }
 
 .editorGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+  min-width: 0;
   min-height: 0;
+  align-content: start;
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .editorGrid label,
 .editorPane {
+  min-width: 0;
   min-height: 0;
 }
 
 .editorPane {
   display: grid;
+  align-content: start;
   min-width: 0;
+  min-height: 0;
   border: 1px solid var(--tt-border-soft);
   border-radius: var(--tt-radius-card);
   padding: 12px;
@@ -1101,6 +1138,8 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .editorPaneHeader small {
@@ -1111,6 +1150,17 @@ h3 {
 
 .editorPane textarea {
   min-height: 180px;
+  height: clamp(180px, 22vh, 260px);
+}
+
+@media (max-width: 1500px) {
+  .subtitleWorkspace {
+    grid-template-columns: minmax(0, 1fr) minmax(340px, 0.94fr);
+  }
+
+  .editorGrid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .translatedPane {
@@ -1608,6 +1658,38 @@ select {
   padding: 0 12px;
 }
 
+.textFieldControl {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.textFieldInput {
+  padding-right: 92px !important;
+}
+
+.textFieldActionButton {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--tt-text-muted);
+  cursor: pointer;
+}
+
+.textFieldActionButton:hover {
+  background: rgba(77, 163, 255, 0.08);
+  color: var(--tt-text-primary);
+}
+
 input[type='checkbox'] {
   width: 16px;
   height: 16px;
@@ -1798,6 +1880,26 @@ input[type='checkbox'] {
   word-break: break-word;
 }
 
+.modelMetaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.modelMetaChip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--tt-radius-pill);
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--tt-text-body);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
 .settingsActionRow {
   display: flex;
   flex-wrap: wrap;
@@ -1839,6 +1941,15 @@ input[type='checkbox'] {
 
 .segmented.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.segmented.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.settingsOptionStack {
+  display: grid;
+  gap: 8px;
 }
 
 .segmented button {
@@ -2353,6 +2464,10 @@ input[type='checkbox'] {
     grid-template-columns: 1fr;
   }
 
+  .workspaceHero.fasterWhisperHero .workspaceHealthGrid {
+    grid-template-columns: 1fr;
+  }
+
   .subtitleTableShell {
     border-right: 0;
     border-bottom: 1px solid var(--tt-border-soft);
@@ -2480,6 +2595,10 @@ input[type='checkbox'] {
 
   .workspaceSignalGrid,
   .workspaceHealthGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspaceHero.fasterWhisperHero .workspaceHealthGrid {
     grid-template-columns: 1fr;
   }
 

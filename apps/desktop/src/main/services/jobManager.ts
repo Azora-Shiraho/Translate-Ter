@@ -12,9 +12,12 @@ import type {
   WorkflowStep
 } from '@shared/models';
 import { canonicalSourceLanguageCode, canonicalTargetLanguageCode, normalizeAsrLanguageCode } from '@shared/languages';
+import { normalizeSubtitleDocumentLayout } from '@shared/subtitleLayout';
 import { TranslationScheduler } from '@shared/translation/scheduler';
 import { MockTranslationProvider, OpenAICompatibleTranslationProvider } from '@shared/translation/providers';
 import { validateAsrRequest } from './asrProviders';
+import { resolveLocalInferenceThreadCount } from './localInferenceProfile';
+import type { FasterWhisperService } from './fasterWhisperService';
 import type { NativeBackendClient } from './nativeBackendClient';
 import type { SettingsStore } from './settingsStore';
 import type { WhisperAssetManager } from './whisperAssets';
@@ -27,7 +30,8 @@ export class JobManager extends EventEmitter {
   constructor(
     private readonly settings: SettingsStore,
     private readonly whisperAssets: WhisperAssetManager,
-    private readonly nativeBackend: NativeBackendClient
+    private readonly nativeBackend: NativeBackendClient,
+    private readonly fasterWhisper: FasterWhisperService
   ) {
     super();
   }
@@ -48,6 +52,7 @@ export class JobManager extends EventEmitter {
       asrProviderId: request.asrProviderId,
       whisperModelId: request.whisperModelId,
       localWhisperUseCuda: request.localWhisperUseCuda ?? false,
+      localAsrCpuMode: request.localAsrCpuMode ?? 'balanced',
       localWhisperIgnoreCudaMismatch: request.localWhisperIgnoreCudaMismatch ?? false,
       allowWhisperAssetDownload: request.allowWhisperAssetDownload ?? true,
       allowCloudAsrUpload: request.allowCloudAsrUpload ?? false,
@@ -75,13 +80,14 @@ export class JobManager extends EventEmitter {
   async start(jobId: string): Promise<void> {
     const job = this.get(jobId);
     try {
-      await this.setProgress(job, 'checking-runtime', 8, 'Checking ASR runtime.');
+      const currentSettings = await this.settings.get();
+      await this.setProgress(job, 'checking-runtime', 8, 'Checking local recognition tools.');
       const nativeHealth = await this.nativeBackend.health();
       if (this.isCancelled(job.id)) return;
       if (!nativeHealth.capabilities.includes('asr.transcribe')) {
         job.warnings.push({
           code: 'NativeCapabilityUnavailable',
-          message: 'Native backend does not currently advertise asr.transcribe.'
+          message: 'The local helper is running, but speech recognition is not ready yet.'
         });
       }
 
@@ -100,25 +106,25 @@ export class JobManager extends EventEmitter {
       if (runtime?.actionRequired && runtime.actionRequired !== 'none') {
         job.warnings.push({
           code: runtime.actionRequired,
-          message: runtime.message ?? 'Local runtime needs setup before real transcription.'
+          message: runtime.message ?? 'Local recognition needs to be set up before starting.'
         });
         this.fail(
           job,
           runtimeActionToErrorCode(runtime.actionRequired),
-          runtime.message ?? 'Local runtime needs setup before real transcription.',
+          runtime.message ?? 'Local recognition needs to be set up before starting.',
           runtime.actionRequired !== 'manifest-not-configured'
         );
         return;
       }
 
-      await this.setProgress(job, 'probing', 18, 'Probing media.');
+      await this.setProgress(job, 'probing', 18, 'Checking the media file.');
       const probe = await this.nativeBackend.probeMedia({ mediaPath: job.mediaPath });
       if (this.isCancelled(job.id)) return;
       if (!probe.ok) {
         this.fail(
           job,
           probe.error?.code ?? 'ProbeFailed',
-          probe.error?.message ?? 'Native backend failed to probe media.',
+          probe.error?.message ?? 'The media file could not be checked.',
           true
         );
         return;
@@ -133,13 +139,13 @@ export class JobManager extends EventEmitter {
         this.fail(
           job,
           extraction.error?.code ?? 'AudioExtractFailed',
-          extraction.error?.message ?? 'Native backend failed to extract audio.',
+          extraction.error?.message ?? 'Audio could not be extracted from this file.',
           true
         );
         return;
       }
 
-      await this.setProgress(job, 'transcribing', 72, 'Transcribing through native backend.');
+      await this.setProgress(job, 'transcribing', 72, 'Starting speech recognition.');
 
       if (job.asrProviderId === 'cloud.openai') {
         const cloudDocument = await this.transcribeWithCloudAsr(
@@ -150,10 +156,32 @@ export class JobManager extends EventEmitter {
         if (!cloudDocument) return;
         job.subtitleDocument = normalizeDocumentForSubtitleDisplay(cloudDocument);
         job.step = 'subtitles';
-        await this.setProgress(job, 'completed', 100, 'Cloud transcription complete.');
+        await this.setProgress(job, 'completed', 100, 'Cloud recognition is complete.');
         return;
       }
 
+      if (job.asrProviderId === 'local.faster-whisper') {
+        const cpuThreadCount = resolveLocalInferenceThreadCount(job.localAsrCpuMode);
+        const localDocument = await this.fasterWhisper.transcribe({
+          jobId: job.id,
+          audioPath: extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path ?? job.mediaPath,
+          sourceLanguage: job.sourceLanguage,
+          targetLanguage: job.targetLanguage,
+          modelId: job.whisperModelId,
+          preferCuda: job.localWhisperUseCuda,
+          cpuThreadCount,
+          allowDownload: job.allowWhisperAssetDownload,
+          useMultiThreadDownload: currentSettings.enableMultiThreadDownload
+        });
+        if (this.isCancelled(job.id)) return;
+        job.subtitleDocument = normalizeDocumentForSubtitleDisplay(localDocument);
+        job.step = 'subtitles';
+        this.cancelledJobs.delete(job.id);
+        await this.setProgress(job, 'completed', 100, 'Local recognition is complete.');
+        return;
+      }
+
+      const cpuThreadCount = resolveLocalInferenceThreadCount(job.localAsrCpuMode);
       const response = await this.nativeBackend.transcribe({
         jobId: job.id,
         mediaPath: job.mediaPath,
@@ -163,6 +191,7 @@ export class JobManager extends EventEmitter {
         targetLanguage: job.targetLanguage,
         asrProviderId: job.asrProviderId,
         preferCuda: job.localWhisperUseCuda,
+        cpuThreadCount,
         runtime: runtime
           ? {
               binaryPath: runtime.binary.expectedPath,
@@ -177,11 +206,11 @@ export class JobManager extends EventEmitter {
         if (shouldRetryOnCpu) {
           job.warnings.push({
             code: 'CudaTranscriptionCrashFallback',
-            message: 'Local whisper CUDA transcription crashed. Retrying once on CPU.',
+            message: 'GPU recognition stopped unexpectedly. Trying CPU once instead.',
             stage: 'asr',
             createdAt: new Date().toISOString()
           });
-          await this.setProgress(job, 'transcribing', 78, 'Local GPU transcription crashed. Retrying on CPU.');
+          await this.setProgress(job, 'transcribing', 78, 'GPU recognition stopped. Retrying with CPU.');
           const cpuRetry = await this.nativeBackend.transcribe({
             jobId: job.id,
             mediaPath: job.mediaPath,
@@ -191,6 +220,7 @@ export class JobManager extends EventEmitter {
             targetLanguage: job.targetLanguage,
             asrProviderId: job.asrProviderId,
             preferCuda: false,
+            cpuThreadCount,
             runtime: runtime
               ? {
                   binaryPath: runtime.binary.expectedPath,
@@ -202,7 +232,7 @@ export class JobManager extends EventEmitter {
           if (cpuRetry.ok) {
             const cpuRetryDocument = nativePayloadToDocument(cpuRetry.payload, job);
             if (!cpuRetryDocument) {
-              this.fail(job, 'MalformedNativeResponse', 'Native backend did not return a subtitle document after CPU retry.', true);
+              this.fail(job, 'MalformedNativeResponse', 'Recognition finished, but no subtitle content was returned after the CPU retry.', true);
               return;
             }
 
@@ -215,14 +245,14 @@ export class JobManager extends EventEmitter {
             });
             job.step = 'subtitles';
             this.cancelledJobs.delete(job.id);
-            await this.setProgress(job, 'completed', 100, 'Transcription complete after CPU retry.');
+            await this.setProgress(job, 'completed', 100, 'Recognition is complete after retrying with CPU.');
             return;
           }
         }
         this.fail(
           job,
           response.error?.code ?? 'NativeBackendError',
-          response.error?.message ?? 'Native backend failed.',
+          response.error?.message ?? 'Local recognition failed.',
           Boolean(response.error?.retryable)
         );
         return;
@@ -231,14 +261,14 @@ export class JobManager extends EventEmitter {
       const document = nativePayloadToDocument(response.payload, job);
       if (this.isCancelled(job.id)) return;
       if (!document) {
-        this.fail(job, 'MalformedNativeResponse', 'Native backend did not return a subtitle document.', true);
+        this.fail(job, 'MalformedNativeResponse', 'Recognition finished, but no subtitle content was returned.', true);
         return;
       }
 
       job.subtitleDocument = normalizeDocumentForSubtitleDisplay(document);
       job.step = 'subtitles';
       this.cancelledJobs.delete(job.id);
-      await this.setProgress(job, 'completed', 100, 'Transcription complete.');
+      await this.setProgress(job, 'completed', 100, 'Recognition is complete.');
     } catch (error) {
       if (this.isCancelled(job.id)) return;
       const message = error instanceof Error ? error.message : String(error);
@@ -325,6 +355,7 @@ export class JobManager extends EventEmitter {
     const job = this.get(jobId);
     this.cancelledJobs.add(job.id);
     this.translationControllers.get(job.id)?.abort();
+    await this.fasterWhisper.cancel(job.id);
     await this.nativeBackend.cancelRunningWork();
     job.stage = 'cancelled';
     job.step = cancelledStep(job);
@@ -383,7 +414,7 @@ export class JobManager extends EventEmitter {
   private async transcribeWithCloudAsr(job: JobSnapshot, audioPath?: string): Promise<SubtitleDocument | undefined> {
     const secret = this.settings.getSecret('cloud.openai');
     if (!secret?.apiKey) {
-      this.fail(job, 'ProviderUnconfigured', 'Cloud ASR API key is not configured.', false);
+      this.fail(job, 'ProviderUnconfigured', 'The cloud recognition API key has not been filled in yet.', false);
       return undefined;
     }
 
@@ -407,7 +438,7 @@ export class JobManager extends EventEmitter {
     });
 
     if (!response.ok) {
-      this.fail(job, 'ProviderUnavailable', `Cloud ASR request failed with HTTP ${response.status}.`, response.status >= 500 || response.status === 429);
+      this.fail(job, 'ProviderUnavailable', `The cloud recognition request failed (HTTP ${response.status}).`, response.status >= 500 || response.status === 429);
       return undefined;
     }
 
@@ -595,32 +626,5 @@ function isAbortError(error: unknown): boolean {
 }
 
 function normalizeDocumentForSubtitleDisplay(document: SubtitleDocument): SubtitleDocument {
-  return {
-    ...document,
-    segments: document.segments.map((segment) => ({
-      ...segment,
-      sourceText: wrapSubtitleText(segment.sourceText),
-      translatedText: segment.translatedText ? wrapSubtitleText(segment.translatedText) : segment.translatedText
-    }))
-  };
-}
-
-function wrapSubtitleText(text: string, maxLineLength = 28): string {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (!normalized) return '';
-
-  const words = normalized.split(' ');
-  const lines: string[] = [];
-  let current = '';
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
-    if (current && next.length > maxLineLength) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = next;
-    }
-  }
-  if (current) lines.push(current);
-  return lines.join('\n');
+  return normalizeSubtitleDocumentLayout(document);
 }

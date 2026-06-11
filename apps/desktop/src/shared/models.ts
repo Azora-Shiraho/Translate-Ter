@@ -53,16 +53,20 @@ export type WorkflowStep = 'import' | 'asr' | 'subtitles' | 'translate' | 'expor
 export type ExportDestinationMode = 'source-directory' | 'selected-directory' | 'ask-each-time';
 export type ExportVariant = 'source' | 'translated' | 'bilingual';
 export type BilingualOrder = 'source-first' | 'target-first';
+export type LocalAsrCpuMode = 'low' | 'balanced' | 'high';
+export type AppLogLevel = 'debug' | 'info' | 'warning' | 'error';
 
 export type AppSettingsPublic = {
   schemaVersion: 1;
   uiLanguage: 'en-US' | 'zh-CN';
   theme: 'dark' | 'light' | 'system';
+  logLevel: AppLogLevel;
   sourceLanguage: string;
   targetLanguage: string;
   asrProviderId: string;
   whisperModelId: string;
   localWhisperUseCuda: boolean;
+  localAsrCpuMode: LocalAsrCpuMode;
   localWhisperIgnoreCudaMismatch: boolean;
   allowWhisperAssetDownload: boolean;
   enableMultiThreadDownload: boolean;
@@ -88,9 +92,9 @@ export type ProviderHealth = {
 };
 
 export type ProviderSecretInput = {
+  apiFormat?: string;
   apiKey?: string;
   baseUrl?: string;
-  organization?: string;
   model?: string;
 };
 
@@ -99,6 +103,7 @@ export type WhisperModelInfo = {
   displayName: string;
   languageScope: 'multilingual' | 'english-only';
   sizeBytes: number;
+  estimatedVramBytes?: number;
   installed: boolean;
   sha256: string;
 };
@@ -172,6 +177,7 @@ export type CreateJobRequest = {
   asrProviderId: string;
   whisperModelId: string;
   localWhisperUseCuda?: boolean;
+  localAsrCpuMode?: LocalAsrCpuMode;
   localWhisperIgnoreCudaMismatch?: boolean;
   allowWhisperAssetDownload?: boolean;
   allowCloudAsrUpload?: boolean;
@@ -208,6 +214,7 @@ export type JobSnapshot = {
   asrProviderId: string;
   whisperModelId: string;
   localWhisperUseCuda: boolean;
+  localAsrCpuMode: LocalAsrCpuMode;
   localWhisperIgnoreCudaMismatch: boolean;
   allowWhisperAssetDownload: boolean;
   allowCloudAsrUpload: boolean;
@@ -244,6 +251,32 @@ export type AssetEvent =
 export type FfmpegRequest = {
   allowDownload: boolean;
   useMultiThreadDownload?: boolean;
+};
+
+export type FasterWhisperRuntimeRequest = {
+  modelId: string;
+  allowDownload: boolean;
+  preferCuda: boolean;
+  useMultiThreadDownload?: boolean;
+  forceManaged?: boolean;
+};
+
+export type FasterWhisperCudaRequest = {
+  allowDownload: boolean;
+  useMultiThreadDownload?: boolean;
+};
+
+export type FasterWhisperCudaStatus = {
+  provider: 'local.faster-whisper';
+  cacheDir: string;
+  runtimeDir: string;
+  source: 'managed' | 'system' | 'missing';
+  hardwareDetected: boolean;
+  runtimeDetected: boolean;
+  cudaSupported: boolean;
+  requiredCudaVersion: '12.8';
+  actionRequired?: 'download-cuda-runtime' | 'none';
+  message?: string;
 };
 
 export type FfmpegStatus = {
