@@ -338,6 +338,7 @@ export type NativeProtocolErrorCode =
   | 'MissingRuntime'
   | 'DownloadRequired'
   | 'ManifestNotConfigured'
+  | 'UnsupportedPlatform'
   | 'UnsupportedCommand'
   | 'MalformedRequest'
   | 'InternalError';

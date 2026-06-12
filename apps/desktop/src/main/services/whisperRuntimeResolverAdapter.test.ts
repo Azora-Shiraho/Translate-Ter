@@ -114,6 +114,19 @@ describe('resolveWhisperRuntimeRequestOptions', () => {
     expect(resolved.preferCuda).toBe(false);
     expect(resolved.ignoreCudaMismatch).toBe(true);
   });
+
+  it('treats auto as cuda-preferred bootstrap on Windows-compatible request flow', () => {
+    const resolved = resolveWhisperRuntimeRequestOptions({
+      preferCuda: false,
+      localAsrAcceleration: 'auto',
+      preferredRuntimeVariant: undefined,
+      ignoreCudaMismatch: false
+    });
+
+    expect(resolved.acceleration).toBe('auto');
+    expect(resolved.preferredVariant).toBeUndefined();
+    expect(resolved.preferCuda).toBe(false);
+  });
 });
 
 describe('resolveWhisperRuntimeSelection', () => {

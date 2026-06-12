@@ -505,8 +505,16 @@ export class JobManager extends EventEmitter {
   }
 }
 
-function runtimeActionToErrorCode(action: NonNullable<JobSnapshot['error']>['code'] | string): 'ManifestNotConfigured' | 'DownloadRequired' {
-  return action === 'manifest-not-configured' ? 'ManifestNotConfigured' : 'DownloadRequired';
+function runtimeActionToErrorCode(
+  action: NonNullable<JobSnapshot['error']>['code'] | string
+): 'ManifestNotConfigured' | 'DownloadRequired' | 'UnsupportedPlatform' {
+  if (action === 'manifest-not-configured') {
+    return 'ManifestNotConfigured';
+  }
+  if (action === 'unsupported-platform') {
+    return 'UnsupportedPlatform';
+  }
+  return 'DownloadRequired';
 }
 
 function nativePayloadToDocument(payload: unknown, job: JobSnapshot): SubtitleDocument | undefined {

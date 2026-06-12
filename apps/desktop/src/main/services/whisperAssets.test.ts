@@ -419,6 +419,27 @@ describe('WhisperAssetManager.ensureRuntime', () => {
     expect(status.actionRequired).toBe('none');
   });
 
+  it('prepares windows cuda dependencies for auto mode before selecting runtime', async () => {
+    createSpawnSyncMock({ hardwareDetected: true, computeCapability: '8.9' });
+    createExistsSyncMock({ cudaRuntimePresent: false });
+    const manager = createManager();
+
+    await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: true,
+      preferCuda: false,
+      localAsrAcceleration: 'auto',
+      preferredRuntimeVariant: undefined,
+      downloadScope: 'runtime'
+    });
+
+    expect((manager as any).ensureWindowsCudaRuntimeDependencies).toHaveBeenCalledTimes(1);
+    const dependencyCandidates = (manager as any).ensureWindowsCudaRuntimeDependencies.mock.calls[0][0] as Array<{ platformKey: string; variant: string }>;
+    expect(dependencyCandidates.some((candidate) =>
+      candidate.platformKey === 'win32-x64-cuda' && candidate.variant === 'cuda'
+    )).toBe(true);
+  });
+
   it('falls back to cpu on cuda mismatch when ignore is false', async () => {
     createSpawnSyncMock({ hardwareDetected: true, computeCapability: '12.0' });
     createExistsSyncMock({ cudaRuntimePresent: true });

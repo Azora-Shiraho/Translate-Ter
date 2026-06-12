@@ -207,12 +207,16 @@ export class WhisperAssetManager extends EventEmitter {
       (downloadScope === 'all' || downloadScope === 'runtime' || downloadScope === 'cuda-runtime');
     const canDownloadModel = request.allowDownload && (downloadScope === 'all' || downloadScope === 'model');
     const cudaHardwareSupported = detectCudaHardwareSupport();
+    const shouldPrepareCudaRuntime =
+      cudaHardwareSupported &&
+      runtimeRequest.acceleration !== 'cpu' &&
+      runtimeRequest.preferredVariant !== 'cpu';
     const preferredCudaVersion = requiredCudaVersion ?? CUDA_11_8;
     let cudaRuntimeDetected = detectCudaSupport(
       this.cudaRuntimeSearchRoots(normalizedManifest.candidates, preferredCudaVersion),
       preferredCudaVersion
     );
-    if (runtimeRequest.preferCuda && cudaHardwareSupported && !cudaRuntimeDetected && canDownloadCudaRuntime) {
+    if (shouldPrepareCudaRuntime && !cudaRuntimeDetected && canDownloadCudaRuntime) {
       await this.ensureWindowsCudaRuntimeDependencies(
         normalizedManifest.candidates,
         preferredCudaVersion,
