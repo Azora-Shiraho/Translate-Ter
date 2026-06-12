@@ -161,7 +161,7 @@ describe('resolveWhisperRuntimeSelection', () => {
     );
 
     expect(result.resolution.variant).toBe('cpu');
-    expect(result.resolution.fallbackReason).toBe('gpu-not-compatible');
+    expect(result.resolution.fallbackReason).toBe('gpu-runtime-missing');
   });
 
   it('falls back to cpu on cuda mismatch when ignore is false', () => {

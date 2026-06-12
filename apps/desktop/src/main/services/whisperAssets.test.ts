@@ -314,6 +314,46 @@ describe('WhisperAssetManager.ensureRuntime', () => {
     expect(status.actionRequired).toBe('none');
   });
 
+  it('uses explicit gpu/cuda settings in ensureRuntime', async () => {
+    createSpawnSyncMock({ hardwareDetected: true, computeCapability: '8.9' });
+    createExistsSyncMock({ cudaRuntimePresent: true });
+    const manager = createManager({ runtimeCudaVersion: '11.8' });
+
+    const status = await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: false,
+      preferCuda: false,
+      localAsrAcceleration: 'gpu',
+      preferredRuntimeVariant: 'cuda',
+      downloadScope: 'none'
+    });
+
+    expect(status.acceleration.requested).toBe('gpu');
+    expect(status.acceleration.selected).toBe('gpu');
+    expect(status.acceleration.runtimeVariant).toBe('cuda');
+    expect(status.actionRequired).toBe('none');
+  });
+
+  it('uses explicit cpu settings in ensureRuntime even if legacy preferCuda is true', async () => {
+    createSpawnSyncMock({ hardwareDetected: true, computeCapability: '8.9' });
+    createExistsSyncMock({ cudaRuntimePresent: true });
+    const manager = createManager({ runtimeCudaVersion: '11.8' });
+
+    const status = await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: false,
+      preferCuda: true,
+      localAsrAcceleration: 'cpu',
+      preferredRuntimeVariant: 'cpu',
+      downloadScope: 'none'
+    });
+
+    expect(status.acceleration.requested).toBe('cpu');
+    expect(status.acceleration.selected).toBe('cpu');
+    expect(status.acceleration.runtimeVariant).toBe('cpu');
+    expect(status.actionRequired).toBe('none');
+  });
+
   it('returns unsupported-platform when current platform has no candidate', async () => {
     createSpawnSyncMock({ hardwareDetected: false });
     createExistsSyncMock({ cudaRuntimePresent: false });
@@ -348,6 +388,9 @@ describe('WhisperAssetManager.ensureRuntime', () => {
     expect(status.acceleration.selected).toBe('cpu');
     expect(status.acceleration.runtimeVariant).toBe('cpu');
     expect(status.acceleration.cudaSupported).toBe(false);
+    expect(status.acceleration.fallbackReason).toBe(
+      'An NVIDIA GPU was found, but the required CUDA files for whisper.cpp are missing.'
+    );
     expect(status.actionRequired).toBe('none');
   });
 
@@ -420,6 +463,66 @@ describe('WhisperAssetManager.ensureRuntime', () => {
 
     expect(status.acceleration.selected).toBe('gpu');
     expect(status.acceleration.runtimeVariant).toBe('cuda');
+    expect(status.actionRequired).toBe('download-runtime');
+  });
+
+  it('returns download-model when runtime is ready but model is missing', async () => {
+    createSpawnSyncMock({ hardwareDetected: true, computeCapability: '8.9' });
+    createExistsSyncMock({ cudaRuntimePresent: true });
+    const manager = createManager({
+      runtimeCudaVersion: '11.8',
+      modelExists: false,
+      modelVerified: false
+    });
+
+    const status = await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: false,
+      preferCuda: true,
+      localAsrAcceleration: 'gpu',
+      preferredRuntimeVariant: 'cuda',
+      downloadScope: 'none'
+    });
+
+    expect(status.acceleration.selected).toBe('gpu');
+    expect(status.acceleration.runtimeVariant).toBe('cuda');
+    expect(status.model.installed).toBe(false);
+    expect(status.model.verified).toBe(false);
+    expect(status.actionRequired).toBe('download-model');
+  });
+
+  it('returns download-runtime when gpu fallback has no cpu candidate', async () => {
+    createSpawnSyncMock({ hardwareDetected: false });
+    createExistsSyncMock({ cudaRuntimePresent: false });
+    const manager = createManager();
+    (manager as any).manifest = vi.fn().mockResolvedValue({
+      ...manifestV1,
+      runtime: {
+        ...manifestV1.runtime,
+        platforms: {
+          'win32-x64-cuda': manifestV1.runtime.platforms['win32-x64-cuda']
+        }
+      }
+    });
+    (manager as any).collectRuntimeCandidateStates = vi.fn().mockResolvedValue({
+      'win32-x64-cuda': {
+        runtime: manifestV1.runtime.platforms['win32-x64-cuda'],
+        binaryState: createBinaryState('cuda')
+      }
+    } satisfies CandidateState);
+
+    const status = await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: false,
+      preferCuda: true,
+      localAsrAcceleration: 'gpu',
+      preferredRuntimeVariant: 'cuda',
+      downloadScope: 'none'
+    });
+
+    expect(status.platformKey).toBe('win32-x64-cuda');
+    expect(status.acceleration.selected).toBe('cpu');
+    expect(status.acceleration.runtimeVariant).toBe('cpu');
     expect(status.actionRequired).toBe('download-runtime');
   });
 

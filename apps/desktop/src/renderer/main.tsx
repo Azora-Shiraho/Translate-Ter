@@ -3533,6 +3533,7 @@ function isRuntimeWarningCode(code: string): boolean {
     'download-model',
     'download-cuda-runtime',
     'manifest-not-configured',
+    'unsupported-platform',
     'pin-manifest-hashes'
   ].includes(code);
 }

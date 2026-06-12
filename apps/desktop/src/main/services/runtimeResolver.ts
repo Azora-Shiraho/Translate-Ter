@@ -11,6 +11,7 @@ export type RuntimeActionRequired =
 export type RuntimeFallbackReason =
   | 'preferred-variant-unavailable'
   | 'gpu-variant-unavailable'
+  | 'gpu-runtime-missing'
   | 'gpu-not-compatible'
   | 'gpu-not-detected';
 
@@ -157,14 +158,7 @@ function selectAutoCandidate(
     };
   }
 
-  const detectedButNotCompatible = candidates.some((candidate) => {
-    if (!GPU_VARIANTS.includes(candidate.variant)) {
-      return false;
-    }
-
-    const capability = capabilityFor(candidate.variant, request);
-    return capability.hardwareDetected || capability.runtimeDetected;
-  });
+  const fallbackReason = resolveGpuFallbackReason(candidates, request);
 
   const warnings = candidates.flatMap((candidate) => {
     if (!GPU_VARIANTS.includes(candidate.variant)) {
@@ -176,7 +170,7 @@ function selectAutoCandidate(
   });
 
   return {
-    fallbackReason: detectedButNotCompatible ? 'gpu-not-compatible' : 'gpu-not-detected',
+    fallbackReason,
     warnings
   };
 }
@@ -198,6 +192,13 @@ function selectGpuCandidate(
   const capability = capabilityFor(preferred.variant, request);
   if (!capability.hardwareDetected && !capability.runtimeDetected) {
     return { fallbackReason: 'gpu-not-detected' };
+  }
+
+  if (preferred.variant === 'cuda' && capability.hardwareDetected && !capability.runtimeDetected) {
+    return {
+      fallbackReason: 'gpu-runtime-missing',
+      warnings: warningsFor(preferred.variant, request)
+    };
   }
 
   if (!runtimeSelectable(preferred.variant, capability, request.ignoreCudaMismatch)) {
@@ -255,10 +256,11 @@ function finalizeCpuResolution(
   }
 ): RuntimeResolution {
   if (!candidate) {
+    const unresolvedPlatformKey = unresolvedCpuPlatformKey(request, result.fallbackReason);
     return unresolved(request, {
-      platformKey: `${request.platform}-${request.arch}`,
+      platformKey: unresolvedPlatformKey,
       variant: 'cpu',
-      actionRequired: 'manifest-not-configured',
+      actionRequired: resolveActionRequired(request, undefined),
       fallbackReason: result.fallbackReason,
       warnings: result.warnings ?? []
     });
@@ -368,6 +370,38 @@ function warningsFor(variant: RuntimeVariant, request: RuntimeResolveRequest): R
   return warning ? [warning] : [];
 }
 
+function resolveGpuFallbackReason(
+  candidates: RuntimeCandidate[],
+  request: RuntimeResolveRequest
+): RuntimeFallbackReason {
+  const gpuCandidates = candidates.filter((candidate) => GPU_VARIANTS.includes(candidate.variant));
+  const capabilities = gpuCandidates.map((candidate) => capabilityFor(candidate.variant, request));
+
+  const anyHardwareDetected = capabilities.some((capability) => capability.hardwareDetected);
+  if (!anyHardwareDetected) {
+    return 'gpu-not-detected';
+  }
+
+  const hasCudaRuntimeMissing = gpuCandidates.some((candidate) => {
+    if (candidate.variant !== 'cuda') {
+      return false;
+    }
+
+    const capability = capabilityFor(candidate.variant, request);
+    return capability.hardwareDetected && !capability.runtimeDetected;
+  });
+  if (hasCudaRuntimeMissing) {
+    return 'gpu-runtime-missing';
+  }
+
+  const anyRuntimeDetected = capabilities.some((capability) => capability.runtimeDetected);
+  if (!anyRuntimeDetected) {
+    return 'gpu-not-compatible';
+  }
+
+  return 'gpu-not-compatible';
+}
+
 function runtimeSelectable(
   variant: RuntimeVariant,
   capability: RuntimeCapability,
@@ -410,6 +444,28 @@ function defaultGpuVariant(platform: string): RuntimeVariant {
   }
 
   return 'cuda';
+}
+
+function unresolvedCpuPlatformKey(
+  request: RuntimeResolveRequest,
+  fallbackReason?: RuntimeFallbackReason
+): string {
+  const baseKey = `${request.platform}-${request.arch}`;
+  const prefersGpuFallback =
+    request.acceleration !== 'cpu' &&
+    fallbackReason !== undefined &&
+    fallbackReason !== 'preferred-variant-unavailable';
+
+  if (!prefersGpuFallback) {
+    return baseKey;
+  }
+
+  const preferredVariant = normalizePreferredVariant(request) ?? defaultGpuVariant(request.platform);
+  if (!GPU_VARIANTS.includes(preferredVariant)) {
+    return baseKey;
+  }
+
+  return `${baseKey}-${preferredVariant}`;
 }
 
 function cpuPreference(request: RuntimeResolveRequest): RuntimeVariant {

@@ -306,10 +306,10 @@ export class WhisperAssetManager extends EventEmitter {
       );
     }
 
-    if (!selectedRuntime) {
+    if (!selectedRuntime || resolution.binaryPath === undefined) {
       return this.status(
         platformKey,
-        'unsupported-platform',
+        selectedRuntime?.binary ?? 'unsupported-platform',
         model.path,
         model.id,
         statusVariant,
@@ -700,9 +700,9 @@ export class WhisperAssetManager extends EventEmitter {
     const fallbackReason =
       fellBackToCpu && versionMismatch
         ? extra.message
-        : fellBackToCpu && resolution.fallbackReason === 'gpu-not-detected' && cudaHardwareSupported && !cudaRuntimeDetected
+        : fellBackToCpu && resolution.fallbackReason === 'gpu-runtime-missing'
           ? 'An NVIDIA GPU was found, but the required CUDA files for whisper.cpp are missing.'
-          : fellBackToCpu && resolution.fallbackReason === 'gpu-not-detected' && !cudaHardwareSupported
+        : fellBackToCpu && resolution.fallbackReason === 'gpu-not-detected' && !cudaHardwareSupported
             ? 'GPU mode was requested, but no supported NVIDIA environment was found on this computer.'
           : fellBackToCpu &&
               (resolution.fallbackReason === 'gpu-not-compatible' ||

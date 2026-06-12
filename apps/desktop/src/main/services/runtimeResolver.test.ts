@@ -104,10 +104,10 @@ describe('resolveRuntime', () => {
     );
 
     expect(resolution.variant).toBe('cpu');
-    expect(resolution.fallbackReason).toBe('gpu-not-compatible');
+    expect(resolution.fallbackReason).toBe('gpu-runtime-missing');
   });
 
-  it('returns manifest-not-configured when cpu mode is forced but no cpu candidate exists', () => {
+  it('returns download-runtime when cpu mode is forced but no cpu candidate exists', () => {
     const resolution = resolveRuntime(
       createRequest({
         acceleration: 'cpu',
@@ -129,7 +129,7 @@ describe('resolveRuntime', () => {
 
     expect(resolution.variant).toBe('cpu');
     expect(resolution.platformKey).toBe('win32-x64');
-    expect(resolution.actionRequired).toBe('manifest-not-configured');
+    expect(resolution.actionRequired).toBe('download-runtime');
   });
 
   it('keeps cpu when cpu mode is forced even if cuda is ready', () => {
@@ -402,7 +402,7 @@ describe('resolveRuntime', () => {
     expect(resolution.actionRequired).toBe('manifest-not-configured');
   });
 
-  it('returns manifest-not-configured when gpu fallback has no cpu candidate', () => {
+  it('returns download-runtime when gpu fallback has no cpu candidate', () => {
     const resolution = resolveRuntime(
       createRequest({
         acceleration: 'gpu',
@@ -430,7 +430,27 @@ describe('resolveRuntime', () => {
     );
 
     expect(resolution.variant).toBe('cpu');
-    expect(resolution.actionRequired).toBe('manifest-not-configured');
+    expect(resolution.platformKey).toBe('win32-x64-cuda');
+    expect(resolution.actionRequired).toBe('download-runtime');
+  });
+
+  it('returns gpu-runtime-missing when gpu mode detects hardware but cuda runtime is unavailable', () => {
+    const resolution = resolveRuntime(
+      createRequest({
+        acceleration: 'gpu',
+        preferredVariant: 'cuda',
+        capabilities: {
+          cuda: {
+            hardwareDetected: true,
+            runtimeDetected: false,
+            compatible: true
+          }
+        }
+      })
+    );
+
+    expect(resolution.variant).toBe('cpu');
+    expect(resolution.fallbackReason).toBe('gpu-runtime-missing');
   });
 
   it('returns unsupported-platform when manifest has no runtime for current platform', () => {
