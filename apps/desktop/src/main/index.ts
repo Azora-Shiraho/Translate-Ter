@@ -269,6 +269,8 @@ function registerIpc(): void {
       modelId: settings.whisperModelId,
       allowDownload: false,
       preferCuda: settings.localWhisperUseCuda,
+      localAsrAcceleration: settings.localAsrAcceleration,
+      preferredRuntimeVariant: settings.preferredRuntimeVariant,
       ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
       useMultiThreadDownload: settings.enableMultiThreadDownload,
       downloadScope: 'none'
@@ -497,8 +499,19 @@ function registerIpc(): void {
   });
   registerHandle('assets:ensure-whisper-runtime', async (_event, request: WhisperRuntimeRequest) => {
     const settings = await settingsStore.get();
+    const localAsrAcceleration = request.localAsrAcceleration ?? settings.localAsrAcceleration;
+    const preferredRuntimeVariant =
+      request.preferredRuntimeVariant !== undefined
+        ? request.preferredRuntimeVariant
+        : request.localAsrAcceleration === undefined
+          ? settings.preferredRuntimeVariant
+          : localAsrAcceleration === 'cpu'
+            ? 'cpu'
+            : undefined;
     return whisperAssets.ensureRuntime({
       ...request,
+      localAsrAcceleration,
+      preferredRuntimeVariant,
       useMultiThreadDownload: request.useMultiThreadDownload ?? settings.enableMultiThreadDownload
     });
   });

@@ -318,6 +318,7 @@ export const i18nResources = {
       runtimeAction: {
         'download-runtime': 'Need runtime files',
         'download-model': 'Need model files',
+        'unsupported-platform': 'Unsupported platform',
         'pin-manifest-hashes': 'Download info is incomplete',
         'manifest-not-configured': 'Automatic download is unavailable',
         'download-required': 'Download required',
@@ -644,6 +645,7 @@ export const i18nResources = {
       runtimeAction: {
         'download-runtime': '需要下载运行时',
         'download-model': '需要下载模型',
+        'unsupported-platform': '当前平台暂不支持',
         'pin-manifest-hashes': '下载信息不完整',
         'manifest-not-configured': '暂不支持自动下载',
         'download-required': '需要下载',

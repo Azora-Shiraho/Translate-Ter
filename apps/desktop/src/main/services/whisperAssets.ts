@@ -267,12 +267,16 @@ export class WhisperAssetManager extends EventEmitter {
     });
     const selectedRuntimeState = runtimeCandidates[resolution.platformKey];
     const selectedRuntime = selectedRuntimeState?.runtime;
-    const platformKey = this.statusPlatformKey(resolution, runtimeRequest.preferCuda);
+    const platformKey = this.statusPlatformKey(resolution, runtimeRequest);
     const compatibilityMessage = this.compatibilityMessageForResolution(
       resolution,
       runtimeRequest,
       compatibility.message
     );
+    const statusVariant = resolution.variant;
+    const statusActionRequired = this.statusActionRequiredForResolution(resolution, selectedRuntime);
+    const statusRuntimeBinary = selectedRuntime?.binary ?? 'unsupported-platform';
+    const statusRuntimePath = selectedRuntimeState?.binaryState.resolvedPath ?? statusRuntimeBinary;
 
     if (manifest.enabled === false) {
       return this.status(
@@ -280,9 +284,9 @@ export class WhisperAssetManager extends EventEmitter {
         selectedRuntime?.binary ?? 'manifest-disabled',
         model.path,
         model.id,
-        normalizeRuntimeAcceleration(selectedRuntime?.acceleration),
+        statusVariant,
         runtimeRequest.acceleration,
-        runtimeRequest.preferCuda,
+        resolution,
         cudaHardwareSupported,
         cudaRuntimeDetected,
         cudaSupported,
@@ -308,9 +312,9 @@ export class WhisperAssetManager extends EventEmitter {
         'unsupported-platform',
         model.path,
         model.id,
-        'cpu',
+        statusVariant,
         runtimeRequest.acceleration,
-        runtimeRequest.preferCuda,
+        resolution,
         cudaHardwareSupported,
         cudaRuntimeDetected,
         cudaSupported,
@@ -322,7 +326,7 @@ export class WhisperAssetManager extends EventEmitter {
         false,
         false,
         {
-          actionRequired: 'download-runtime',
+          actionRequired: statusActionRequired,
           message: compatibilityMessage ?? 'This version does not provide a local Whisper program for your computer yet.'
         }
       );
@@ -339,9 +343,9 @@ export class WhisperAssetManager extends EventEmitter {
         selectedRuntime.binary,
         model.path,
         model.id,
-        normalizeRuntimeAcceleration(selectedRuntime.acceleration),
+        statusVariant,
         runtimeRequest.acceleration,
-        runtimeRequest.preferCuda,
+        resolution,
         cudaHardwareSupported,
         cudaRuntimeDetected,
         cudaSupported,
@@ -387,12 +391,12 @@ export class WhisperAssetManager extends EventEmitter {
 
     return this.status(
       platformKey,
-      resolvedManagedBinary.resolvedPath,
+      resolvedManagedBinary.resolvedPath ?? statusRuntimePath,
       resolvedModelPath,
       model.id,
-      normalizeRuntimeAcceleration(selectedRuntime.acceleration),
+      statusVariant,
       runtimeRequest.acceleration,
-      runtimeRequest.preferCuda,
+      resolution,
       cudaHardwareSupported,
       cudaRuntimeDetected,
       cudaSupported,
@@ -404,7 +408,11 @@ export class WhisperAssetManager extends EventEmitter {
       resolvedBinaryVerified,
       resolvedModelVerified,
       {
-        actionRequired: !resolvedBinaryVerified ? 'download-runtime' : !resolvedModelVerified ? 'download-model' : 'none',
+        actionRequired: !resolvedBinaryVerified
+          ? 'download-runtime'
+          : !resolvedModelVerified
+            ? 'download-model'
+            : statusActionRequired,
         message:
           !resolvedBinaryVerified
             ? 'whisper.cpp binary is missing or cannot run. Download whisper runtime before testing local transcription.'
@@ -673,7 +681,7 @@ export class WhisperAssetManager extends EventEmitter {
     modelId: string,
     runtimeAcceleration: 'cpu' | 'cuda' | 'metal' | 'vulkan',
     requestedAcceleration: LocalAsrAcceleration,
-    preferCuda: boolean,
+    resolution: RuntimeResolution,
     cudaHardwareSupported: boolean,
     cudaRuntimeDetected: boolean,
     cudaSupported: boolean,
@@ -686,19 +694,22 @@ export class WhisperAssetManager extends EventEmitter {
     modelVerified: boolean,
     extra: Pick<WhisperRuntimeStatus, 'actionRequired' | 'message'>
   ): WhisperRuntimeStatus {
-    const canUseCuda = preferCuda && cudaSupported && runtimeAcceleration === 'cuda';
+    const selected = runtimeAcceleration === 'cpu' ? 'cpu' : 'gpu';
+    const preferredGpuRequested = requestedAcceleration === 'gpu' || requestedAcceleration === 'auto';
+    const fellBackToCpu = selected === 'cpu' && preferredGpuRequested && resolution.fallbackReason !== undefined;
     const fallbackReason =
-      preferCuda && versionMismatch
+      fellBackToCpu && versionMismatch
         ? extra.message
-        : preferCuda && cudaHardwareSupported && !cudaRuntimeDetected
+        : fellBackToCpu && resolution.fallbackReason === 'gpu-not-detected' && cudaHardwareSupported && !cudaRuntimeDetected
           ? 'An NVIDIA GPU was found, but the required CUDA files for whisper.cpp are missing.'
-          : preferCuda && !cudaHardwareSupported
+          : fellBackToCpu && resolution.fallbackReason === 'gpu-not-detected' && !cudaHardwareSupported
             ? 'GPU mode was requested, but no supported NVIDIA environment was found on this computer.'
-          : preferCuda && runtimeAcceleration !== 'cuda'
+          : fellBackToCpu &&
+              (resolution.fallbackReason === 'gpu-not-compatible' ||
+                resolution.fallbackReason === 'preferred-variant-unavailable' ||
+                resolution.fallbackReason === 'gpu-variant-unavailable')
             ? 'The selected local Whisper program does not support GPU acceleration.'
-          : runtimeAcceleration === 'cuda' && !cudaSupported
-            ? 'This local Whisper program can use GPU acceleration, but the required NVIDIA environment was not found.'
-            : 'Using CPU mode for local Whisper.';
+            : undefined;
 
     return {
       provider: 'whisper.cpp',
@@ -717,7 +728,7 @@ export class WhisperAssetManager extends EventEmitter {
       },
       acceleration: {
         requested: requestedAcceleration,
-        selected: canUseCuda ? 'gpu' : 'cpu',
+        selected,
         cudaSupported,
         hardwareDetected: cudaHardwareSupported,
         runtimeDetected: cudaRuntimeDetected,
@@ -863,14 +874,15 @@ export class WhisperAssetManager extends EventEmitter {
     return Object.fromEntries(entries);
   }
 
-  private statusPlatformKey(resolution: RuntimeResolution, preferCuda: boolean): string {
+  private statusPlatformKey(resolution: RuntimeResolution, request: WhisperRuntimeResolverOptions): string {
     if (resolution.supported) {
       return resolution.platformKey;
     }
 
     if (resolution.actionRequired === 'manifest-not-configured' || resolution.actionRequired === 'unsupported-platform') {
       const baseKey = this.platformKey();
-      return preferCuda ? `${baseKey}-cuda` : baseKey;
+      const wantsGpu = request.acceleration === 'gpu' || (request.acceleration === 'auto' && request.preferredVariant === 'cuda');
+      return wantsGpu ? `${baseKey}-cuda` : baseKey;
     }
 
     return resolution.platformKey;
@@ -891,6 +903,13 @@ export class WhisperAssetManager extends EventEmitter {
     }
 
     return undefined;
+  }
+
+  private statusActionRequiredForResolution(
+    resolution: RuntimeResolution,
+    runtime: WhisperManifestRuntime | undefined
+  ): NonNullable<WhisperRuntimeStatus['actionRequired']> {
+    return resolution.actionRequired;
   }
 
   private async findExistingModelPath(manifestModelPath: string): Promise<string | undefined> {
@@ -1301,10 +1320,6 @@ function isCudaRuntimeCompatibleWithGpu(
   }
 
   return { ok: true };
-}
-
-function normalizeRuntimeAcceleration(value: string | undefined): 'cpu' | 'cuda' | 'metal' | 'vulkan' {
-  return value === 'cuda' || value === 'metal' || value === 'vulkan' ? value : 'cpu';
 }
 
 function canRunWhisperBinary(path: string): boolean {
