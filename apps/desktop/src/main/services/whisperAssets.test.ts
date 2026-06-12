@@ -80,6 +80,8 @@ type CandidateState = Record<
   string,
   {
     runtime: (typeof manifestV1.runtime.platforms)[keyof typeof manifestV1.runtime.platforms];
+    variant: 'cpu' | 'cuda';
+    platformKey: string;
     binaryState: BinaryState;
   }
 >;
@@ -104,10 +106,14 @@ function createCandidateStates(overrides?: {
   return {
     'win32-x64': {
       runtime: manifestV1.runtime.platforms['win32-x64'],
+      variant: 'cpu',
+      platformKey: 'win32-x64',
       binaryState: createBinaryState('cpu', overrides?.cpu)
     },
     'win32-x64-cuda': {
       runtime: manifestV1.runtime.platforms['win32-x64-cuda'],
+      variant: 'cuda',
+      platformKey: 'win32-x64-cuda',
       binaryState: createBinaryState('cuda', overrides?.cuda)
     }
   };
@@ -226,8 +232,8 @@ function createManager(options?: {
   manager.downloadAndInstall = vi.fn().mockResolvedValue(undefined);
   const candidateStates = options?.candidateStates ?? createCandidateStates();
   manager.collectRuntimeCandidateStates = vi.fn().mockResolvedValue(candidateStates);
-  manager.probeRuntimeBinaryState = vi.fn().mockImplementation(async (runtime: { acceleration: string }) =>
-    runtime.acceleration === 'cuda'
+  manager.probeRuntimeBinaryState = vi.fn().mockImplementation(async (_runtime: { acceleration: string }, variant: 'cpu' | 'cuda') =>
+    variant === 'cuda'
       ? createBinaryState('cuda', candidateStates['win32-x64-cuda']?.binaryState)
       : createBinaryState('cpu', candidateStates['win32-x64']?.binaryState)
   );
@@ -388,9 +394,28 @@ describe('WhisperAssetManager.ensureRuntime', () => {
     expect(status.acceleration.selected).toBe('cpu');
     expect(status.acceleration.runtimeVariant).toBe('cpu');
     expect(status.acceleration.cudaSupported).toBe(false);
-    expect(status.acceleration.fallbackReason).toBe(
-      'An NVIDIA GPU was found, but the required CUDA files for whisper.cpp are missing.'
-    );
+    expect(status.acceleration.fallbackReason).toBe('gpu-runtime-missing');
+    expect(status.actionRequired).toBe('none');
+  });
+
+  it('falls back to cpu for auto mode when gpu is unavailable', async () => {
+    createSpawnSyncMock({ hardwareDetected: false });
+    createExistsSyncMock({ cudaRuntimePresent: false });
+    const manager = createManager();
+
+    const status = await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: false,
+      preferCuda: false,
+      localAsrAcceleration: 'auto',
+      preferredRuntimeVariant: undefined,
+      downloadScope: 'none'
+    });
+
+    expect(status.acceleration.requested).toBe('auto');
+    expect(status.acceleration.selected).toBe('cpu');
+    expect(status.acceleration.runtimeVariant).toBe('cpu');
+    expect(status.acceleration.fallbackReason).toBe('gpu-not-detected');
     expect(status.actionRequired).toBe('none');
   });
 
@@ -491,6 +516,53 @@ describe('WhisperAssetManager.ensureRuntime', () => {
     expect(status.actionRequired).toBe('download-model');
   });
 
+  it('prefers runtime download before model download when both are missing and downloads are allowed', async () => {
+    createSpawnSyncMock({ hardwareDetected: true, computeCapability: '8.9' });
+    createExistsSyncMock({ cudaRuntimePresent: true });
+    const candidateStates = createCandidateStates({
+      cuda: {
+        existingPath: undefined,
+        verifiedPath: undefined,
+        resolvedPath: 'D:/runtime/whisper_cpp/cuda/Release/whisper-cli.exe',
+        installed: false,
+        verified: false
+      }
+    });
+    const manager = createManager({
+      candidateStates,
+      modelExists: false,
+      modelVerified: false
+    });
+
+    const status = await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: true,
+      preferCuda: true,
+      localAsrAcceleration: 'gpu',
+      preferredRuntimeVariant: 'cuda',
+      downloadScope: 'all'
+    });
+
+    expect((manager as any).downloadAndInstall).toHaveBeenCalledTimes(2);
+    expect((manager as any).downloadAndInstall).toHaveBeenNthCalledWith(
+      1,
+      'runtime',
+      'https://example.test/cuda.zip',
+      'D:/runtime/whisper_cpp/cuda/Release/whisper-cli.exe',
+      VALID_SHA_CUDA,
+      false
+    );
+    expect((manager as any).downloadAndInstall).toHaveBeenNthCalledWith(
+      2,
+      'model',
+      'https://example.test/model.bin',
+      expect.stringMatching(/runtime[\\/]+whisper_cpp[\\/]+models[\\/]+ggml-base\.bin$/),
+      VALID_SHA_MODEL,
+      false
+    );
+    expect(status.actionRequired).toBe('download-runtime');
+  });
+
   it('returns download-runtime when gpu fallback has no cpu candidate', async () => {
     createSpawnSyncMock({ hardwareDetected: false });
     createExistsSyncMock({ cudaRuntimePresent: false });
@@ -507,6 +579,8 @@ describe('WhisperAssetManager.ensureRuntime', () => {
     (manager as any).collectRuntimeCandidateStates = vi.fn().mockResolvedValue({
       'win32-x64-cuda': {
         runtime: manifestV1.runtime.platforms['win32-x64-cuda'],
+        variant: 'cuda',
+        platformKey: 'win32-x64-cuda',
         binaryState: createBinaryState('cuda')
       }
     } satisfies CandidateState);
@@ -554,5 +628,42 @@ describe('WhisperAssetManager.ensureRuntime', () => {
     expect(status.acceleration.selected).toBe('gpu');
     expect(status.acceleration.runtimeVariant).toBe('cuda');
     expect(status.actionRequired).toBe('none');
+  });
+
+  it('uses suffix-derived cuda variant for cuda search roots and dependency download when v1 acceleration is wrong', async () => {
+    createSpawnSyncMock({ hardwareDetected: true, computeCapability: '8.9' });
+    createExistsSyncMock({ cudaRuntimePresent: false });
+    const manager = createManager();
+    const cudaSearchRootsSpy = vi.spyOn(manager as any, 'cudaRuntimeSearchRoots');
+    (manager as any).manifest = vi.fn().mockResolvedValue({
+      ...manifestV1,
+      runtime: {
+        ...manifestV1.runtime,
+        platforms: {
+          ...manifestV1.runtime.platforms,
+          'win32-x64-cuda': {
+            ...manifestV1.runtime.platforms['win32-x64-cuda'],
+            acceleration: 'cpu'
+          }
+        }
+      }
+    });
+
+    await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: true,
+      preferCuda: true,
+      downloadScope: 'runtime'
+    });
+
+    const normalizedCandidates = (cudaSearchRootsSpy.mock.calls[0]?.[0] ?? []) as Array<{ platformKey: string; variant: string }>;
+    expect(normalizedCandidates.some((candidate: { platformKey: string; variant: string }) =>
+      candidate.platformKey === 'win32-x64-cuda' && candidate.variant === 'cuda'
+    )).toBe(true);
+    expect((manager as any).ensureWindowsCudaRuntimeDependencies).toHaveBeenCalledTimes(1);
+    const dependencyCandidates = (manager as any).ensureWindowsCudaRuntimeDependencies.mock.calls[0][0] as Array<{ platformKey: string; variant: string }>;
+    expect(dependencyCandidates.some((candidate: { platformKey: string; variant: string }) =>
+      candidate.platformKey === 'win32-x64-cuda' && candidate.variant === 'cuda'
+    )).toBe(true);
   });
 });

@@ -46,6 +46,7 @@ import type {
   SubtitleWarning,
   WhisperModelInfo,
   WhisperModelStatus,
+  WhisperRuntimeFallbackCode,
   WhisperRuntimeStatus
 } from '@shared/types';
 import type { AssetEvent, JobEvent, JobStage } from '@shared/models';
@@ -3360,7 +3361,7 @@ function describeCudaStatusDetail(
   if (!status.acceleration.hardwareDetected) {
     return t('cudaNoHardware');
   }
-  return status.acceleration.fallbackReason ?? t('cudaUnavailable');
+  return fallbackReasonLabel(status.acceleration.fallbackReason, t);
 }
 
 function describeCudaStatusShort(
@@ -3381,6 +3382,22 @@ function hasBlockingCudaMismatch(status: WhisperRuntimeStatus | undefined, ignor
   const required = status.acceleration.requiredCudaVersion;
   const current = status.acceleration.runtimeCudaVersion;
   return Boolean(required && current && required !== current);
+}
+
+function fallbackReasonLabel(
+  code: WhisperRuntimeFallbackCode | undefined,
+  t: (key: string) => string
+): string {
+  if (code === 'gpu-runtime-missing') return t('cudaRuntimeMissing');
+  if (code === 'gpu-not-detected') return t('cudaNoHardware');
+  if (
+    code === 'gpu-not-compatible' ||
+    code === 'preferred-variant-unavailable' ||
+    code === 'gpu-variant-unavailable'
+  ) {
+    return t('cudaUnavailable');
+  }
+  return t('cudaUnavailable');
 }
 
 function describeFfmpegStatusDetail(
