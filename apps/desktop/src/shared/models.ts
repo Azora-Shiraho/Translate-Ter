@@ -119,6 +119,8 @@ export type WhisperRuntimeRequest = {
   modelId: string;
   allowDownload: boolean;
   preferCuda: boolean;
+  localAsrAcceleration?: LocalAsrAcceleration;
+  preferredRuntimeVariant?: RuntimeVariant;
   ignoreCudaMismatch?: boolean;
   useMultiThreadDownload?: boolean;
   downloadScope?: 'all' | 'runtime' | 'cuda-runtime' | 'model' | 'none';

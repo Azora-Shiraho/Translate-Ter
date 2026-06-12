@@ -7,6 +7,7 @@ import { access, copyFile, mkdir, open, readFile, readdir, rename, rm, writeFile
 import { availableParallelism, cpus } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import type {
+  LocalAsrAcceleration,
   AssetEvent,
   WhisperModelInfo,
   WhisperModelRequest,
@@ -15,6 +16,14 @@ import type {
   WhisperRuntimeStatus
 } from '@shared/models';
 import { legacyWhisperCudaRuntimeDirs, sharedCudaRuntimeDir } from './cudaRuntimePaths';
+import {
+  type RuntimeResolution
+} from './runtimeResolver';
+import {
+  resolveWhisperRuntimeRequestOptions,
+  resolveWhisperRuntimeSelection,
+  type WhisperRuntimeResolverOptions
+} from './whisperRuntimeResolverAdapter';
 
 const NVIDIA_CUDA_REDIST_BASE_URL = 'https://developer.download.nvidia.com/compute/cuda/redist/';
 const NVIDIA_CUDA_REDIST_MANIFEST_URLS = {
@@ -79,6 +88,19 @@ type NvidiaGpuInfo = {
   name: string;
   architecture?: string;
   computeCapability?: string;
+};
+
+type WhisperRuntimeCandidateState = {
+  runtime: WhisperManifestRuntime;
+  binaryState: {
+    installPath: string;
+    existingPath?: string;
+    verifiedPath?: string;
+    systemPath?: string;
+    resolvedPath: string;
+    installed: boolean;
+    verified: boolean;
+  };
 };
 
 export class WhisperAssetManager extends EventEmitter {
@@ -166,6 +188,7 @@ export class WhisperAssetManager extends EventEmitter {
     await this.migrateLegacyCacheIfNeeded();
     const manifest = await this.manifest();
     const model = manifest.models.find((item) => item.id === request.modelId) ?? manifest.models[0];
+    const runtimeRequest = resolveWhisperRuntimeRequestOptions(request);
     const gpuInfo = detectNvidiaGpuInfo();
     const requiredCudaVersion = gpuInfo ? requiredCudaVersionForGpu(gpuInfo) : undefined;
     const downloadScope = request.downloadScope ?? 'all';
@@ -178,7 +201,7 @@ export class WhisperAssetManager extends EventEmitter {
     const cudaHardwareSupported = detectCudaHardwareSupport();
     const preferredCudaVersion = requiredCudaVersion ?? CUDA_11_8;
     let cudaRuntimeDetected = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest, preferredCudaVersion), preferredCudaVersion);
-    if (request.preferCuda && cudaHardwareSupported && !cudaRuntimeDetected && canDownloadCudaRuntime) {
+    if (runtimeRequest.preferCuda && cudaHardwareSupported && !cudaRuntimeDetected && canDownloadCudaRuntime) {
       await this.ensureWindowsCudaRuntimeDependencies(
         manifest,
         preferredCudaVersion,
@@ -186,35 +209,80 @@ export class WhisperAssetManager extends EventEmitter {
       );
       cudaRuntimeDetected = detectCudaSupport(this.cudaRuntimeSearchRoots(manifest, preferredCudaVersion), preferredCudaVersion);
     }
-    const { runtime, platformKey, compatibilityMessage } = this.selectRuntime(
-      manifest,
-      request.preferCuda,
-      cudaHardwareSupported,
-      cudaRuntimeDetected,
-      gpuInfo,
-      Boolean(request.ignoreCudaMismatch)
-    );
     const hasPinnedCudaRuntime = Boolean(manifest.runtime.platforms[`${this.platformKey()}-cuda`]);
     const runtimeCudaVersion = this.runtimeCudaVersion(manifest);
-    const versionMismatch =
-      hasPinnedCudaRuntime &&
-      cudaHardwareSupported &&
-      cudaRuntimeDetected &&
-      !isCudaRuntimeCompatibleWithGpu(runtimeCudaVersion, gpuInfo).ok;
+    const compatibility = isCudaRuntimeCompatibleWithGpu(runtimeCudaVersion, gpuInfo);
+    const versionMismatch = hasPinnedCudaRuntime && cudaHardwareSupported && cudaRuntimeDetected && !compatibility.ok;
     const cudaSupported =
       hasPinnedCudaRuntime &&
       cudaHardwareSupported &&
       cudaRuntimeDetected &&
-      (!versionMismatch || Boolean(request.ignoreCudaMismatch));
+      (!versionMismatch || runtimeRequest.ignoreCudaMismatch);
+    const managedModelPath = join(this.cacheDir(), model.path);
+    const existingModelPath = await this.findExistingModelPath(model.path);
+    const modelPath = existingModelPath ?? managedModelPath;
+    const modelExists = await this.exists(modelPath);
+    const modelVerified = isPinnedSha256(model.sha256) && modelExists ? await this.verifySha256(modelPath, model.sha256) : false;
+    const capabilities = {
+      cuda: {
+        hardwareDetected: cudaHardwareSupported,
+        runtimeDetected: cudaRuntimeDetected,
+        compatible: !versionMismatch,
+        warning: versionMismatch && compatibility.message
+          ? {
+              code: 'cuda-version-mismatch' as const,
+              message: compatibility.message
+            }
+          : undefined
+      }
+    } satisfies Parameters<typeof resolveWhisperRuntimeSelection>[0]['capabilities'];
+    const runtimeCandidates = await this.collectRuntimeCandidateStates(manifest);
+    const runtimeBinaries = Object.fromEntries(
+      Object.entries(runtimeCandidates).map(([platformKey, state]) => [
+        platformKey,
+        {
+          exists: state.binaryState.installed,
+          verified: state.binaryState.verified,
+          resolvedPath: state.binaryState.resolvedPath
+        }
+      ])
+    );
+    const { resolution } = resolveWhisperRuntimeSelection({
+      manifest,
+      platform: process.platform,
+      arch: process.arch,
+      modelId: model.id,
+      options: {
+        acceleration: runtimeRequest.acceleration,
+        preferredVariant: runtimeRequest.preferredVariant,
+        ignoreCudaMismatch: runtimeRequest.ignoreCudaMismatch
+      },
+      runtimeBinaries,
+      modelFile: {
+        exists: modelExists,
+        verified: modelVerified,
+        resolvedPath: modelPath
+      },
+      capabilities
+    });
+    const selectedRuntimeState = runtimeCandidates[resolution.platformKey];
+    const selectedRuntime = selectedRuntimeState?.runtime;
+    const platformKey = this.statusPlatformKey(resolution, runtimeRequest.preferCuda);
+    const compatibilityMessage = this.compatibilityMessageForResolution(
+      resolution,
+      runtimeRequest,
+      compatibility.message
+    );
 
     if (manifest.enabled === false) {
       return this.status(
         platformKey,
-        runtime?.binary ?? 'manifest-disabled',
+        selectedRuntime?.binary ?? 'manifest-disabled',
         model.path,
         model.id,
-        runtime?.acceleration ?? 'cpu',
-        request.preferCuda,
+        normalizeRuntimeAcceleration(selectedRuntime?.acceleration),
+        runtimeRequest.acceleration,
+        runtimeRequest.preferCuda,
         cudaHardwareSupported,
         cudaRuntimeDetected,
         cudaSupported,
@@ -234,14 +302,15 @@ export class WhisperAssetManager extends EventEmitter {
       );
     }
 
-    if (!runtime) {
+    if (!selectedRuntime) {
       return this.status(
         platformKey,
         'unsupported-platform',
         model.path,
         model.id,
         'cpu',
-        request.preferCuda,
+        runtimeRequest.acceleration,
+        runtimeRequest.preferCuda,
         cudaHardwareSupported,
         cudaRuntimeDetected,
         cudaSupported,
@@ -259,26 +328,20 @@ export class WhisperAssetManager extends EventEmitter {
       );
     }
 
-    const managedBinary = await this.probeManagedRuntimeBinary(runtime);
-    const systemBinaryPath = managedBinary.verifiedPath ? undefined : await this.findSystemWhisperBinary(runtime);
-    const binaryPath = managedBinary.verifiedPath ?? systemBinaryPath ?? managedBinary.existingPath ?? managedBinary.installPath;
-    const managedModelPath = join(this.cacheDir(), model.path);
-    const existingModelPath = await this.findExistingModelPath(model.path);
-    const modelPath = existingModelPath ?? managedModelPath;
-    const hashesPinned = isPinnedSha256(runtime.sha256) && isPinnedSha256(model.sha256);
-    const binaryExists = Boolean(systemBinaryPath) || Boolean(managedBinary.existingPath);
-    const modelExists = await this.exists(modelPath);
-    const binaryVerified = Boolean(systemBinaryPath) || Boolean(managedBinary.verifiedPath);
-    const modelVerified = hashesPinned && modelExists ? await this.verifySha256(modelPath, model.sha256) : false;
+    const managedBinary = selectedRuntimeState!.binaryState;
+    const hashesPinned = isPinnedSha256(selectedRuntime.sha256) && isPinnedSha256(model.sha256);
+    const binaryExists = managedBinary.installed;
+    const binaryVerified = managedBinary.verified;
 
     if (!hashesPinned) {
       return this.status(
         platformKey,
-        runtime.binary,
+        selectedRuntime.binary,
         model.path,
         model.id,
-        runtime.acceleration,
-        request.preferCuda,
+        normalizeRuntimeAcceleration(selectedRuntime.acceleration),
+        runtimeRequest.acceleration,
+        runtimeRequest.preferCuda,
         cudaHardwareSupported,
         cudaRuntimeDetected,
         cudaSupported,
@@ -299,9 +362,9 @@ export class WhisperAssetManager extends EventEmitter {
     if (!binaryVerified && canDownloadRuntime) {
       await this.downloadAndInstall(
         'runtime',
-        runtime.url,
+        selectedRuntime.url,
         managedBinary.installPath,
-        runtime.sha256,
+        selectedRuntime.sha256,
         Boolean(request.useMultiThreadDownload)
       );
     }
@@ -315,26 +378,21 @@ export class WhisperAssetManager extends EventEmitter {
       );
     }
 
-    const resolvedManagedBinary = await this.probeManagedRuntimeBinary(runtime);
-    const resolvedSystemBinaryPath = resolvedManagedBinary.verifiedPath ? undefined : await this.findSystemWhisperBinary(runtime);
-    const resolvedBinaryPath =
-      resolvedManagedBinary.verifiedPath ??
-      resolvedSystemBinaryPath ??
-      resolvedManagedBinary.existingPath ??
-      resolvedManagedBinary.installPath;
+    const resolvedManagedBinary = await this.probeRuntimeBinaryState(selectedRuntime);
     const resolvedModelPath = (await this.findExistingModelPath(model.path)) ?? managedModelPath;
-    const resolvedBinaryInstalled = Boolean(resolvedSystemBinaryPath) || Boolean(resolvedManagedBinary.existingPath);
+    const resolvedBinaryInstalled = resolvedManagedBinary.installed;
     const resolvedModelInstalled = await this.exists(resolvedModelPath);
-    const resolvedBinaryVerified = Boolean(resolvedSystemBinaryPath) || Boolean(resolvedManagedBinary.verifiedPath);
+    const resolvedBinaryVerified = resolvedManagedBinary.verified;
     const resolvedModelVerified = await this.verifyIfPresent(resolvedModelPath, model.sha256);
 
     return this.status(
       platformKey,
-      resolvedBinaryPath,
+      resolvedManagedBinary.resolvedPath,
       resolvedModelPath,
       model.id,
-      runtime.acceleration,
-      request.preferCuda,
+      normalizeRuntimeAcceleration(selectedRuntime.acceleration),
+      runtimeRequest.acceleration,
+      runtimeRequest.preferCuda,
       cudaHardwareSupported,
       cudaRuntimeDetected,
       cudaSupported,
@@ -614,6 +672,7 @@ export class WhisperAssetManager extends EventEmitter {
     modelPath: string,
     modelId: string,
     runtimeAcceleration: 'cpu' | 'cuda' | 'metal' | 'vulkan',
+    requestedAcceleration: LocalAsrAcceleration,
     preferCuda: boolean,
     cudaHardwareSupported: boolean,
     cudaRuntimeDetected: boolean,
@@ -657,7 +716,7 @@ export class WhisperAssetManager extends EventEmitter {
         verified: modelVerified
       },
       acceleration: {
-        requested: preferCuda ? 'gpu' : 'cpu',
+        requested: requestedAcceleration,
         selected: canUseCuda ? 'gpu' : 'cpu',
         cudaSupported,
         hardwareDetected: cudaHardwareSupported,
@@ -698,51 +757,6 @@ export class WhisperAssetManager extends EventEmitter {
 
   private platformKey(): string {
     return `${process.platform}-${process.arch}`;
-  }
-
-  private selectRuntime(
-    manifest: WhisperManifest,
-    preferCuda: boolean,
-    cudaHardwareSupported: boolean,
-    cudaRuntimeDetected: boolean,
-    gpuInfo?: NvidiaGpuInfo,
-    ignoreCudaMismatch = false
-  ): {
-    runtime: WhisperManifest['runtime']['platforms'][string] | undefined;
-    platformKey: string;
-    compatibilityMessage?: string;
-  } {
-    const baseKey = this.platformKey();
-    const cpuRuntime = manifest.runtime.platforms[baseKey];
-    const cudaRuntime = manifest.runtime.platforms[`${baseKey}-cuda`];
-    const compatibility = isCudaRuntimeCompatibleWithGpu(cudaRuntime?.cudaVersion, gpuInfo);
-    const cudaSupported =
-      Boolean(cudaRuntime) &&
-      cudaHardwareSupported &&
-      cudaRuntimeDetected &&
-      (compatibility.ok || ignoreCudaMismatch);
-
-    if (preferCuda && cudaSupported && cudaRuntime) {
-      return { runtime: cudaRuntime, platformKey: `${baseKey}-cuda` };
-    }
-
-    if (preferCuda && cudaRuntime && cudaHardwareSupported && cudaRuntimeDetected && !compatibility.ok) {
-      return {
-        runtime: cpuRuntime,
-        platformKey: cpuRuntime ? baseKey : `${baseKey}-cuda`,
-        compatibilityMessage: compatibility.message
-      };
-    }
-
-    if (cpuRuntime) {
-      return { runtime: cpuRuntime, platformKey: baseKey };
-    }
-
-    if (preferCuda && cudaSupported && cudaRuntime) {
-      return { runtime: cudaRuntime, platformKey: `${baseKey}-cuda` };
-    }
-
-    return { runtime: undefined, platformKey: preferCuda ? `${baseKey}-cuda` : baseKey };
   }
 
   private runtimeCudaVersion(manifest: WhisperManifest): SupportedCudaVersion | undefined {
@@ -817,6 +831,66 @@ export class WhisperAssetManager extends EventEmitter {
     }
 
     return { installPath, existingPath };
+  }
+
+  private async probeRuntimeBinaryState(runtime: WhisperManifestRuntime): Promise<WhisperRuntimeCandidateState['binaryState']> {
+    const managedBinary = await this.probeManagedRuntimeBinary(runtime);
+    const systemPath = managedBinary.verifiedPath ? undefined : await this.findSystemWhisperBinary(runtime);
+    const resolvedPath = managedBinary.verifiedPath ?? systemPath ?? managedBinary.existingPath ?? managedBinary.installPath;
+    return {
+      installPath: managedBinary.installPath,
+      existingPath: managedBinary.existingPath,
+      verifiedPath: managedBinary.verifiedPath,
+      systemPath,
+      resolvedPath,
+      installed: Boolean(systemPath) || Boolean(managedBinary.existingPath),
+      verified: Boolean(systemPath) || Boolean(managedBinary.verifiedPath)
+    };
+  }
+
+  private async collectRuntimeCandidateStates(
+    manifest: WhisperManifest
+  ): Promise<Record<string, WhisperRuntimeCandidateState>> {
+    const entries = await Promise.all(
+      Object.entries(manifest.runtime.platforms).map(async ([platformKey, runtime]) => [
+        platformKey,
+        {
+          runtime,
+          binaryState: await this.probeRuntimeBinaryState(runtime)
+        }
+      ] as const)
+    );
+    return Object.fromEntries(entries);
+  }
+
+  private statusPlatformKey(resolution: RuntimeResolution, preferCuda: boolean): string {
+    if (resolution.supported) {
+      return resolution.platformKey;
+    }
+
+    if (resolution.actionRequired === 'manifest-not-configured' || resolution.actionRequired === 'unsupported-platform') {
+      const baseKey = this.platformKey();
+      return preferCuda ? `${baseKey}-cuda` : baseKey;
+    }
+
+    return resolution.platformKey;
+  }
+
+  private compatibilityMessageForResolution(
+    resolution: RuntimeResolution,
+    request: WhisperRuntimeResolverOptions,
+    mismatchMessage?: string
+  ): string | undefined {
+    if (
+      request.preferCuda &&
+      resolution.variant === 'cpu' &&
+      resolution.fallbackReason === 'gpu-not-compatible' &&
+      mismatchMessage
+    ) {
+      return mismatchMessage;
+    }
+
+    return undefined;
   }
 
   private async findExistingModelPath(manifestModelPath: string): Promise<string | undefined> {
@@ -1227,6 +1301,10 @@ function isCudaRuntimeCompatibleWithGpu(
   }
 
   return { ok: true };
+}
+
+function normalizeRuntimeAcceleration(value: string | undefined): 'cpu' | 'cuda' | 'metal' | 'vulkan' {
+  return value === 'cuda' || value === 'metal' || value === 'vulkan' ? value : 'cpu';
 }
 
 function canRunWhisperBinary(path: string): boolean {
