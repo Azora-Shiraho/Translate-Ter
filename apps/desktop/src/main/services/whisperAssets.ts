@@ -430,7 +430,7 @@ export class WhisperAssetManager extends EventEmitter {
           ? 'download-runtime'
           : !resolvedModelVerified
             ? 'download-model'
-            : statusActionRequired,
+            : 'none',
         message:
           !resolvedBinaryVerified
             ? 'whisper.cpp binary is missing or cannot run. Download whisper runtime before testing local transcription.'

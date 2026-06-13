@@ -46,7 +46,6 @@ import type {
   SubtitleWarning,
   WhisperModelInfo,
   WhisperModelStatus,
-  WhisperRuntimeFallbackCode,
   WhisperRuntimeStatus
 } from '@shared/types';
 import type { AssetEvent, JobEvent, JobStage } from '@shared/models';
@@ -3385,7 +3384,7 @@ function hasBlockingCudaMismatch(status: WhisperRuntimeStatus | undefined, ignor
 }
 
 function fallbackReasonLabel(
-  code: WhisperRuntimeFallbackCode | undefined,
+  code: string | undefined,
   t: (key: string) => string
 ): string {
   if (code === 'gpu-runtime-missing') return t('cudaRuntimeMissing');

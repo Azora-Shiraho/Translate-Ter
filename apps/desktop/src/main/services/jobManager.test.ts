@@ -125,7 +125,7 @@ describe('JobManager', () => {
     const failed = manager.get(job.id);
     expect(failed.stage).toBe('failed');
     expect(failed.error?.code).toBe('UnsupportedPlatform');
-    expect(failed.error?.retryable).toBe(true);
+    expect(failed.error?.retryable).toBe(false);
   });
 
   it('passes preferCuda=false to native backend when resolver selected cpu fallback', async () => {

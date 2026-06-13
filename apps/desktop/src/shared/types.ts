@@ -31,7 +31,6 @@ import type {
   WhisperModelRequest,
   WhisperModelStatus,
   WhisperRuntimeRequest,
-  WhisperRuntimeFallbackCode,
   WhisperRuntimeStatus
 } from './models';
 
@@ -75,7 +74,6 @@ export type {
   ProviderHealth,
   ProviderSecretInput,
   RuntimeVariant,
-  WhisperRuntimeFallbackCode,
   WhisperModelInfo,
   WhisperModelRequest,
   WhisperModelStatus,

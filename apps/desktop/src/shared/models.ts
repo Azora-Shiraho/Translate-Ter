@@ -56,12 +56,6 @@ export type BilingualOrder = 'source-first' | 'target-first';
 export type LocalAsrCpuMode = 'low' | 'balanced' | 'high';
 export type LocalAsrAcceleration = 'auto' | 'cpu' | 'gpu';
 export type RuntimeVariant = 'cpu' | 'cuda' | 'metal' | 'vulkan';
-export type WhisperRuntimeFallbackCode =
-  | 'preferred-variant-unavailable'
-  | 'gpu-variant-unavailable'
-  | 'gpu-runtime-missing'
-  | 'gpu-not-compatible'
-  | 'gpu-not-detected';
 export type AppLogLevel = 'debug' | 'info' | 'warning' | 'error';
 
 export type AppSettingsPublic = {
@@ -173,7 +167,7 @@ export type WhisperRuntimeStatus = {
     requiredCudaVersion?: '11.8' | '12.8';
     runtimeCudaVersion?: '11.8' | '12.8';
     runtimeVariant: 'cpu' | 'cuda' | 'metal' | 'vulkan';
-    fallbackReason?: WhisperRuntimeFallbackCode;
+    fallbackReason?: string;
   };
   actionRequired?:
     | 'download-runtime'
@@ -338,7 +332,6 @@ export type NativeProtocolErrorCode =
   | 'MissingRuntime'
   | 'DownloadRequired'
   | 'ManifestNotConfigured'
-  | 'UnsupportedPlatform'
   | 'UnsupportedCommand'
   | 'MalformedRequest'
   | 'InternalError';

@@ -584,6 +584,51 @@ describe('WhisperAssetManager.ensureRuntime', () => {
     expect(status.actionRequired).toBe('download-runtime');
   });
 
+  it('returns actionRequired=none after successful runtime download and verification', async () => {
+    createSpawnSyncMock({ hardwareDetected: true, computeCapability: '8.9' });
+    createExistsSyncMock({ cudaRuntimePresent: true });
+    const initialCandidateStates = createCandidateStates({
+      cuda: {
+        existingPath: undefined,
+        verifiedPath: undefined,
+        resolvedPath: 'D:/runtime/whisper_cpp/cuda/Release/whisper-cli.exe',
+        installed: false,
+        verified: false
+      }
+    });
+    const manager = createManager({
+      candidateStates: initialCandidateStates,
+      modelExists: true,
+      modelVerified: true
+    });
+    (manager as any).probeRuntimeBinaryState = vi
+      .fn()
+      .mockResolvedValueOnce(createBinaryState('cuda'));
+
+    const status = await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: true,
+      preferCuda: true,
+      localAsrAcceleration: 'gpu',
+      preferredRuntimeVariant: 'cuda',
+      downloadScope: 'runtime'
+    });
+
+    expect((manager as any).downloadAndInstall).toHaveBeenCalledTimes(1);
+    expect((manager as any).downloadAndInstall).toHaveBeenCalledWith(
+      'runtime',
+      'https://example.test/cuda.zip',
+      'D:/runtime/whisper_cpp/cuda/Release/whisper-cli.exe',
+      VALID_SHA_CUDA,
+      false
+    );
+    expect(status.binary.installed).toBe(true);
+    expect(status.binary.verified).toBe(true);
+    expect(status.model.installed).toBe(true);
+    expect(status.model.verified).toBe(true);
+    expect(status.actionRequired).toBe('none');
+  });
+
   it('returns download-runtime when gpu fallback has no cpu candidate', async () => {
     createSpawnSyncMock({ hardwareDetected: false });
     createExistsSyncMock({ cudaRuntimePresent: false });

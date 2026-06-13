@@ -127,7 +127,7 @@ export class JobManager extends EventEmitter {
           job,
           runtimeActionToErrorCode(runtime.actionRequired),
           runtime.message ?? 'Local recognition needs to be set up before starting.',
-          runtime.actionRequired !== 'manifest-not-configured'
+          runtime.actionRequired !== 'manifest-not-configured' && runtime.actionRequired !== 'unsupported-platform'
         );
         return;
       }
