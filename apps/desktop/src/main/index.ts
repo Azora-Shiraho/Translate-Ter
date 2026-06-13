@@ -29,6 +29,7 @@ import { FfmpegAssetManager } from './services/ffmpegAssets';
 import { AppLogger, type RendererLogWriteInput } from './services/logger';
 import { testOpenAICompatibleProvider } from './services/providerHealth';
 import { WhisperAssetManager } from './services/whisperAssets';
+import { mergeWhisperRuntimeRequestWithSettings } from './services/whisperRuntimeRequestMerge';
 import { asrProviders } from './services/asrProviders';
 
 let mainWindow: BrowserWindow | undefined;
@@ -269,6 +270,8 @@ function registerIpc(): void {
       modelId: settings.whisperModelId,
       allowDownload: false,
       preferCuda: settings.localWhisperUseCuda,
+      localAsrAcceleration: settings.localAsrAcceleration,
+      preferredRuntimeVariant: settings.preferredRuntimeVariant,
       ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
       useMultiThreadDownload: settings.enableMultiThreadDownload,
       downloadScope: 'none'
@@ -497,10 +500,7 @@ function registerIpc(): void {
   });
   registerHandle('assets:ensure-whisper-runtime', async (_event, request: WhisperRuntimeRequest) => {
     const settings = await settingsStore.get();
-    return whisperAssets.ensureRuntime({
-      ...request,
-      useMultiThreadDownload: request.useMultiThreadDownload ?? settings.enableMultiThreadDownload
-    });
+    return whisperAssets.ensureRuntime(mergeWhisperRuntimeRequestWithSettings(request, settings));
   });
   registerHandle('assets:ensure-faster-whisper-runtime', async (_event, request: FasterWhisperRuntimeRequest) => {
     const settings = await settingsStore.get();

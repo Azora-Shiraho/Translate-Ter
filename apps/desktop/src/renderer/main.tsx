@@ -360,6 +360,8 @@ function App(): JSX.Element {
           modelId: settings.whisperModelId,
           allowDownload: false,
           preferCuda: effectiveLocalWhisperUseCuda,
+          localAsrAcceleration: settings.localAsrAcceleration,
+          preferredRuntimeVariant: settings.preferredRuntimeVariant,
           ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
           useMultiThreadDownload: settings.enableMultiThreadDownload,
           downloadScope: 'none'
@@ -377,6 +379,8 @@ function App(): JSX.Element {
     settings?.asrProviderId,
     settings?.whisperModelId,
     effectiveLocalWhisperUseCuda,
+    settings?.localAsrAcceleration,
+    settings?.preferredRuntimeVariant,
     settings?.localWhisperIgnoreCudaMismatch,
     settings?.enableMultiThreadDownload
   ]);
@@ -412,6 +416,8 @@ function App(): JSX.Element {
           modelId: settings.whisperModelId,
           allowDownload: false,
           preferCuda: true,
+          localAsrAcceleration: 'gpu',
+          preferredRuntimeVariant: 'cuda',
           ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
           useMultiThreadDownload: settings.enableMultiThreadDownload,
           downloadScope: 'none'
@@ -595,6 +601,8 @@ function App(): JSX.Element {
       modelId: settings.whisperModelId,
       allowDownload: false,
       preferCuda: effectiveLocalWhisperUseCuda,
+      localAsrAcceleration: settings.localAsrAcceleration,
+      preferredRuntimeVariant: settings.preferredRuntimeVariant,
       ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
       useMultiThreadDownload: settings.enableMultiThreadDownload,
       downloadScope: 'none'
@@ -613,6 +621,8 @@ function App(): JSX.Element {
       modelId: settings.whisperModelId,
       allowDownload: false,
       preferCuda: effectiveLocalWhisperUseCuda,
+      localAsrAcceleration: settings.localAsrAcceleration,
+      preferredRuntimeVariant: settings.preferredRuntimeVariant,
       ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
       useMultiThreadDownload: settings.enableMultiThreadDownload,
       downloadScope: 'none'
@@ -637,6 +647,8 @@ function App(): JSX.Element {
         modelId: settings.whisperModelId,
         allowDownload: true,
         preferCuda: effectiveLocalWhisperUseCuda,
+        localAsrAcceleration: settings.localAsrAcceleration,
+        preferredRuntimeVariant: settings.preferredRuntimeVariant,
         ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'runtime'
@@ -734,6 +746,8 @@ function App(): JSX.Element {
         modelId: settings.whisperModelId,
         allowDownload: false,
         preferCuda: true,
+        localAsrAcceleration: 'gpu',
+        preferredRuntimeVariant: 'cuda',
         ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'none'
@@ -763,6 +777,8 @@ function App(): JSX.Element {
         modelId: settings.whisperModelId,
         allowDownload: true,
         preferCuda: true,
+        localAsrAcceleration: 'gpu',
+        preferredRuntimeVariant: 'cuda',
         ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'cuda-runtime'
@@ -923,6 +939,8 @@ function App(): JSX.Element {
         asrProviderId: settings.asrProviderId,
         whisperModelId: settings.whisperModelId,
         localWhisperUseCuda: effectiveLocalWhisperUseCuda,
+        localAsrAcceleration: settings.localAsrAcceleration,
+        preferredRuntimeVariant: settings.preferredRuntimeVariant,
         localAsrCpuMode: settings.localAsrCpuMode,
         localWhisperIgnoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
         allowWhisperAssetDownload: settings.allowWhisperAssetDownload,
@@ -3290,13 +3308,16 @@ function deriveWorkspaceRuntimeDetail(input: {
 }
 
 function describeLocalWhisperTestResult(status: WhisperRuntimeStatus, t: (key: string) => string): string {
+  if (status.actionRequired === 'unsupported-platform') {
+    return t(runtimeActionLabel(status.actionRequired));
+  }
   if (!status.binary.verified) {
     return t('runtimeBinaryMissingDetail');
   }
   if (!status.model.verified) {
     return t('runtimeModelMissingDetail');
   }
-  if (status.acceleration.requested === 'gpu') {
+  if (status.acceleration.requested === 'gpu' || status.acceleration.selected === 'gpu') {
     return describeCudaStatusDetail(status, t);
   }
   return t('runtimeReady');
@@ -3339,7 +3360,7 @@ function describeCudaStatusDetail(
   if (!status.acceleration.hardwareDetected) {
     return t('cudaNoHardware');
   }
-  return status.acceleration.fallbackReason ?? t('cudaUnavailable');
+  return fallbackReasonLabel(status.acceleration.fallbackReason, t);
 }
 
 function describeCudaStatusShort(
@@ -3360,6 +3381,22 @@ function hasBlockingCudaMismatch(status: WhisperRuntimeStatus | undefined, ignor
   const required = status.acceleration.requiredCudaVersion;
   const current = status.acceleration.runtimeCudaVersion;
   return Boolean(required && current && required !== current);
+}
+
+function fallbackReasonLabel(
+  code: string | undefined,
+  t: (key: string) => string
+): string {
+  if (code === 'gpu-runtime-missing') return t('cudaRuntimeMissing');
+  if (code === 'gpu-not-detected') return t('cudaNoHardware');
+  if (
+    code === 'gpu-not-compatible' ||
+    code === 'preferred-variant-unavailable' ||
+    code === 'gpu-variant-unavailable'
+  ) {
+    return t('cudaUnavailable');
+  }
+  return t('cudaUnavailable');
 }
 
 function describeFfmpegStatusDetail(
@@ -3512,6 +3549,7 @@ function isRuntimeWarningCode(code: string): boolean {
     'download-model',
     'download-cuda-runtime',
     'manifest-not-configured',
+    'unsupported-platform',
     'pin-manifest-hashes'
   ].includes(code);
 }
@@ -3792,7 +3830,7 @@ function deriveRuntimeState(input: {
       tone: 'good',
       label: t('installed'),
       detail:
-        runtimeStatus.acceleration.requested === 'gpu'
+        runtimeStatus.acceleration.requested === 'gpu' || runtimeStatus.acceleration.selected === 'gpu'
           ? describeCudaStatusDetail(runtimeStatus, t)
           : t('runtimeReady')
     };
@@ -3803,6 +3841,7 @@ function deriveRuntimeState(input: {
       label: t(runtimeActionLabel(runtimeStatus.actionRequired ?? 'download-runtime')),
       detail:
         runtimeStatus.actionRequired === 'manifest-not-configured' ||
+        runtimeStatus.actionRequired === 'unsupported-platform' ||
         runtimeStatus.actionRequired === 'pin-manifest-hashes'
           ? t(runtimeActionLabel(runtimeStatus.actionRequired))
           : t('runtimeBinaryMissingDetail')
@@ -3871,6 +3910,13 @@ function deriveRuntimeModelState(input: {
   if (runtimeStatus.actionRequired === 'manifest-not-configured') {
     return {
       tone: runtimeStatus.binary.verified ? 'warn' : 'error',
+      label: t(runtimeActionLabel(runtimeStatus.actionRequired)),
+      detail: t(runtimeActionLabel(runtimeStatus.actionRequired))
+    };
+  }
+  if (runtimeStatus.actionRequired === 'unsupported-platform') {
+    return {
+      tone: 'error',
       label: t(runtimeActionLabel(runtimeStatus.actionRequired)),
       detail: t(runtimeActionLabel(runtimeStatus.actionRequired))
     };

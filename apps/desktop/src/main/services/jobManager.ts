@@ -40,6 +40,17 @@ export class JobManager extends EventEmitter {
     validateAsrRequest(request);
     const jobId = `job-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
+    const localAsrAcceleration = request.localAsrAcceleration ?? (request.localWhisperUseCuda ? 'gpu' : 'cpu');
+    const preferredRuntimeVariant =
+      request.preferredRuntimeVariant !== undefined
+        ? request.preferredRuntimeVariant
+        : request.localAsrAcceleration === undefined
+          ? request.localWhisperUseCuda
+            ? 'cuda'
+            : 'cpu'
+          : localAsrAcceleration === 'cpu'
+            ? 'cpu'
+            : undefined;
     const job: JobSnapshot = {
       id: jobId,
       mediaPath: request.mediaPath,
@@ -52,6 +63,8 @@ export class JobManager extends EventEmitter {
       asrProviderId: request.asrProviderId,
       whisperModelId: request.whisperModelId,
       localWhisperUseCuda: request.localWhisperUseCuda ?? false,
+      localAsrAcceleration,
+      preferredRuntimeVariant,
       localAsrCpuMode: request.localAsrCpuMode ?? 'balanced',
       localWhisperIgnoreCudaMismatch: request.localWhisperIgnoreCudaMismatch ?? false,
       allowWhisperAssetDownload: request.allowWhisperAssetDownload ?? true,
@@ -97,6 +110,8 @@ export class JobManager extends EventEmitter {
             modelId: job.whisperModelId,
             allowDownload: false,
             preferCuda: job.localWhisperUseCuda,
+            localAsrAcceleration: job.localAsrAcceleration,
+            preferredRuntimeVariant: job.preferredRuntimeVariant,
             ignoreCudaMismatch: job.localWhisperIgnoreCudaMismatch,
             downloadScope: 'none'
           })
@@ -112,7 +127,7 @@ export class JobManager extends EventEmitter {
           job,
           runtimeActionToErrorCode(runtime.actionRequired),
           runtime.message ?? 'Local recognition needs to be set up before starting.',
-          runtime.actionRequired !== 'manifest-not-configured'
+          runtime.actionRequired !== 'manifest-not-configured' && runtime.actionRequired !== 'unsupported-platform'
         );
         return;
       }
@@ -182,6 +197,7 @@ export class JobManager extends EventEmitter {
       }
 
       const cpuThreadCount = resolveLocalInferenceThreadCount(job.localAsrCpuMode);
+      const useCudaForNativeWhisper = runtime?.acceleration.selected === 'gpu';
       const response = await this.nativeBackend.transcribe({
         jobId: job.id,
         mediaPath: job.mediaPath,
@@ -190,7 +206,7 @@ export class JobManager extends EventEmitter {
         sourceLanguage: job.sourceLanguage,
         targetLanguage: job.targetLanguage,
         asrProviderId: job.asrProviderId,
-        preferCuda: job.localWhisperUseCuda,
+        preferCuda: useCudaForNativeWhisper ?? job.localWhisperUseCuda,
         cpuThreadCount,
         runtime: runtime
           ? {
@@ -202,7 +218,11 @@ export class JobManager extends EventEmitter {
       if (this.isCancelled(job.id)) return;
 
       if (!response.ok) {
-        const shouldRetryOnCpu = shouldRetryLocalWhisperOnCpu(job, response.error);
+        const shouldRetryOnCpu = shouldRetryLocalWhisperOnCpu(
+          job,
+          useCudaForNativeWhisper ?? job.localWhisperUseCuda,
+          response.error
+        );
         if (shouldRetryOnCpu) {
           job.warnings.push({
             code: 'CudaTranscriptionCrashFallback',
@@ -485,8 +505,16 @@ export class JobManager extends EventEmitter {
   }
 }
 
-function runtimeActionToErrorCode(action: NonNullable<JobSnapshot['error']>['code'] | string): 'ManifestNotConfigured' | 'DownloadRequired' {
-  return action === 'manifest-not-configured' ? 'ManifestNotConfigured' : 'DownloadRequired';
+function runtimeActionToErrorCode(
+  action: NonNullable<JobSnapshot['error']>['code'] | string
+): 'ManifestNotConfigured' | 'DownloadRequired' | 'UnsupportedPlatform' {
+  if (action === 'manifest-not-configured') {
+    return 'ManifestNotConfigured';
+  }
+  if (action === 'unsupported-platform') {
+    return 'UnsupportedPlatform';
+  }
+  return 'DownloadRequired';
 }
 
 function nativePayloadToDocument(payload: unknown, job: JobSnapshot): SubtitleDocument | undefined {
@@ -588,9 +616,10 @@ function translationProviderIdFromPriority(priority: string[]): string {
 
 function shouldRetryLocalWhisperOnCpu(
   job: JobSnapshot,
+  attemptedGpu: boolean,
   error?: { code?: string; message?: string; retryable?: boolean }
 ): boolean {
-  if (job.asrProviderId !== 'local.whisper.cpp' || !job.localWhisperUseCuda) {
+  if (job.asrProviderId !== 'local.whisper.cpp' || !attemptedGpu) {
     return false;
   }
   const message = error?.message?.toLowerCase() ?? '';

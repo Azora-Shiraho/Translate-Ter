@@ -119,6 +119,8 @@ export type WhisperRuntimeRequest = {
   modelId: string;
   allowDownload: boolean;
   preferCuda: boolean;
+  localAsrAcceleration?: LocalAsrAcceleration;
+  preferredRuntimeVariant?: RuntimeVariant;
   ignoreCudaMismatch?: boolean;
   useMultiThreadDownload?: boolean;
   downloadScope?: 'all' | 'runtime' | 'cuda-runtime' | 'model' | 'none';
@@ -170,6 +172,7 @@ export type WhisperRuntimeStatus = {
   actionRequired?:
     | 'download-runtime'
     | 'download-model'
+    | 'unsupported-platform'
     | 'pin-manifest-hashes'
     | 'manifest-not-configured'
     | 'download-required'
@@ -184,6 +187,8 @@ export type CreateJobRequest = {
   asrProviderId: string;
   whisperModelId: string;
   localWhisperUseCuda?: boolean;
+  localAsrAcceleration?: LocalAsrAcceleration;
+  preferredRuntimeVariant?: RuntimeVariant;
   localAsrCpuMode?: LocalAsrCpuMode;
   localWhisperIgnoreCudaMismatch?: boolean;
   allowWhisperAssetDownload?: boolean;
@@ -221,6 +226,8 @@ export type JobSnapshot = {
   asrProviderId: string;
   whisperModelId: string;
   localWhisperUseCuda: boolean;
+  localAsrAcceleration: LocalAsrAcceleration;
+  preferredRuntimeVariant?: RuntimeVariant;
   localAsrCpuMode: LocalAsrCpuMode;
   localWhisperIgnoreCudaMismatch: boolean;
   allowWhisperAssetDownload: boolean;
