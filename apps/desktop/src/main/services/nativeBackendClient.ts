@@ -12,6 +12,7 @@ import type {
 import { legacyWhisperCudaRuntimeDirs, sharedCudaRuntimeDir } from './cudaRuntimePaths';
 import type { ScopedLogger } from './logger';
 import { ffmpegBinDir } from './mediaToolPaths';
+import type { NativeRuntimePayload } from './nativeTranscribePayload';
 
 export type NativeTranscribePayload = {
   jobId?: string;
@@ -23,10 +24,9 @@ export type NativeTranscribePayload = {
   asrProviderId?: string;
   preferCuda?: boolean;
   cpuThreadCount?: number;
-  runtime?: {
-    binaryPath?: string;
-    modelPath?: string;
-  };
+  binaryPath?: string;
+  modelPath?: string;
+  runtime?: NativeRuntimePayload;
 };
 
 const MISSING_EXECUTABLE_ERROR: NativeProtocolError = {

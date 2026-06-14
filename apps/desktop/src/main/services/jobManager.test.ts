@@ -182,5 +182,238 @@ describe('JobManager', () => {
 
     expect(nativeBackend.transcribe).toHaveBeenCalledTimes(1);
     expect(nativeBackend.transcribe.mock.calls[0][0].preferCuda).toBe(false);
+    expect(nativeBackend.transcribe.mock.calls[0][0].binaryPath).toBe('D:/runtime/whisper_cpp/cpu/Release/whisper-cli.exe');
+    expect(nativeBackend.transcribe.mock.calls[0][0].modelPath).toBe('D:/runtime/whisper_cpp/models/ggml-base.bin');
+    expect(nativeBackend.transcribe.mock.calls[0][0].runtime).toEqual({
+      provider: 'whisper.cpp',
+      variant: 'cpu',
+      binaryPath: 'D:/runtime/whisper_cpp/cpu/Release/whisper-cli.exe',
+      modelPath: 'D:/runtime/whisper_cpp/models/ggml-base.bin'
+    });
+  });
+
+  it('passes runtime.variant=cuda to native backend when resolver selected gpu runtime', async () => {
+    const settings = createSettings();
+    const whisperAssets = {
+      ensureRuntime: vi.fn().mockResolvedValue(
+        createRuntimeStatus({
+          platformKey: 'win32-x64-cuda',
+          binary: {
+            expectedPath: 'D:/runtime/whisper_cpp/cuda/Release/whisper-cli.exe',
+            installed: true,
+            verified: true
+          },
+          acceleration: {
+            requested: 'gpu',
+            selected: 'gpu',
+            cudaSupported: true,
+            hardwareDetected: true,
+            runtimeDetected: true,
+            versionMismatch: false,
+            runtimeVariant: 'cuda'
+          }
+        })
+      )
+    };
+    const nativeBackend = {
+      health: vi.fn().mockResolvedValue({
+        capabilities: ['asr.transcribe'],
+        protocolVersion: 1,
+        backendVersion: 'test',
+        status: 'ok',
+        whisperRuntimeAvailable: true,
+        hardwareAcceleration: 'gpu',
+        cudaSupported: true,
+        recommendedLocalAcceleration: 'gpu'
+      }),
+      probeMedia: vi.fn().mockResolvedValue({
+        ok: true,
+        payload: {}
+      }),
+      extractAudio: vi.fn().mockResolvedValue({
+        ok: true,
+        payload: {
+          audioPath: 'D:/media/demo.wav'
+        }
+      }),
+      transcribe: vi.fn().mockResolvedValue({
+        ok: true,
+        payload: {
+          document: {
+            id: 'doc-1',
+            format: 'srt',
+            sourceLanguage: 'en',
+            targetLanguage: 'zh-CN',
+            segments: [],
+            metadata: {
+              createdAt: new Date().toISOString(),
+              warnings: []
+            }
+          }
+        }
+      }),
+      cancelRunningWork: vi.fn()
+    };
+    const fasterWhisper = {
+      cancel: vi.fn()
+    };
+    const manager = new JobManager(settings as any, whisperAssets as any, nativeBackend as any, fasterWhisper as any);
+    const job = manager.create(createRequest());
+
+    await manager.start(job.id);
+
+    expect(nativeBackend.transcribe).toHaveBeenCalledTimes(1);
+    expect(nativeBackend.transcribe.mock.calls[0][0].preferCuda).toBe(true);
+    expect(nativeBackend.transcribe.mock.calls[0][0].binaryPath).toBe('D:/runtime/whisper_cpp/cuda/Release/whisper-cli.exe');
+    expect(nativeBackend.transcribe.mock.calls[0][0].modelPath).toBe('D:/runtime/whisper_cpp/models/ggml-base.bin');
+    expect(nativeBackend.transcribe.mock.calls[0][0].runtime).toEqual({
+      provider: 'whisper.cpp',
+      variant: 'cuda',
+      binaryPath: 'D:/runtime/whisper_cpp/cuda/Release/whisper-cli.exe',
+      modelPath: 'D:/runtime/whisper_cpp/models/ggml-base.bin'
+    });
+  });
+
+  it('keeps local.faster-whisper on FasterWhisperService instead of native backend', async () => {
+    const settings = createSettings();
+    const whisperAssets = {
+      ensureRuntime: vi.fn()
+    };
+    const nativeBackend = {
+      health: vi.fn().mockResolvedValue({
+        capabilities: ['asr.transcribe'],
+        protocolVersion: 1,
+        backendVersion: 'test',
+        status: 'ok',
+        whisperRuntimeAvailable: true,
+        hardwareAcceleration: 'gpu',
+        cudaSupported: true,
+        recommendedLocalAcceleration: 'gpu'
+      }),
+      probeMedia: vi.fn().mockResolvedValue({
+        ok: true,
+        payload: {}
+      }),
+      extractAudio: vi.fn().mockResolvedValue({
+        ok: true,
+        payload: {
+          audioPath: 'D:/media/demo.wav'
+        }
+      }),
+      transcribe: vi.fn(),
+      cancelRunningWork: vi.fn()
+    };
+    const fasterWhisper = {
+      transcribe: vi.fn().mockResolvedValue({
+        id: 'doc-1',
+        format: 'srt',
+        sourceLanguage: 'en',
+        targetLanguage: 'zh-CN',
+        segments: [],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          warnings: []
+        }
+      }),
+      cancel: vi.fn()
+    };
+    const manager = new JobManager(settings as any, whisperAssets as any, nativeBackend as any, fasterWhisper as any);
+    const job = manager.create(
+      createRequest({
+        asrProviderId: 'local.faster-whisper'
+      })
+    );
+
+    await manager.start(job.id);
+
+    expect(whisperAssets.ensureRuntime).not.toHaveBeenCalled();
+    expect(fasterWhisper.transcribe).toHaveBeenCalledTimes(1);
+    expect(nativeBackend.transcribe).not.toHaveBeenCalled();
+  });
+
+  it('forces runtime.variant=cpu during local whisper cpu retry fallback', async () => {
+    const settings = createSettings();
+    const whisperAssets = {
+      ensureRuntime: vi.fn().mockResolvedValue(
+        createRuntimeStatus({
+          platformKey: 'win32-x64-cuda',
+          binary: {
+            expectedPath: 'D:/runtime/whisper_cpp/cuda/Release/whisper-cli.exe',
+            installed: true,
+            verified: true
+          },
+          acceleration: {
+            requested: 'gpu',
+            selected: 'gpu',
+            cudaSupported: true,
+            hardwareDetected: true,
+            runtimeDetected: true,
+            versionMismatch: false,
+            runtimeVariant: 'cuda'
+          }
+        })
+      )
+    };
+    const nativeBackend = {
+      health: vi.fn().mockResolvedValue({
+        capabilities: ['asr.transcribe'],
+        protocolVersion: 1,
+        backendVersion: 'test',
+        status: 'ok',
+        whisperRuntimeAvailable: true,
+        hardwareAcceleration: 'gpu',
+        cudaSupported: true,
+        recommendedLocalAcceleration: 'gpu'
+      }),
+      probeMedia: vi.fn().mockResolvedValue({
+        ok: true,
+        payload: {}
+      }),
+      extractAudio: vi.fn().mockResolvedValue({
+        ok: true,
+        payload: {
+          audioPath: 'D:/media/demo.wav'
+        }
+      }),
+      transcribe: vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          error: {
+            code: 'InternalError',
+            message: 'process exited with 0xC0000409',
+            retryable: true
+          }
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          payload: {
+            document: {
+              id: 'doc-1',
+              format: 'srt',
+              sourceLanguage: 'en',
+              targetLanguage: 'zh-CN',
+              segments: [],
+              metadata: {
+                createdAt: new Date().toISOString(),
+                warnings: []
+              }
+            }
+          }
+        }),
+      cancelRunningWork: vi.fn()
+    };
+    const fasterWhisper = {
+      cancel: vi.fn()
+    };
+    const manager = new JobManager(settings as any, whisperAssets as any, nativeBackend as any, fasterWhisper as any);
+    const job = manager.create(createRequest());
+
+    await manager.start(job.id);
+
+    expect(nativeBackend.transcribe).toHaveBeenCalledTimes(2);
+    expect(nativeBackend.transcribe.mock.calls[0][0].runtime.variant).toBe('cuda');
+    expect(nativeBackend.transcribe.mock.calls[1][0].preferCuda).toBe(false);
+    expect(nativeBackend.transcribe.mock.calls[1][0].runtime.variant).toBe('cpu');
   });
 });

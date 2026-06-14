@@ -19,6 +19,7 @@ import { validateAsrRequest } from './asrProviders';
 import { resolveLocalInferenceThreadCount } from './localInferenceProfile';
 import type { FasterWhisperService } from './fasterWhisperService';
 import type { NativeBackendClient } from './nativeBackendClient';
+import { createNativeRuntimePayload } from './nativeTranscribePayload';
 import type { SettingsStore } from './settingsStore';
 import type { WhisperAssetManager } from './whisperAssets';
 
@@ -198,6 +199,24 @@ export class JobManager extends EventEmitter {
 
       const cpuThreadCount = resolveLocalInferenceThreadCount(job.localAsrCpuMode);
       const useCudaForNativeWhisper = runtime?.acceleration.selected === 'gpu';
+      const nativeRuntimePayload =
+        runtime && job.asrProviderId === 'local.whisper.cpp'
+          ? createNativeRuntimePayload({
+              provider: 'whisper.cpp',
+              variant: runtime.acceleration.runtimeVariant,
+              binaryPath: runtime.binary.expectedPath,
+              modelPath: runtime.model.expectedPath
+            })
+          : undefined;
+      const cpuRetryRuntimePayload =
+        runtime && job.asrProviderId === 'local.whisper.cpp'
+          ? createNativeRuntimePayload({
+              provider: 'whisper.cpp',
+              variant: 'cpu',
+              binaryPath: runtime.binary.expectedPath,
+              modelPath: runtime.model.expectedPath
+            })
+          : undefined;
       const response = await this.nativeBackend.transcribe({
         jobId: job.id,
         mediaPath: job.mediaPath,
@@ -208,12 +227,9 @@ export class JobManager extends EventEmitter {
         asrProviderId: job.asrProviderId,
         preferCuda: useCudaForNativeWhisper ?? job.localWhisperUseCuda,
         cpuThreadCount,
-        runtime: runtime
-          ? {
-              binaryPath: runtime.binary.expectedPath,
-              modelPath: runtime.model.expectedPath
-            }
-          : undefined
+        binaryPath: nativeRuntimePayload?.binaryPath,
+        modelPath: nativeRuntimePayload?.modelPath,
+        runtime: nativeRuntimePayload?.runtime
       });
       if (this.isCancelled(job.id)) return;
 
@@ -241,12 +257,9 @@ export class JobManager extends EventEmitter {
             asrProviderId: job.asrProviderId,
             preferCuda: false,
             cpuThreadCount,
-            runtime: runtime
-              ? {
-                  binaryPath: runtime.binary.expectedPath,
-                  modelPath: runtime.model.expectedPath
-                }
-              : undefined
+            binaryPath: cpuRetryRuntimePayload?.binaryPath,
+            modelPath: cpuRetryRuntimePayload?.modelPath,
+            runtime: cpuRetryRuntimePayload?.runtime
           });
           if (this.isCancelled(job.id)) return;
           if (cpuRetry.ok) {
