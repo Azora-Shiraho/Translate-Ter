@@ -304,8 +304,16 @@ export class JobManager extends EventEmitter {
       await this.setProgress(job, 'completed', 100, 'Recognition is complete.');
     } catch (error) {
       if (this.isCancelled(job.id)) return;
+      const code =
+        typeof error === 'object' && error && 'code' in error
+          ? String((error as { code?: unknown }).code ?? 'DownloadRequired')
+          : 'DownloadRequired';
+      const retryable =
+        typeof error === 'object' && error && 'retryable' in error
+          ? Boolean((error as { retryable?: unknown }).retryable)
+          : true;
       const message = error instanceof Error ? error.message : String(error);
-      this.fail(job, 'DownloadRequired', message, true);
+      this.fail(job, code, message, retryable);
     }
   }
 
