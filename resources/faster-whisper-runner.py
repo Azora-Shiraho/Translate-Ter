@@ -13,6 +13,7 @@ def parse_args():
     parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
     parser.add_argument("--cpu-threads", type=int, default=0)
     parser.add_argument("--cache-dir", required=True)
+    parser.add_argument("--local-files-only", action="store_true")
     return parser.parse_args()
 
 
@@ -51,6 +52,7 @@ def runner_health(args):
 def runner_transcribe(args):
     try:
         from faster_whisper import WhisperModel
+        from huggingface_hub.errors import LocalEntryNotFoundError
     except Exception as exc:  # pragma: no cover - runtime environment dependent
         print(str(exc), file=sys.stderr)
         return 1
@@ -59,10 +61,46 @@ def runner_transcribe(args):
     model_kwargs = {
         "device": args.device,
         "download_root": args.cache_dir,
+        "local_files_only": args.local_files_only,
     }
     if args.cpu_threads and args.cpu_threads > 0:
         model_kwargs["cpu_threads"] = args.cpu_threads
-    model = WhisperModel(args.model, **model_kwargs)
+    try:
+        model = WhisperModel(args.model, **model_kwargs)
+    except LocalEntryNotFoundError as exc:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "code": "DownloadRequired",
+                    "retryable": True,
+                    "message": (
+                        "faster-whisper 模型不可用。"
+                        + (
+                            " 当前已禁用联网下载，请先下载模型或启用下载后重试。"
+                            if args.local_files_only
+                            else " 无法从 Hugging Face 下载模型，请检查网络、代理或证书后重试。"
+                        )
+                    ),
+                    "detail": str(exc),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 1
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "code": "RuntimeError",
+                    "retryable": True,
+                    "message": str(exc),
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 1
     segments, info = model.transcribe(args.audio_path, language=language)
     payload = {
         "ok": True,

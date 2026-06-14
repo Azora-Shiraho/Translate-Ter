@@ -3,11 +3,13 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <optional>
+#include <map>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -15,12 +17,24 @@
 #include <thread>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <sys/wait.h>
+#include <unistd.h>
+extern char** environ;
+#endif
+
 namespace {
 
 struct CliOptions {
   bool health = false;
   bool stdio_json = false;
   bool help = false;
+  bool selftest = false;
 };
 
 struct SubtitleWarning {
@@ -52,6 +66,15 @@ struct NativeResult {
   std::string code;
   std::string message;
   bool retryable = false;
+};
+
+struct RuntimePayload {
+  std::string provider = "whisper.cpp";
+  std::optional<std::string> variant;
+  std::optional<std::string> binary_path;
+  std::optional<std::string> model_path;
+  std::vector<std::string> library_paths;
+  std::map<std::string, std::string> env;
 };
 
 std::string json_escape(std::string_view input) {
@@ -148,8 +171,145 @@ std::optional<bool> extract_bool(const std::string& json, const std::string& key
   return match[1].str() == "true";
 }
 
+std::optional<std::string> extract_object(const std::string& json, const std::string& key) {
+  const std::string needle = "\"" + key + "\"";
+  const auto key_pos = json.find(needle);
+  if (key_pos == std::string::npos) return std::nullopt;
+
+  const auto colon_pos = json.find(':', key_pos + needle.size());
+  if (colon_pos == std::string::npos) return std::nullopt;
+
+  auto object_start = json.find('{', colon_pos + 1);
+  if (object_start == std::string::npos) return std::nullopt;
+
+  int depth = 0;
+  bool in_string = false;
+  bool escaped = false;
+  for (std::size_t index = object_start; index < json.size(); ++index) {
+    const char ch = json[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\' && in_string) {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"') {
+      in_string = !in_string;
+      continue;
+    }
+    if (in_string) {
+      continue;
+    }
+    if (ch == '{') {
+      ++depth;
+      continue;
+    }
+    if (ch == '}') {
+      --depth;
+      if (depth == 0) {
+        return json.substr(object_start, index - object_start + 1);
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> extract_array(const std::string& json, const std::string& key) {
+  const std::string needle = "\"" + key + "\"";
+  const auto key_pos = json.find(needle);
+  if (key_pos == std::string::npos) return std::nullopt;
+
+  const auto colon_pos = json.find(':', key_pos + needle.size());
+  if (colon_pos == std::string::npos) return std::nullopt;
+
+  auto array_start = json.find('[', colon_pos + 1);
+  if (array_start == std::string::npos) return std::nullopt;
+
+  int depth = 0;
+  bool in_string = false;
+  bool escaped = false;
+  for (std::size_t index = array_start; index < json.size(); ++index) {
+    const char ch = json[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\' && in_string) {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"') {
+      in_string = !in_string;
+      continue;
+    }
+    if (in_string) {
+      continue;
+    }
+    if (ch == '[') {
+      ++depth;
+      continue;
+    }
+    if (ch == ']') {
+      --depth;
+      if (depth == 0) {
+        return json.substr(array_start, index - array_start + 1);
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+std::vector<std::string> extract_string_array(const std::string& json, const std::string& key) {
+  const auto raw_array = extract_array(json, key);
+  if (!raw_array) return {};
+
+  std::vector<std::string> values;
+  const std::regex pattern(R"regex("((?:\\.|[^"\\])*)")regex");
+  for (std::sregex_iterator it(raw_array->begin(), raw_array->end(), pattern), end; it != end; ++it) {
+    values.push_back(json_unescape((*it)[1].str()));
+  }
+  return values;
+}
+
+std::map<std::string, std::string> extract_string_map(const std::string& json, const std::string& key) {
+  const auto raw_object = extract_object(json, key);
+  if (!raw_object) return {};
+
+  std::map<std::string, std::string> values;
+  const std::regex pattern(R"regex("((?:\\.|[^"\\])*)"\s*:\s*"((?:\\.|[^"\\])*)")regex");
+  for (std::sregex_iterator it(raw_object->begin(), raw_object->end(), pattern), end; it != end; ++it) {
+    values.emplace(json_unescape((*it)[1].str()), json_unescape((*it)[2].str()));
+  }
+  return values;
+}
+
 bool starts_with(std::string_view value, std::string_view prefix) {
   return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
+}
+
+bool contains_case_insensitive(std::string_view haystack, std::string_view needle) {
+  return std::search(
+             haystack.begin(),
+             haystack.end(),
+             needle.begin(),
+             needle.end(),
+             [](char left, char right) {
+               return std::tolower(static_cast<unsigned char>(left)) ==
+                      std::tolower(static_cast<unsigned char>(right));
+             }) != haystack.end();
+}
+
+bool is_safe_environment_key(std::string_view key) {
+  if (key.empty()) return false;
+  for (const char ch : key) {
+    const auto unsigned_ch = static_cast<unsigned char>(ch);
+    if (!(std::isalnum(unsigned_ch) || ch == '_')) {
+      return false;
+    }
+  }
+  return true;
 }
 
 std::string lowercase(std::string value) {
@@ -168,6 +328,54 @@ std::string sanitize_id(std::string value) {
     }
   }
   return value;
+}
+
+bool is_supported_runtime_variant(std::string_view variant) {
+  return variant == "cpu" || variant == "cuda" || variant == "metal" || variant == "vulkan";
+}
+
+bool runtime_variant_requests_gpu(const std::optional<std::string>& variant) {
+  return variant && (*variant == "cuda" || *variant == "metal" || *variant == "vulkan");
+}
+
+bool should_disable_whisper_gpu(const std::optional<std::string>& variant, bool prefer_cuda, bool cuda_supported) {
+  if (variant.has_value()) {
+    return *variant == "cpu";
+  }
+  return !prefer_cuda || !cuda_supported;
+}
+
+RuntimePayload parse_runtime_payload(const std::string& request) {
+  RuntimePayload runtime;
+  if (const auto raw_runtime = extract_object(request, "runtime")) {
+    if (const auto provider = extract_string(*raw_runtime, "provider")) {
+      runtime.provider = *provider;
+    }
+    if (const auto variant = extract_string(*raw_runtime, "variant")) {
+      runtime.variant = lowercase(*variant);
+    }
+    runtime.binary_path = extract_string(*raw_runtime, "binaryPath");
+    runtime.model_path = extract_string(*raw_runtime, "modelPath");
+    runtime.library_paths = extract_string_array(*raw_runtime, "libraryPaths");
+    runtime.env = extract_string_map(*raw_runtime, "env");
+  }
+
+  if (!runtime.binary_path) {
+    runtime.binary_path = extract_string(request, "binaryPath");
+  }
+  if (!runtime.model_path) {
+    runtime.model_path = extract_string(request, "modelPath");
+  }
+
+  return runtime;
+}
+
+std::string resolve_runtime_provider_for_request(const RuntimePayload& runtime) {
+  return runtime.provider;
+}
+
+bool runtime_request_uses_gpu(const RuntimePayload& runtime, bool prefer_cuda) {
+  return runtime.variant.has_value() ? runtime_variant_requests_gpu(runtime.variant) : prefer_cuda;
 }
 
 bool path_exists(const std::filesystem::path& path) {
@@ -273,35 +481,245 @@ std::string normalize_whisper_language_code(std::string language_code) {
   return language_code.substr(0, separator);
 }
 
-CommandOutput run_command_capture(std::string command) {
-  command += " 2>&1";
-  std::array<char, 4096> buffer{};
-  CommandOutput result;
-
+std::string merged_path_value(
+    const std::vector<std::string>& runtime_library_paths,
+    const std::map<std::string, std::string>& runtime_env) {
 #if defined(_WIN32)
-  const std::string shell_command = "\"" + command + "\"";
-  FILE* pipe = _popen(shell_command.c_str(), "r");
+  constexpr char separator = ';';
 #else
-  FILE* pipe = popen(command.c_str(), "r");
+  constexpr char separator = ':';
 #endif
 
-  if (!pipe) {
+  std::vector<std::string> parts;
+  for (const auto& entry : runtime_library_paths) {
+    if (!entry.empty()) {
+      parts.push_back(entry);
+    }
+  }
+
+  if (const auto it = runtime_env.find("PATH"); it != runtime_env.end() && !it->second.empty()) {
+    parts.push_back(it->second);
+  }
+
+  if (const char* existing_path = std::getenv("PATH"); existing_path != nullptr && std::strlen(existing_path) > 0) {
+    parts.push_back(existing_path);
+  }
+
+  std::ostringstream stream;
+  for (std::size_t index = 0; index < parts.size(); ++index) {
+    if (index > 0) {
+      stream << separator;
+    }
+    stream << parts[index];
+  }
+  return stream.str();
+}
+
+void set_child_environment_value(
+    std::map<std::string, std::string>& environment,
+    const std::string& key,
+    const std::string& value) {
+  if (!is_safe_environment_key(key)) return;
+  for (auto it = environment.begin(); it != environment.end();) {
+    if (lowercase(it->first) == lowercase(key)) {
+      it = environment.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  environment[key] = value;
+}
+
+std::map<std::string, std::string> current_child_environment() {
+  std::map<std::string, std::string> environment;
+#if defined(_WIN32)
+  LPCH raw_environment = GetEnvironmentStringsA();
+  if (!raw_environment) return environment;
+  for (LPCH entry = raw_environment; *entry != '\0'; entry += std::strlen(entry) + 1) {
+    const std::string item(entry);
+    const auto separator = item.find('=');
+    if (separator == std::string::npos || separator == 0) continue;
+    environment[item.substr(0, separator)] = item.substr(separator + 1);
+  }
+  FreeEnvironmentStringsA(raw_environment);
+#else
+  for (char** entry = environ; entry != nullptr && *entry != nullptr; ++entry) {
+    const std::string item(*entry);
+    const auto separator = item.find('=');
+    if (separator == std::string::npos || separator == 0) continue;
+    environment[item.substr(0, separator)] = item.substr(separator + 1);
+  }
+#endif
+  return environment;
+}
+
+std::map<std::string, std::string> child_environment_with_overrides(
+    const std::map<std::string, std::string>& runtime_env,
+    const std::vector<std::string>& runtime_library_paths) {
+  auto environment = current_child_environment();
+  for (const auto& [key, value] : runtime_env) {
+    set_child_environment_value(environment, key, value);
+  }
+
+  const auto merged_path = merged_path_value(runtime_library_paths, runtime_env);
+  if (!merged_path.empty()) {
+    set_child_environment_value(environment, "PATH", merged_path);
+  }
+  return environment;
+}
+
+#if defined(_WIN32)
+std::vector<char> windows_environment_block(const std::map<std::string, std::string>& environment) {
+  std::vector<char> block;
+  for (const auto& [key, value] : environment) {
+    const auto entry = key + "=" + value;
+    block.insert(block.end(), entry.begin(), entry.end());
+    block.push_back('\0');
+  }
+  block.push_back('\0');
+  return block;
+}
+
+CommandOutput run_shell_command_with_environment(
+    const std::string& command,
+    const std::map<std::string, std::string>& environment) {
+  CommandOutput result;
+  SECURITY_ATTRIBUTES security_attributes{};
+  security_attributes.nLength = sizeof(SECURITY_ATTRIBUTES);
+  security_attributes.bInheritHandle = TRUE;
+
+  HANDLE read_pipe = nullptr;
+  HANDLE write_pipe = nullptr;
+  if (!CreatePipe(&read_pipe, &write_pipe, &security_attributes, 0)) {
+    result.exit_code = -1;
+    result.output = "Failed to create command output pipe.";
+    return result;
+  }
+  SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
+
+  STARTUPINFOA startup_info{};
+  startup_info.cb = sizeof(STARTUPINFOA);
+  startup_info.dwFlags = STARTF_USESTDHANDLES;
+  startup_info.hStdOutput = write_pipe;
+  startup_info.hStdError = write_pipe;
+  startup_info.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+
+  PROCESS_INFORMATION process_info{};
+  const char* comspec = std::getenv("COMSPEC");
+  const std::string shell = comspec && std::strlen(comspec) > 0 ? comspec : "C:\\Windows\\System32\\cmd.exe";
+  std::string command_line = quote_shell_arg(shell) + " /S /C \"" + command + "\"";
+  std::vector<char> mutable_command(command_line.begin(), command_line.end());
+  mutable_command.push_back('\0');
+  auto environment_block = windows_environment_block(environment);
+
+  const BOOL started = CreateProcessA(
+      nullptr,
+      mutable_command.data(),
+      nullptr,
+      nullptr,
+      TRUE,
+      CREATE_NO_WINDOW,
+      environment_block.data(),
+      nullptr,
+      &startup_info,
+      &process_info);
+  CloseHandle(write_pipe);
+
+  if (!started) {
+    CloseHandle(read_pipe);
     result.exit_code = -1;
     result.output = "Failed to start command.";
     return result;
   }
 
-  while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
-    result.output += buffer.data();
+  std::array<char, 4096> buffer{};
+  DWORD bytes_read = 0;
+  while (ReadFile(read_pipe, buffer.data(), static_cast<DWORD>(buffer.size()), &bytes_read, nullptr) && bytes_read > 0) {
+    result.output.append(buffer.data(), bytes_read);
   }
 
-#if defined(_WIN32)
-  result.exit_code = _pclose(pipe);
+  WaitForSingleObject(process_info.hProcess, INFINITE);
+  DWORD exit_code = 0;
+  if (GetExitCodeProcess(process_info.hProcess, &exit_code)) {
+    result.exit_code = static_cast<int>(exit_code);
+  } else {
+    result.exit_code = -1;
+  }
+
+  CloseHandle(process_info.hThread);
+  CloseHandle(process_info.hProcess);
+  CloseHandle(read_pipe);
+  return result;
+}
 #else
-  result.exit_code = pclose(pipe);
+CommandOutput run_shell_command_with_environment(
+    const std::string& command,
+    const std::map<std::string, std::string>& environment) {
+  CommandOutput result;
+  int pipe_fds[2]{};
+  if (pipe(pipe_fds) != 0) {
+    result.exit_code = -1;
+    result.output = "Failed to create command output pipe.";
+    return result;
+  }
+
+  std::vector<std::string> environment_entries;
+  environment_entries.reserve(environment.size());
+  for (const auto& [key, value] : environment) {
+    environment_entries.push_back(key + "=" + value);
+  }
+  std::vector<char*> environment_pointers;
+  environment_pointers.reserve(environment_entries.size() + 1);
+  for (auto& entry : environment_entries) {
+    environment_pointers.push_back(entry.data());
+  }
+  environment_pointers.push_back(nullptr);
+
+  const pid_t child = fork();
+  if (child == -1) {
+    close(pipe_fds[0]);
+    close(pipe_fds[1]);
+    result.exit_code = -1;
+    result.output = "Failed to start command.";
+    return result;
+  }
+
+  if (child == 0) {
+    close(pipe_fds[0]);
+    dup2(pipe_fds[1], STDOUT_FILENO);
+    dup2(pipe_fds[1], STDERR_FILENO);
+    close(pipe_fds[1]);
+    execle("/bin/sh", "sh", "-c", command.c_str(), static_cast<char*>(nullptr), environment_pointers.data());
+    _exit(127);
+  }
+
+  close(pipe_fds[1]);
+  std::array<char, 4096> buffer{};
+  ssize_t bytes_read = 0;
+  while ((bytes_read = read(pipe_fds[0], buffer.data(), buffer.size())) > 0) {
+    result.output.append(buffer.data(), static_cast<std::size_t>(bytes_read));
+  }
+  close(pipe_fds[0]);
+
+  int status = 0;
+  waitpid(child, &status, 0);
+  if (WIFEXITED(status)) {
+    result.exit_code = WEXITSTATUS(status);
+  } else if (WIFSIGNALED(status)) {
+    result.exit_code = 128 + WTERMSIG(status);
+  } else {
+    result.exit_code = -1;
+  }
+  return result;
+}
 #endif
 
-  return result;
+CommandOutput run_command_capture(
+    std::string command,
+    const std::map<std::string, std::string>& runtime_env = {},
+    const std::vector<std::string>& runtime_library_paths = {}) {
+  const auto environment = child_environment_with_overrides(runtime_env, runtime_library_paths);
+  return run_shell_command_with_environment(command, environment);
 }
 
 std::string read_text_file(const std::filesystem::path& path) {
@@ -945,13 +1363,30 @@ NativeResult asr_transcribe_result(const std::string& request) {
   const auto job_id = extract_string(request, "jobId").value_or("native-job");
   const bool prefer_cuda = extract_bool(request, "preferCuda").value_or(false);
   const int cpu_thread_count = std::max(1, extract_int(request, "cpuThreadCount").value_or(default_whisper_thread_count()));
+  const auto runtime = parse_runtime_payload(request);
 
   if (!starts_with(asr_provider, "local.whisper")) {
     return {false, "", "UnsupportedCommand", "This local helper currently supports only the local Whisper method.", false};
   }
+  if (runtime.provider != "whisper.cpp") {
+    return {
+        false,
+        "",
+        "UnsupportedCommand",
+        "This local helper currently supports only runtime.provider=whisper.cpp.",
+        false};
+  }
+  if (runtime.variant && !is_supported_runtime_variant(*runtime.variant)) {
+    return {
+        false,
+        "",
+        "MalformedRequest",
+        "runtime.variant must be one of cpu, cuda, metal, or vulkan.",
+        false};
+  }
 
-  const auto binary_path = extract_string(request, "binaryPath");
-  const auto model_path = extract_string(request, "modelPath");
+  const auto binary_path = runtime.binary_path;
+  const auto model_path = runtime.model_path;
   if (!binary_path || !model_path || binary_path->empty() || model_path->empty()) {
     return {
         false,
@@ -971,7 +1406,18 @@ NativeResult asr_transcribe_result(const std::string& request) {
   if (media_path.empty() || !path_exists(media_path)) {
     return {false, "", "MalformedRequest", "The audio file to recognize could not be found.", false};
   }
-  const bool cuda_supported = detect_cuda_support({std::filesystem::path(*binary_path).parent_path()});
+
+  std::vector<std::filesystem::path> runtime_search_roots;
+  runtime_search_roots.push_back(std::filesystem::path(*binary_path).parent_path());
+  for (const auto& library_path : runtime.library_paths) {
+    if (!library_path.empty()) {
+      runtime_search_roots.emplace_back(library_path);
+    }
+  }
+  const bool cuda_supported = detect_cuda_support(runtime_search_roots);
+  const bool runtime_requests_gpu = runtime_variant_requests_gpu(runtime.variant);
+  const bool use_gpu = runtime.variant.has_value() ? runtime_requests_gpu : prefer_cuda;
+  const bool disable_whisper_gpu = should_disable_whisper_gpu(runtime.variant, prefer_cuda, cuda_supported);
 
   const auto job_safe = sanitize_id(job_id);
   auto output_dir = requested_output_dir(request, job_id, "asr");
@@ -999,7 +1445,7 @@ NativeResult asr_transcribe_result(const std::string& request) {
     std::ostringstream extract_command;
     extract_command << quote_shell_arg(*ffmpeg) << " -y -i " << quote_shell_value(media_path)
                     << " -vn -ac 1 -ar 16000 -c:a pcm_s16le " << quote_shell_arg(*extracted_audio);
-    const auto extract_output = run_command_capture(extract_command.str());
+    const auto extract_output = run_command_capture(extract_command.str(), runtime.env, runtime.library_paths);
     if (extract_output.exit_code != 0 || !path_exists(*extracted_audio)) {
       return {
           false,
@@ -1021,11 +1467,11 @@ NativeResult asr_transcribe_result(const std::string& request) {
   if (whisper_language != "auto" && !whisper_language.empty()) {
     command << " -l " << quote_shell_value(whisper_language);
   }
-  if (!prefer_cuda || !cuda_supported) {
+  if (disable_whisper_gpu) {
     command << " -ng";
   }
 
-  const auto output = run_command_capture(command.str());
+  const auto output = run_command_capture(command.str(), runtime.env, runtime.library_paths);
   const auto srt_path = output_base.string() + ".srt";
   const auto json_path = output_base.string() + ".json";
   if (output.exit_code != 0 || (!path_exists(srt_path) && !path_exists(json_path))) {
@@ -1042,10 +1488,10 @@ NativeResult asr_transcribe_result(const std::string& request) {
   if (extracted_audio) {
     warnings.push_back({"AudioPreExtracted", "Input media was converted to mono 16 kHz WAV before transcription.", ""});
   }
-  if (prefer_cuda && !cuda_supported) {
-    warnings.push_back({"CudaFallback", "CUDA acceleration was requested but the native backend did not detect CUDA support.", ""});
+  if (use_gpu && !cuda_supported) {
+    warnings.push_back({"CudaRuntimeNotDetected", "GPU runtime was requested, but the native backend did not detect CUDA support.", ""});
   }
-  if (!prefer_cuda) {
+  if (disable_whisper_gpu) {
     warnings.push_back({"CudaDisabled", "CUDA acceleration was disabled for this whisper.cpp transcription run.", ""});
   }
   std::vector<Segment> segments;
@@ -1145,8 +1591,40 @@ void print_help(const char* executable) {
       << "Translate-Ter native backend\n\n"
       << "Usage:\n"
       << "  " << executable << " --health\n"
-      << "  " << executable << " --stdio-json\n\n"
+      << "  " << executable << " --stdio-json\n"
+      << "  " << executable << " --selftest\n\n"
       << "Protocol: write one JSON request per line to stdin and read one JSON response per line from stdout.\n";
+}
+
+bool run_selftest() {
+  const auto legacy_gpu = parse_runtime_payload(R"({"payload":{"preferCuda":true,"binaryPath":"C:/top/whisper.exe","modelPath":"C:/top/model.bin"}})");
+  if (legacy_gpu.binary_path.value_or("") != "C:/top/whisper.exe") return false;
+  if (legacy_gpu.model_path.value_or("") != "C:/top/model.bin") return false;
+  if (runtime_request_uses_gpu(legacy_gpu, true) != true) return false;
+  if (should_disable_whisper_gpu(legacy_gpu.variant, true, true) != false) return false;
+  if (should_disable_whisper_gpu(legacy_gpu.variant, true, false) != true) return false;
+  if (should_disable_whisper_gpu(legacy_gpu.variant, false, true) != true) return false;
+
+  const auto nested_cpu = parse_runtime_payload(
+      R"({"payload":{"preferCuda":true,"runtime":{"provider":"whisper.cpp","variant":"cpu","binaryPath":"C:/nested/whisper.exe","modelPath":"C:/nested/model.bin"}}})");
+  if (resolve_runtime_provider_for_request(nested_cpu) != "whisper.cpp") return false;
+  if (nested_cpu.binary_path.value_or("") != "C:/nested/whisper.exe") return false;
+  if (nested_cpu.model_path.value_or("") != "C:/nested/model.bin") return false;
+  if (runtime_request_uses_gpu(nested_cpu, true) != false) return false;
+  if (should_disable_whisper_gpu(nested_cpu.variant, true, true) != true) return false;
+  if (should_disable_whisper_gpu(nested_cpu.variant, true, false) != true) return false;
+
+  const auto nested_gpu = parse_runtime_payload(
+      R"({"payload":{"preferCuda":false,"runtime":{"provider":"whisper.cpp","variant":"metal","binaryPath":"C:/nested/whisper.exe","modelPath":"C:/nested/model.bin"}}})");
+  if (runtime_request_uses_gpu(nested_gpu, false) != true) return false;
+  if (should_disable_whisper_gpu(nested_gpu.variant, false, true) != false) return false;
+  if (should_disable_whisper_gpu(nested_gpu.variant, false, false) != false) return false;
+
+  const auto unsupported_provider = parse_runtime_payload(
+      R"({"payload":{"runtime":{"provider":"faster-whisper","variant":"cuda","binaryPath":"C:/nested/whisper.exe","modelPath":"C:/nested/model.bin"}}})");
+  if (resolve_runtime_provider_for_request(unsupported_provider) != "faster-whisper") return false;
+
+  return true;
 }
 
 CliOptions parse_args(int argc, char** argv) {
@@ -1157,6 +1635,8 @@ CliOptions parse_args(int argc, char** argv) {
       options.health = true;
     } else if (arg == "--stdio-json") {
       options.stdio_json = true;
+    } else if (arg == "--selftest") {
+      options.selftest = true;
     } else if (arg == "--help" || arg == "-h") {
       options.help = true;
     }
@@ -1168,6 +1648,9 @@ CliOptions parse_args(int argc, char** argv) {
 
 int main(int argc, char** argv) {
   const CliOptions options = parse_args(argc, argv);
+  if (options.selftest) {
+    return run_selftest() ? 0 : 1;
+  }
   if (options.health) {
     print_health();
     return 0;

@@ -155,19 +155,51 @@ It returns a `document` payload with parsed segments.
   "targetLanguage": "zh-CN",
   "asrProviderId": "local.whisper.cpp",
   "runtime": {
+    "provider": "whisper.cpp",
+    "variant": "cpu",
     "binaryPath": "D:/userData/runtime/whisper/bin/whisper-cli.exe",
-    "modelPath": "D:/userData/runtime/whisper/models/ggml-base.bin"
+    "modelPath": "D:/userData/runtime/whisper/models/ggml-base.bin",
+    "libraryPaths": ["D:/userData/runtime/whisper/bin"],
+    "env": {
+      "WHISPER_CACHE_DIR": "D:/userData/runtime/whisper/cache"
+    }
   },
+  "binaryPath": "D:/userData/runtime/whisper/bin/whisper-cli.exe",
+  "modelPath": "D:/userData/runtime/whisper/models/ggml-base.bin",
+  "preferCuda": false,
   "ffmpegPath": "D:/tools/ffmpeg.exe",
   "outputDir": "D:/tmp/translate-ter/job-123/asr"
 }
 ```
 
-The backend accepts `binaryPath` and `modelPath` anywhere in the request object
-so current Electron payloads with nested `runtime` work. Electron main must
-only send these paths after manifest pinning, local file existence checks, and
-SHA-256 verification. The native backend checks existence but does not trust or
-download assets.
+`runtime.provider` currently accepts `whisper.cpp`, `faster-whisper`, `mlx`,
+and `coreml` at the contract level, but the C++ backend only executes
+`whisper.cpp`. Other providers return `UnsupportedCommand` and must keep using
+their existing Electron main services.
+
+`runtime.variant` supports `cpu`, `cuda`, `metal`, and `vulkan`. For
+`whisper.cpp`, the backend treats `cpu` as a forced CPU run and adds `-ng` to
+the CLI command. For `cuda`, `metal`, and `vulkan`, it does not add `-ng`. If
+`runtime.variant` is missing, the backend falls back to the legacy `preferCuda`
+flag and preserves existing behavior.
+
+`runtime.libraryPaths` and `runtime.env` are optional runtime launch hints for
+Electron main to pass through. The backend uses them only to augment the native
+child process environment; it does not resolve downloads, manifests, or trust.
+
+Legacy compatibility remains enabled:
+
+- `preferCuda` may still be sent and still works as the fallback selector when
+  `runtime.variant` is absent.
+- `runtime.binaryPath` and `runtime.modelPath` from the older nested structure
+  still work.
+- top-level `binaryPath` and `modelPath` still work and are preserved for
+  compatibility.
+
+Electron main must assemble the `runtime` object and must only send executable
+or model paths after manifest pinning, local file existence checks, and
+SHA-256 verification. Renderer code does not assemble runtime internals. The
+native backend checks existence but does not trust or download assets.
 
 For `local.whisper.cpp`, the backend invokes whisper.cpp CLI with `-osrt` and
 parses the generated SRT into the shared subtitle document shape. Non-WAV input
@@ -191,8 +223,9 @@ Electron main is responsible for:
 - downloading to a temporary file;
 - verifying SHA-256 against the manifest;
 - atomically moving verified files into `userData/runtime/whisper`;
-- passing verified `binaryPath`, `modelPath`, and optional `ffmpegPath` to the
-  backend.
+- assembling the runtime payload and passing verified `binaryPath`,
+  `modelPath`, optional `runtime.libraryPaths`, optional `runtime.env`, and
+  optional `ffmpegPath` to the backend.
 
 The backend returns `DownloadRequired` or `MissingRuntime` when verified paths
 are absent. It does not fetch URLs from the manifest and does not execute

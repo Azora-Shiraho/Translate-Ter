@@ -66,6 +66,19 @@ type FasterWhisperTranscriptionResponse = {
   segments: FasterWhisperSegment[];
 };
 
+type FasterWhisperRunnerError = Error & {
+  code?: string;
+  retryable?: boolean;
+};
+
+type FasterWhisperRunnerFailure = {
+  ok: false;
+  errorMessage: string;
+  message?: string;
+  code?: string;
+  retryable?: boolean;
+};
+
 type DetectedRuntime =
   | {
       ok: true;
@@ -348,7 +361,13 @@ export class FasterWhisperService extends EventEmitter {
     }
 
     if (!output.ok) {
-      throw new Error(output.errorMessage ?? 'faster-whisper transcription failed.');
+      const error = new Error(output.errorMessage ?? 'faster-whisper transcription failed.') as Error & {
+        code?: string;
+        retryable?: boolean;
+      };
+      error.code = output.code;
+      error.retryable = output.retryable ?? true;
+      throw error;
     }
     if (this.cancelledJobs.has(request.jobId)) {
       throw cancellationError();
@@ -406,7 +425,7 @@ export class FasterWhisperService extends EventEmitter {
     input: FasterWhisperTranscriptionRequest & { useCuda: boolean }
   ): Promise<
     | { ok: true; payload: FasterWhisperTranscriptionResponse; warnings: SubtitleWarning[] }
-    | { ok: false; errorMessage: string; warnings: SubtitleWarning[] }
+    | { ok: false; errorMessage: string; code?: string; retryable?: boolean; warnings: SubtitleWarning[] }
   > {
     if (input.useCuda && !this.hasRequiredCudaRuntimeLibraries()) {
       return {
@@ -441,13 +460,16 @@ export class FasterWhisperService extends EventEmitter {
       '--cpu-threads',
       String(input.cpuThreadCount ?? defaultTranscriptionThreads()),
       '--cache-dir',
-      this.cacheDir()
+      this.cacheDir(),
+      ...(input.allowDownload ? [] : ['--local-files-only'])
     ];
     const response = await this.runPythonJson(runtime.command, args, 30 * 60 * 1000, input.jobId);
     if (!response.ok) {
       return {
         ok: false,
         errorMessage: response.errorMessage,
+        code: response.code,
+        retryable: response.retryable,
         warnings: []
       };
     }
@@ -1004,7 +1026,7 @@ export class FasterWhisperService extends EventEmitter {
     args: string[],
     timeoutMs: number,
     jobId?: string
-  ): Promise<{ ok: true; payload: unknown } | { ok: false; errorMessage: string }> {
+  ): Promise<{ ok: true; payload: unknown } | FasterWhisperRunnerFailure> {
     try {
       const result = await runCommandCapture(command.executable, args, {
         env: this.pythonEnv(command),
@@ -1031,14 +1053,14 @@ export class FasterWhisperService extends EventEmitter {
       if (result.timedOut) {
         return {
           ok: false,
-          errorMessage: `faster-whisper Python runner timed out after ${Math.round(timeoutMs / 1000)} seconds.`
+          errorMessage: `faster-whisper Python runner timed out after ${Math.round(timeoutMs / 1000)} seconds.`,
+          code: 'Timeout',
+          retryable: true
         };
       }
-      if (result.code !== 0) {
-        return {
-          ok: false,
-          errorMessage: String(result.stderr || result.stdout || 'faster-whisper runner failed.').trim()
-        };
+      const parsedFailure = this.tryParseRunnerFailure(result.stdout);
+      if (parsedFailure) {
+        return parsedFailure;
       }
       try {
         return {
@@ -1046,20 +1068,74 @@ export class FasterWhisperService extends EventEmitter {
           payload: JSON.parse(result.stdout.trim())
         };
       } catch {
+        const normalized = this.normalizeRunnerError(result.stderr || result.stdout || 'faster-whisper runner failed.');
         return {
           ok: false,
-          errorMessage: 'faster-whisper runner returned invalid JSON.'
+          errorMessage: normalized.message,
+          code: normalized.code,
+          retryable: normalized.retryable
         };
       }
     } catch (error) {
+      const normalized = this.normalizeRunnerError(error);
       return {
         ok: false,
-        errorMessage: error instanceof Error ? error.message : String(error)
+        errorMessage: normalized.message,
+        code: normalized.code,
+        retryable: normalized.retryable
       };
     } finally {
       if (jobId) {
         this.activeTranscriptions.delete(jobId);
       }
+    }
+  }
+
+  normalizeRunnerError(error: unknown): FasterWhisperRunnerError {
+    const message = error instanceof Error ? error.message : String(error);
+    const normalized = message.toLowerCase();
+    const runnerError = new Error(message) as FasterWhisperRunnerError;
+    runnerError.retryable = true;
+
+    if (
+      normalized.includes('unexpected_eof_while_reading') ||
+      normalized.includes('local_files_only') ||
+      normalized.includes('localentrynotfounderror') ||
+      normalized.includes('connecterror') ||
+      normalized.includes('snapshot_download') ||
+      normalized.includes('huggingface') ||
+      normalized.includes('ssl:')
+    ) {
+      runnerError.code = 'DownloadRequired';
+      runnerError.message =
+        'faster-whisper 模型下载失败。请检查网络、代理或证书后重试；如果模型已缓存，请确认缓存目录可访问。';
+      return runnerError;
+    }
+
+    if (normalized.includes('permission denied') || normalized.includes('access is denied')) {
+      runnerError.code = 'DownloadRequired';
+      runnerError.message = 'faster-whisper 模型缓存目录不可写或被占用。请检查权限后重试。';
+      return runnerError;
+    }
+
+    return runnerError;
+  }
+
+  private tryParseRunnerFailure(stdout: string): FasterWhisperRunnerFailure | undefined {
+    try {
+      const parsed = JSON.parse(stdout.trim()) as Partial<FasterWhisperRunnerFailure> | undefined;
+      if (!parsed || parsed.ok !== false || typeof parsed.message !== 'string' || !parsed.message.trim()) {
+        return undefined;
+      }
+      return {
+        ok: false,
+        errorMessage: parsed.message.trim(),
+        message: parsed.message.trim(),
+        code: typeof parsed.code === 'string' && parsed.code.trim() ? parsed.code.trim() : undefined,
+        retryable: typeof parsed.retryable === 'boolean' ? parsed.retryable : undefined
+      };
+    } catch {
+      return undefined;
     }
   }
 
