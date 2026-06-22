@@ -39,6 +39,40 @@ const manifestV1: Parameters<typeof resolveWhisperRuntimeSelection>[0]['manifest
   ]
 };
 
+const manifestDarwinV1: Parameters<typeof resolveWhisperRuntimeSelection>[0]['manifest'] & { manifestVersion: number } = {
+  manifestVersion: 1,
+  enabled: true,
+  runtime: {
+    provider: 'whisper.cpp',
+    version: 'v1.8.3',
+    platforms: {
+      'darwin-arm64': {
+        binary: 'cpu/bin/whisper-cli',
+        sha256: 'cpu-sha',
+        url: 'https://example.test/cpu.tar.gz',
+        acceleration: 'cpu'
+      },
+      'darwin-arm64-metal': {
+        binary: 'metal/bin/whisper-cli',
+        sha256: '',
+        url: null,
+        acceleration: 'metal'
+      }
+    }
+  },
+  models: [
+    {
+      id: 'ggml-base',
+      displayName: 'Whisper base',
+      languageScope: 'multilingual',
+      sizeBytes: 1,
+      sha256: 'model-sha',
+      path: 'models/ggml-base.bin',
+      url: 'https://example.test/model.bin'
+    }
+  ]
+};
+
 function createSelectionInput(overrides: Partial<Parameters<typeof resolveWhisperRuntimeSelection>[0]> = {}) {
   return {
     manifest: manifestV1,
@@ -69,6 +103,45 @@ function createSelectionInput(overrides: Partial<Parameters<typeof resolveWhispe
     },
     capabilities: {
       cuda: {
+        hardwareDetected: true,
+        runtimeDetected: true,
+        compatible: true
+      }
+    },
+    ...overrides
+  };
+}
+
+function createDarwinSelectionInput(overrides: Partial<Parameters<typeof resolveWhisperRuntimeSelection>[0]> = {}) {
+  return {
+    manifest: manifestDarwinV1,
+    platform: 'darwin',
+    arch: 'arm64',
+    modelId: 'ggml-base',
+    options: {
+      acceleration: 'auto' as const,
+      preferredVariant: undefined,
+      ignoreCudaMismatch: false
+    },
+    runtimeBinaries: {
+      'darwin-arm64': {
+        exists: true,
+        verified: true,
+        resolvedPath: '.runtime/whisper_cpp/cpu/whisper-cli'
+      },
+      'darwin-arm64-metal': {
+        exists: true,
+        verified: true,
+        resolvedPath: '/usr/local/bin/whisper-cli'
+      }
+    },
+    modelFile: {
+      exists: true,
+      verified: true,
+      resolvedPath: '.runtime/whisper_cpp/models/ggml-base.bin'
+    },
+    capabilities: {
+      metal: {
         hardwareDetected: true,
         runtimeDetected: true,
         compatible: true
@@ -233,5 +306,60 @@ describe('resolveWhisperRuntimeSelection', () => {
         message: 'CUDA 版本不匹配'
       }
     ]);
+  });
+
+  it('selects metal for darwin arm64 auto when system runtime is available', () => {
+    const result = resolveWhisperRuntimeSelection(createDarwinSelectionInput());
+
+    expect(result.resolution.variant).toBe('metal');
+    expect(result.resolution.platformKey).toBe('darwin-arm64-metal');
+    expect(result.resolution.actionRequired).toBe('none');
+  });
+
+  it('selects metal for explicit darwin arm64 gpu request when system runtime is available', () => {
+    const result = resolveWhisperRuntimeSelection(
+      createDarwinSelectionInput({
+        options: {
+          acceleration: 'gpu',
+          preferredVariant: 'metal',
+          ignoreCudaMismatch: false
+        }
+      })
+    );
+
+    expect(result.resolution.variant).toBe('metal');
+    expect(result.resolution.platformKey).toBe('darwin-arm64-metal');
+    expect(result.resolution.actionRequired).toBe('none');
+  });
+
+  it('falls back to cpu for darwin arm64 auto when metal runtime probe fails', () => {
+    const result = resolveWhisperRuntimeSelection(
+      createDarwinSelectionInput({
+        runtimeBinaries: {
+          'darwin-arm64': {
+            exists: true,
+            verified: true,
+            resolvedPath: '.runtime/whisper_cpp/cpu/whisper-cli'
+          },
+          'darwin-arm64-metal': {
+            exists: false,
+            verified: false,
+            resolvedPath: '/usr/local/bin/whisper-cli'
+          }
+        },
+        capabilities: {
+          metal: {
+            hardwareDetected: true,
+            runtimeDetected: false,
+            compatible: true
+          }
+        }
+      })
+    );
+
+    expect(result.resolution.variant).toBe('cpu');
+    expect(result.resolution.platformKey).toBe('darwin-arm64');
+    expect(result.resolution.fallbackReason).toBe('gpu-runtime-missing');
+    expect(result.resolution.actionRequired).toBe('none');
   });
 });

@@ -67,27 +67,71 @@ const manifestV1 = {
   ]
 } as const;
 
+const manifestDarwinV1 = {
+  manifestVersion: 1,
+  enabled: true,
+  runtime: {
+    provider: 'whisper.cpp',
+    version: 'v1.8.3',
+    platforms: {
+      'darwin-arm64': {
+        binary: 'cpu/bin/whisper-cli',
+        sha256: VALID_SHA_CPU,
+        url: 'https://example.test/cpu.tar.gz',
+        acceleration: 'cpu'
+      },
+      'darwin-arm64-metal': {
+        binary: 'metal/bin/whisper-cli',
+        sha256: '',
+        url: null,
+        acceleration: 'metal'
+      }
+    }
+  },
+  models: [
+    {
+      id: 'ggml-base',
+      displayName: 'Whisper base',
+      languageScope: 'multilingual',
+      sizeBytes: 1,
+      sha256: VALID_SHA_MODEL,
+      path: 'models/ggml-base.bin',
+      url: 'https://example.test/model.bin'
+    }
+  ]
+} as const;
+
 type BinaryState = {
   installPath: string;
   existingPath?: string;
   verifiedPath?: string;
+  systemPath?: string;
   resolvedPath: string;
   installed: boolean;
   verified: boolean;
+  source: 'managed' | 'system' | 'missing';
+  verification: 'managed-sha256' | 'system-probe' | 'none';
 };
+
+type CandidateRuntime =
+  | (typeof manifestV1.runtime.platforms)[keyof typeof manifestV1.runtime.platforms]
+  | (typeof manifestDarwinV1.runtime.platforms)[keyof typeof manifestDarwinV1.runtime.platforms];
 
 type CandidateState = Record<
   string,
   {
-    runtime: (typeof manifestV1.runtime.platforms)[keyof typeof manifestV1.runtime.platforms];
-    variant: 'cpu' | 'cuda';
+    runtime: CandidateRuntime;
+    variant: 'cpu' | 'cuda' | 'metal';
     platformKey: string;
     binaryState: BinaryState;
   }
 >;
 
-function createBinaryState(kind: 'cpu' | 'cuda', overrides: Partial<BinaryState> = {}): BinaryState {
-  const root = `D:/runtime/whisper_cpp/${kind}/Release/whisper-cli.exe`;
+function createBinaryState(kind: 'cpu' | 'cuda' | 'metal', overrides: Partial<BinaryState> = {}): BinaryState {
+  const root =
+    kind === 'metal'
+      ? '/usr/local/bin/whisper-cli'
+      : `D:/runtime/whisper_cpp/${kind}/Release/whisper-cli.exe`;
   return {
     installPath: root,
     existingPath: root,
@@ -95,6 +139,8 @@ function createBinaryState(kind: 'cpu' | 'cuda', overrides: Partial<BinaryState>
     resolvedPath: root,
     installed: true,
     verified: true,
+    source: 'managed',
+    verification: 'managed-sha256',
     ...overrides
   };
 }
@@ -115,6 +161,43 @@ function createCandidateStates(overrides?: {
       variant: 'cuda',
       platformKey: 'win32-x64-cuda',
       binaryState: createBinaryState('cuda', overrides?.cuda)
+    }
+  };
+}
+
+function createDarwinCandidateStates(overrides?: {
+  cpu?: Partial<BinaryState>;
+  metal?: Partial<BinaryState>;
+}): CandidateState {
+  return {
+    'darwin-arm64': {
+      runtime: manifestDarwinV1.runtime.platforms['darwin-arm64'],
+      variant: 'cpu',
+      platformKey: 'darwin-arm64',
+      binaryState: createBinaryState('cpu', {
+        installPath: '/Applications/Translate-Ter.app/runtime/whisper_cpp/cpu/bin/whisper-cli',
+        existingPath: '/Applications/Translate-Ter.app/runtime/whisper_cpp/cpu/bin/whisper-cli',
+        verifiedPath: '/Applications/Translate-Ter.app/runtime/whisper_cpp/cpu/bin/whisper-cli',
+        resolvedPath: '/Applications/Translate-Ter.app/runtime/whisper_cpp/cpu/bin/whisper-cli',
+        ...overrides?.cpu
+      })
+    },
+    'darwin-arm64-metal': {
+      runtime: manifestDarwinV1.runtime.platforms['darwin-arm64-metal'],
+      variant: 'metal',
+      platformKey: 'darwin-arm64-metal',
+      binaryState: createBinaryState('metal', {
+        installPath: '/Applications/Translate-Ter.app/runtime/whisper_cpp/metal/bin/whisper-cli',
+        existingPath: undefined,
+        verifiedPath: undefined,
+        resolvedPath: '/usr/local/bin/whisper-cli',
+        installed: true,
+        verified: true,
+        source: 'system',
+        systemPath: '/usr/local/bin/whisper-cli',
+        verification: 'system-probe',
+        ...overrides?.metal
+      })
     }
   };
 }
@@ -215,12 +298,18 @@ function createManager(options?: {
   modelExists?: boolean;
   modelVerified?: boolean;
   runtimeCudaVersion?: '11.8' | '12.8';
+  manifest?: typeof manifestV1 | typeof manifestDarwinV1;
+  cacheDir?: string;
+  modelPath?: string;
 }) {
   const manager = new WhisperAssetManager() as any;
-  manager.manifest = vi.fn().mockResolvedValue(manifestV1);
+  const manifest = options?.manifest ?? manifestV1;
+  const cacheDir = options?.cacheDir ?? 'D:/runtime/whisper_cpp';
+  const modelPath = options?.modelPath ?? `${cacheDir}/models/ggml-base.bin`;
+  manager.manifest = vi.fn().mockResolvedValue(manifest);
   manager.migrateLegacyCacheIfNeeded = vi.fn().mockResolvedValue(undefined);
-  manager.cacheDir = vi.fn().mockReturnValue('D:/runtime/whisper_cpp');
-  manager.findExistingModelPath = vi.fn().mockResolvedValue('D:/runtime/whisper_cpp/models/ggml-base.bin');
+  manager.cacheDir = vi.fn().mockReturnValue(cacheDir);
+  manager.findExistingModelPath = vi.fn().mockResolvedValue(modelPath);
   manager.exists = vi
     .fn()
     .mockImplementation(async (target: string) => (target.includes('ggml-base.bin') ? (options?.modelExists ?? true) : false));
@@ -230,13 +319,18 @@ function createManager(options?: {
   manager.cudaRuntimeSearchRoots = vi.fn().mockReturnValue(['D:/cuda/bin']);
   manager.ensureWindowsCudaRuntimeDependencies = vi.fn().mockResolvedValue(undefined);
   manager.downloadAndInstall = vi.fn().mockResolvedValue(undefined);
-  const candidateStates = options?.candidateStates ?? createCandidateStates();
+  const candidateStates =
+    options?.candidateStates ?? (manifest === manifestDarwinV1 ? createDarwinCandidateStates() : createCandidateStates());
   manager.collectRuntimeCandidateStates = vi.fn().mockResolvedValue(candidateStates);
-  manager.probeRuntimeBinaryState = vi.fn().mockImplementation(async (_runtime: { acceleration: string }, variant: 'cpu' | 'cuda') =>
-    variant === 'cuda'
-      ? createBinaryState('cuda', candidateStates['win32-x64-cuda']?.binaryState)
-      : createBinaryState('cpu', candidateStates['win32-x64']?.binaryState)
-  );
+  manager.probeRuntimeBinaryState = vi.fn().mockImplementation(async (_runtime: { acceleration: string }, variant: 'cpu' | 'cuda' | 'metal') => {
+    if (variant === 'cuda') {
+      return createBinaryState('cuda', candidateStates['win32-x64-cuda']?.binaryState);
+    }
+    if (variant === 'metal') {
+      return createBinaryState('metal', candidateStates['darwin-arm64-metal']?.binaryState);
+    }
+    return createBinaryState('cpu', candidateStates['win32-x64']?.binaryState ?? candidateStates['darwin-arm64']?.binaryState);
+  });
   return manager as WhisperAssetManager & Record<string, any>;
 }
 
@@ -731,5 +825,158 @@ describe('WhisperAssetManager.ensureRuntime', () => {
     expect(dependencyCandidates.some((candidate: { platformKey: string; variant: string }) =>
       candidate.platformKey === 'win32-x64-cuda' && candidate.variant === 'cuda'
     )).toBe(true);
+  });
+
+  it('selects darwin metal for auto mode when system whisper-cli probe succeeds', async () => {
+    createSpawnSyncMock({ hardwareDetected: false });
+    createExistsSyncMock({ cudaRuntimePresent: false });
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    Object.defineProperty(process, 'arch', { value: 'arm64' });
+    const manager = createManager({
+      manifest: manifestDarwinV1,
+      candidateStates: createDarwinCandidateStates(),
+      cacheDir: '/tmp/translate-ter/.runtime/whisper_cpp',
+      modelPath: '/tmp/translate-ter/.runtime/whisper_cpp/models/ggml-base.bin'
+    });
+
+    const status = await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: false,
+      preferCuda: false,
+      localAsrAcceleration: 'auto',
+      preferredRuntimeVariant: undefined,
+      downloadScope: 'none'
+    });
+
+    expect(status.platformKey).toBe('darwin-arm64-metal');
+    expect(status.binary.expectedPath).toBe('/usr/local/bin/whisper-cli');
+    expect(status.binary.installed).toBe(true);
+    expect(status.binary.verified).toBe(true);
+    expect(status.acceleration.selected).toBe('gpu');
+    expect(status.acceleration.runtimeVariant).toBe('metal');
+    expect(status.acceleration.hardwareDetected).toBe(true);
+    expect(status.acceleration.runtimeDetected).toBe(true);
+    expect(status.actionRequired).toBe('none');
+  });
+
+  it('selects darwin metal for explicit gpu+metal when system whisper-cli probe succeeds', async () => {
+    createSpawnSyncMock({ hardwareDetected: false });
+    createExistsSyncMock({ cudaRuntimePresent: false });
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    Object.defineProperty(process, 'arch', { value: 'arm64' });
+    const manager = createManager({
+      manifest: manifestDarwinV1,
+      candidateStates: createDarwinCandidateStates(),
+      cacheDir: '/tmp/translate-ter/.runtime/whisper_cpp',
+      modelPath: '/tmp/translate-ter/.runtime/whisper_cpp/models/ggml-base.bin'
+    });
+
+    const status = await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: false,
+      preferCuda: false,
+      localAsrAcceleration: 'gpu',
+      preferredRuntimeVariant: 'metal',
+      downloadScope: 'none'
+    });
+
+    expect(status.platformKey).toBe('darwin-arm64-metal');
+    expect(status.acceleration.selected).toBe('gpu');
+    expect(status.acceleration.runtimeVariant).toBe('metal');
+    expect(status.actionRequired).toBe('none');
+  });
+
+  it('falls back to cpu for darwin auto when system whisper-cli is missing', async () => {
+    createSpawnSyncMock({ hardwareDetected: false });
+    createExistsSyncMock({ cudaRuntimePresent: false });
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    Object.defineProperty(process, 'arch', { value: 'arm64' });
+    const manager = createManager({
+      manifest: manifestDarwinV1,
+      candidateStates: createDarwinCandidateStates({
+        metal: {
+          systemPath: undefined,
+          resolvedPath: '/tmp/translate-ter/.runtime/whisper_cpp/metal/bin/whisper-cli',
+          installed: false,
+          verified: false,
+          source: 'missing',
+          verification: 'none'
+        }
+      }),
+      cacheDir: '/tmp/translate-ter/.runtime/whisper_cpp',
+      modelPath: '/tmp/translate-ter/.runtime/whisper_cpp/models/ggml-base.bin'
+    });
+
+    const status = await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: false,
+      preferCuda: false,
+      localAsrAcceleration: 'auto',
+      preferredRuntimeVariant: undefined,
+      downloadScope: 'none'
+    });
+
+    expect(status.platformKey).toBe('darwin-arm64');
+    expect(status.acceleration.selected).toBe('cpu');
+    expect(status.acceleration.runtimeVariant).toBe('cpu');
+    expect(status.acceleration.hardwareDetected).toBe(true);
+    expect(status.acceleration.runtimeDetected).toBe(false);
+    expect(status.acceleration.fallbackReason).toBe('gpu-runtime-missing');
+    expect(status.actionRequired).toBe('none');
+  });
+
+  it('does not require runtime sha256 for darwin metal system runtime after probe succeeds', async () => {
+    createSpawnSyncMock({ hardwareDetected: false });
+    createExistsSyncMock({ cudaRuntimePresent: false });
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    Object.defineProperty(process, 'arch', { value: 'arm64' });
+    const manager = createManager({
+      manifest: manifestDarwinV1,
+      candidateStates: createDarwinCandidateStates(),
+      cacheDir: '/tmp/translate-ter/.runtime/whisper_cpp',
+      modelPath: '/tmp/translate-ter/.runtime/whisper_cpp/models/ggml-base.bin'
+    });
+
+    const status = await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: false,
+      preferCuda: false,
+      localAsrAcceleration: 'gpu',
+      preferredRuntimeVariant: 'metal',
+      downloadScope: 'none'
+    });
+
+    expect(status.binary.verified).toBe(true);
+    expect(status.actionRequired).toBe('none');
+    expect((manager as any).downloadAndInstall).not.toHaveBeenCalled();
+  });
+
+  it('returns download-model when darwin metal system runtime is ready but model is missing', async () => {
+    createSpawnSyncMock({ hardwareDetected: false });
+    createExistsSyncMock({ cudaRuntimePresent: false });
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    Object.defineProperty(process, 'arch', { value: 'arm64' });
+    const manager = createManager({
+      manifest: manifestDarwinV1,
+      candidateStates: createDarwinCandidateStates(),
+      modelExists: false,
+      modelVerified: false,
+      cacheDir: '/tmp/translate-ter/.runtime/whisper_cpp',
+      modelPath: '/tmp/translate-ter/.runtime/whisper_cpp/models/ggml-base.bin'
+    });
+
+    const status = await manager.ensureRuntime({
+      modelId: 'ggml-base',
+      allowDownload: false,
+      preferCuda: false,
+      localAsrAcceleration: 'gpu',
+      preferredRuntimeVariant: 'metal',
+      downloadScope: 'none'
+    });
+
+    expect(status.binary.verified).toBe(true);
+    expect(status.model.installed).toBe(false);
+    expect(status.model.verified).toBe(false);
+    expect(status.actionRequired).toBe('download-model');
   });
 });

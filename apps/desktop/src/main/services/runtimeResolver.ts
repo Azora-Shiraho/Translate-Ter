@@ -194,7 +194,7 @@ function selectGpuCandidate(
     return { fallbackReason: 'gpu-not-detected' };
   }
 
-  if (preferred.variant === 'cuda' && capability.hardwareDetected && !capability.runtimeDetected) {
+  if (capability.hardwareDetected && !capability.runtimeDetected) {
     return {
       fallbackReason: 'gpu-runtime-missing',
       warnings: warningsFor(preferred.variant, request)
@@ -383,10 +383,6 @@ function resolveGpuFallbackReason(
   }
 
   const hasCudaRuntimeMissing = gpuCandidates.some((candidate) => {
-    if (candidate.variant !== 'cuda') {
-      return false;
-    }
-
     const capability = capabilityFor(candidate.variant, request);
     return capability.hardwareDetected && !capability.runtimeDetected;
   });
@@ -411,11 +407,11 @@ function runtimeSelectable(
     return false;
   }
 
-  if (variant === 'cuda') {
-    if (!capability.runtimeDetected) {
-      return false;
-    }
+  if (!capability.runtimeDetected) {
+    return false;
+  }
 
+  if (variant === 'cuda') {
     if (capability.compatible) {
       return true;
     }

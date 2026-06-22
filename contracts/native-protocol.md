@@ -236,6 +236,14 @@ or model paths after manifest pinning, local file existence checks, and
 SHA-256 verification. Renderer code does not assemble runtime internals. The
 native backend checks existence but does not trust or download assets.
 
+For `local.whisper.cpp` on `darwin-arm64`, the initial `metal` runtime path may
+also come from a system `whisper-cli` discovered on `PATH`. This does not add
+new protocol fields: Electron main still sends the same `runtime.provider`,
+`runtime.variant`, `runtime.binaryPath`, and `runtime.modelPath`. The only
+difference is trust policy inside Electron main: managed runtimes stay
+SHA-256-pinned, while a system `metal` runtime is accepted only after an
+executable probe succeeds and is not auto-downloaded or unpacked by the app.
+
 For `local.whisper.cpp`, the backend invokes whisper.cpp CLI with `-osrt` and
 parses the generated SRT into the shared subtitle document shape. Non-WAV input
 is converted to mono 16 kHz WAV with ffmpeg before transcription. If ffmpeg is

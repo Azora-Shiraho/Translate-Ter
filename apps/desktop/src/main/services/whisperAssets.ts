@@ -95,6 +95,9 @@ type NvidiaGpuInfo = {
   computeCapability?: string;
 };
 
+type WhisperBinarySource = 'managed' | 'system' | 'missing';
+type WhisperBinaryVerification = 'managed-sha256' | 'system-probe' | 'none';
+
 type WhisperRuntimeCandidateState = {
   runtime: WhisperManifestRuntime;
   variant: RuntimeVariant;
@@ -107,6 +110,8 @@ type WhisperRuntimeCandidateState = {
     resolvedPath: string;
     installed: boolean;
     verified: boolean;
+    source: WhisperBinarySource;
+    verification: WhisperBinaryVerification;
   };
 };
 
@@ -241,6 +246,10 @@ export class WhisperAssetManager extends EventEmitter {
     const modelPath = existingModelPath ?? managedModelPath;
     const modelExists = await this.exists(modelPath);
     const modelVerified = isPinnedSha256(model.sha256) && modelExists ? await this.verifySha256(modelPath, model.sha256) : false;
+    const runtimeCandidates = await this.collectRuntimeCandidateStates(manifest, normalizedManifest.candidates);
+    const metalRuntimeState = runtimeCandidates[`${this.platformKey()}-metal`];
+    const metalHardwareSupported = process.platform === 'darwin' && process.arch === 'arm64';
+    const metalRuntimeDetected = metalRuntimeState?.binaryState.verified ?? false;
     const capabilities = {
       cuda: {
         hardwareDetected: cudaHardwareSupported,
@@ -252,9 +261,13 @@ export class WhisperAssetManager extends EventEmitter {
               message: compatibility.message
             }
           : undefined
+      },
+      metal: {
+        hardwareDetected: metalHardwareSupported,
+        runtimeDetected: metalRuntimeDetected,
+        compatible: metalHardwareSupported
       }
     } satisfies Parameters<typeof resolveWhisperRuntimeSelection>[0]['capabilities'];
-    const runtimeCandidates = await this.collectRuntimeCandidateStates(manifest, normalizedManifest.candidates);
     const runtimeBinaries = Object.fromEntries(
       Object.entries(runtimeCandidates).map(([platformKey, state]) => [
         platformKey,
@@ -291,6 +304,15 @@ export class WhisperAssetManager extends EventEmitter {
       runtimeRequest,
       compatibility.message
     );
+    const statusCapabilityVariant = this.statusCapabilityVariant(runtimeRequest);
+    const statusHardwareDetected =
+      statusCapabilityVariant === 'metal' ? metalHardwareSupported : cudaHardwareSupported;
+    const statusRuntimeDetected =
+      statusCapabilityVariant === 'metal' ? metalRuntimeDetected : cudaRuntimeDetected;
+    const statusCudaSupported = statusCapabilityVariant === 'cuda' ? cudaSupported : false;
+    const statusVersionMismatch = statusCapabilityVariant === 'cuda' ? versionMismatch : false;
+    const statusRequiredCudaVersion = statusCapabilityVariant === 'cuda' ? requiredCudaVersion : undefined;
+    const statusRuntimeCudaVersion = statusCapabilityVariant === 'cuda' ? runtimeCudaVersion : undefined;
     const statusVariant = resolution.variant;
     const statusActionRequired = this.statusActionRequiredForResolution(resolution, selectedRuntime);
     const statusRuntimeBinary = selectedRuntime?.binary ?? 'unsupported-platform';
@@ -305,12 +327,12 @@ export class WhisperAssetManager extends EventEmitter {
         statusVariant,
         runtimeRequest.acceleration,
         resolution,
-        cudaHardwareSupported,
-        cudaRuntimeDetected,
-        cudaSupported,
-        versionMismatch,
-        requiredCudaVersion,
-        runtimeCudaVersion,
+        statusHardwareDetected,
+        statusRuntimeDetected,
+        statusCudaSupported,
+        statusVersionMismatch,
+        statusRequiredCudaVersion,
+        statusRuntimeCudaVersion,
         false,
         false,
         false,
@@ -333,12 +355,12 @@ export class WhisperAssetManager extends EventEmitter {
         statusVariant,
         runtimeRequest.acceleration,
         resolution,
-        cudaHardwareSupported,
-        cudaRuntimeDetected,
-        cudaSupported,
-        versionMismatch,
-        requiredCudaVersion,
-        runtimeCudaVersion,
+        statusHardwareDetected,
+        statusRuntimeDetected,
+        statusCudaSupported,
+        statusVersionMismatch,
+        statusRequiredCudaVersion,
+        statusRuntimeCudaVersion,
         false,
         false,
         false,
@@ -351,32 +373,36 @@ export class WhisperAssetManager extends EventEmitter {
     }
 
     const managedBinary = selectedRuntimeState!.binaryState;
-    const hashesPinned = isPinnedSha256(selectedRuntime.sha256) && isPinnedSha256(model.sha256);
+    const runtimeHashesPinned = isPinnedSha256(selectedRuntime.sha256);
+    const modelHashesPinned = isPinnedSha256(model.sha256);
     const binaryExists = managedBinary.installed;
     const binaryVerified = managedBinary.verified;
 
-    if (!hashesPinned) {
+    if (!modelHashesPinned || (managedBinary.source !== 'system' && !runtimeHashesPinned)) {
       return this.status(
         platformKey,
-        selectedRuntime.binary,
+        managedBinary.resolvedPath ?? selectedRuntime.binary,
         model.path,
         model.id,
         statusVariant,
         runtimeRequest.acceleration,
         resolution,
-        cudaHardwareSupported,
-        cudaRuntimeDetected,
-        cudaSupported,
-        versionMismatch,
-        requiredCudaVersion,
-        runtimeCudaVersion,
+        statusHardwareDetected,
+        statusRuntimeDetected,
+        statusCudaSupported,
+        statusVersionMismatch,
+        statusRequiredCudaVersion,
+        statusRuntimeCudaVersion,
         binaryExists,
         modelExists,
-        false,
+        managedBinary.source === 'system' ? binaryVerified : false,
         false,
         {
           actionRequired: 'manifest-not-configured',
-          message: 'The local Whisper download information is incomplete right now, so the app cannot verify or download these files automatically.'
+          message:
+            !modelHashesPinned
+              ? 'The model download information is incomplete right now, so the app cannot verify or download this model automatically.'
+              : 'The local Whisper download information is incomplete right now, so the app cannot verify or download these files automatically.'
         }
       );
     }
@@ -415,12 +441,12 @@ export class WhisperAssetManager extends EventEmitter {
       statusVariant,
       runtimeRequest.acceleration,
       resolution,
-      cudaHardwareSupported,
-      cudaRuntimeDetected,
-      cudaSupported,
-      versionMismatch,
-      requiredCudaVersion,
-      runtimeCudaVersion,
+      statusHardwareDetected,
+      statusRuntimeDetected,
+      statusCudaSupported,
+      statusVersionMismatch,
+      statusRequiredCudaVersion,
+      statusRuntimeCudaVersion,
       resolvedBinaryInstalled,
       resolvedModelInstalled,
       resolvedBinaryVerified,
@@ -791,7 +817,7 @@ export class WhisperAssetManager extends EventEmitter {
   }
 
   private async findSystemWhisperBinary(runtime: WhisperManifestRuntime, variant: RuntimeVariant): Promise<string | undefined> {
-    if (variant !== 'cpu') {
+    if (!this.supportsSystemWhisperBinary(variant)) {
       return undefined;
     }
 
@@ -811,6 +837,14 @@ export class WhisperAssetManager extends EventEmitter {
       if (canRunWhisperBinary(candidate)) return candidate;
     }
     return undefined;
+  }
+
+  private supportsSystemWhisperBinary(variant: RuntimeVariant): boolean {
+    if (variant === 'cpu') {
+      return true;
+    }
+
+    return process.platform === 'darwin' && process.arch === 'arm64' && variant === 'metal';
   }
 
   private runtimeBinaryInstallPath(runtime: WhisperManifestRuntime): string {
@@ -869,6 +903,16 @@ export class WhisperAssetManager extends EventEmitter {
     const managedBinary = await this.probeManagedRuntimeBinary(runtime);
     const systemPath = managedBinary.verifiedPath ? undefined : await this.findSystemWhisperBinary(runtime, variant);
     const resolvedPath = managedBinary.verifiedPath ?? systemPath ?? managedBinary.existingPath ?? managedBinary.installPath;
+    const source: WhisperBinarySource =
+      managedBinary.verifiedPath
+        ? 'managed'
+        : systemPath
+          ? 'system'
+          : managedBinary.existingPath
+            ? 'managed'
+          : 'missing';
+    const verification: WhisperBinaryVerification =
+      managedBinary.verifiedPath ? 'managed-sha256' : systemPath ? 'system-probe' : 'none';
     return {
       installPath: managedBinary.installPath,
       existingPath: managedBinary.existingPath,
@@ -876,7 +920,9 @@ export class WhisperAssetManager extends EventEmitter {
       systemPath,
       resolvedPath,
       installed: Boolean(systemPath) || Boolean(managedBinary.existingPath),
-      verified: Boolean(systemPath) || Boolean(managedBinary.verifiedPath)
+      verified: Boolean(systemPath) || Boolean(managedBinary.verifiedPath),
+      source,
+      verification
     };
   }
 
@@ -915,11 +961,19 @@ export class WhisperAssetManager extends EventEmitter {
 
     if (resolution.actionRequired === 'manifest-not-configured' || resolution.actionRequired === 'unsupported-platform') {
       const baseKey = this.platformKey();
-      const wantsGpu = request.acceleration === 'gpu' || (request.acceleration === 'auto' && request.preferredVariant === 'cuda');
-      return wantsGpu ? `${baseKey}-cuda` : baseKey;
+      const gpuVariant = this.statusCapabilityVariant(request);
+      return gpuVariant ? `${baseKey}-${gpuVariant}` : baseKey;
     }
 
     return resolution.platformKey;
+  }
+
+  private statusCapabilityVariant(request: WhisperRuntimeResolverOptions): RuntimeVariant | undefined {
+    if (request.acceleration === 'cpu' || request.preferredVariant === 'cpu') {
+      return undefined;
+    }
+
+    return request.preferredVariant ?? defaultGpuRuntimeVariant(process.platform);
   }
 
   private compatibilityMessageForResolution(
@@ -1366,6 +1420,10 @@ function canRunWhisperBinary(path: string): boolean {
     timeout: 5_000
   });
   return probe.status === 0;
+}
+
+function defaultGpuRuntimeVariant(platform: string): RuntimeVariant {
+  return platform === 'darwin' ? 'metal' : 'cuda';
 }
 
 function normalizeRuntimeVariantFromPlatformKey(platformKey: string, acceleration?: string): RuntimeVariant {
