@@ -21,6 +21,7 @@ import type { FasterWhisperService } from './fasterWhisperService';
 import type { NativeBackendClient } from './nativeBackendClient';
 import { createNativeRuntimePayload } from './nativeTranscribePayload';
 import type { SettingsStore } from './settingsStore';
+import { resolveFasterWhisperRequestOptions } from './fasterWhisperRuntimeOptions';
 import type { WhisperAssetManager } from './whisperAssets';
 
 export class JobManager extends EventEmitter {
@@ -41,17 +42,13 @@ export class JobManager extends EventEmitter {
     validateAsrRequest(request);
     const jobId = `job-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
-    const localAsrAcceleration = request.localAsrAcceleration ?? (request.localWhisperUseCuda ? 'gpu' : 'cpu');
-    const preferredRuntimeVariant =
-      request.preferredRuntimeVariant !== undefined
-        ? request.preferredRuntimeVariant
-        : request.localAsrAcceleration === undefined
-          ? request.localWhisperUseCuda
-            ? 'cuda'
-            : 'cpu'
-          : localAsrAcceleration === 'cpu'
-            ? 'cpu'
-            : undefined;
+    const resolvedFasterWhisper = resolveFasterWhisperRequestOptions({
+      preferCuda: Boolean(request.localWhisperUseCuda),
+      localAsrAcceleration: request.localAsrAcceleration,
+      preferredRuntimeVariant: request.preferredRuntimeVariant
+    });
+    const localAsrAcceleration = resolvedFasterWhisper.acceleration;
+    const preferredRuntimeVariant = resolvedFasterWhisper.preferredVariant;
     const job: JobSnapshot = {
       id: jobId,
       mediaPath: request.mediaPath,
@@ -63,7 +60,7 @@ export class JobManager extends EventEmitter {
       targetLanguage: canonicalTargetLanguageCode(request.targetLanguage),
       asrProviderId: request.asrProviderId,
       whisperModelId: request.whisperModelId,
-      localWhisperUseCuda: request.localWhisperUseCuda ?? false,
+      localWhisperUseCuda: resolvedFasterWhisper.preferCuda,
       localAsrAcceleration,
       preferredRuntimeVariant,
       localAsrCpuMode: request.localAsrCpuMode ?? 'balanced',
@@ -185,6 +182,8 @@ export class JobManager extends EventEmitter {
           targetLanguage: job.targetLanguage,
           modelId: job.whisperModelId,
           preferCuda: job.localWhisperUseCuda,
+          localAsrAcceleration: job.localAsrAcceleration,
+          preferredRuntimeVariant: job.preferredRuntimeVariant,
           cpuThreadCount,
           allowDownload: job.allowWhisperAssetDownload,
           useMultiThreadDownload: currentSettings.enableMultiThreadDownload

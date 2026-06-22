@@ -677,6 +677,8 @@ function App(): JSX.Element {
         modelId: settings.whisperModelId,
         allowDownload: true,
         preferCuda: Boolean(settings.localWhisperUseCuda),
+        localAsrAcceleration: settings.localAsrAcceleration,
+        preferredRuntimeVariant: settings.preferredRuntimeVariant,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         forceManaged: true
       });
@@ -881,7 +883,9 @@ function App(): JSX.Element {
         const health = await window.translateTer.assets.ensureFasterWhisperRuntime({
           modelId: settings.whisperModelId,
           allowDownload: false,
-          preferCuda: Boolean(settings.localWhisperUseCuda)
+          preferCuda: Boolean(settings.localWhisperUseCuda),
+          localAsrAcceleration: settings.localAsrAcceleration,
+          preferredRuntimeVariant: settings.preferredRuntimeVariant
         });
         setProviderHealth((current) => ({ ...current, [providerId]: health }));
         pushStatus(health.message ?? t(providerStatusLabel(health.status)), health.ok ? 'success' : 'warning');
@@ -1147,6 +1151,9 @@ function App(): JSX.Element {
   const asrHealth = providerHealth[asrProviderId];
   const usingWhisperCpp = asrProviderId === 'local.whisper.cpp';
   const usingFasterWhisper = asrProviderId === 'local.faster-whisper';
+  const fasterWhisperUnsupportedVariant = Boolean(
+    usingFasterWhisper && asrHealth?.acceleration && !asrHealth.acceleration.supported
+  );
   const usingLocalAsr = usingWhisperCpp || usingFasterWhisper;
   const canForceStop = Boolean(job && !['completed', 'failed', 'cancelled'].includes(job.stage));
   const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) ?? segments[0];
@@ -1267,8 +1274,16 @@ function App(): JSX.Element {
   const accelerationJumpTarget: SettingsJumpTarget = usingWhisperCpp ? 'cuda' : 'asr-provider';
   const modelJumpTarget: SettingsJumpTarget = usingLocalAsr ? 'whisper-model' : 'asr-provider';
   const translationJumpTarget: SettingsJumpTarget = 'translation-provider';
+  const showFasterWhisperRuntimeDownloadAction = Boolean(
+    settings?.allowWhisperAssetDownload &&
+      usingFasterWhisper &&
+      !fasterWhisperUnsupportedVariant &&
+      (!asrHealth || asrHealth.status === 'unavailable')
+  );
   const showRuntimeDownloadAction =
-    Boolean(settings?.allowWhisperAssetDownload) && (usingWhisperCpp || usingFasterWhisper) && !asrHealth?.ok;
+    Boolean(settings?.allowWhisperAssetDownload) &&
+    (usingWhisperCpp || showFasterWhisperRuntimeDownloadAction) &&
+    !asrHealth?.ok;
   const runtimeDownloadDisabled =
     runtimeOperation === 'runtime-download' ||
     checkingProvider === asrProviderId ||

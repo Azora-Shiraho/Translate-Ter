@@ -29,6 +29,7 @@ import { FfmpegAssetManager } from './services/ffmpegAssets';
 import { AppLogger, type RendererLogWriteInput } from './services/logger';
 import { testOpenAICompatibleProvider } from './services/providerHealth';
 import { WhisperAssetManager } from './services/whisperAssets';
+import { mergeFasterWhisperRuntimeRequestWithSettings } from './services/fasterWhisperRuntimeOptions';
 import { mergeWhisperRuntimeRequestWithSettings } from './services/whisperRuntimeRequestMerge';
 import { asrProviders } from './services/asrProviders';
 
@@ -290,7 +291,9 @@ function registerIpc(): void {
     const settings = await settingsStore.get();
     return fasterWhisper.health({
       modelId: settings.whisperModelId,
-      preferCuda: settings.localWhisperUseCuda
+      preferCuda: settings.localWhisperUseCuda,
+      localAsrAcceleration: settings.localAsrAcceleration,
+      preferredRuntimeVariant: settings.preferredRuntimeVariant
     });
   }
 
@@ -504,10 +507,7 @@ function registerIpc(): void {
   });
   registerHandle('assets:ensure-faster-whisper-runtime', async (_event, request: FasterWhisperRuntimeRequest) => {
     const settings = await settingsStore.get();
-    return fasterWhisper.ensureRuntime({
-      ...request,
-      useMultiThreadDownload: request.useMultiThreadDownload ?? settings.enableMultiThreadDownload
-    });
+    return fasterWhisper.ensureRuntime(mergeFasterWhisperRuntimeRequestWithSettings(request, settings));
   });
   registerHandle('assets:ensure-faster-whisper-cuda', async (_event, request: FasterWhisperCudaRequest) => {
     const settings = await settingsStore.get();
