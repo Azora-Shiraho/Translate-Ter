@@ -64,6 +64,7 @@ export class NativeBackendClient {
       status: 'degraded',
       detail: response.error?.message,
       capabilities: ['runtime.health'],
+      accelerators: [],
       whisperRuntimeAvailable: false,
       ffmpegAvailable: false,
       ffprobeAvailable: false,

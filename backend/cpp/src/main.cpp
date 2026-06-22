@@ -750,7 +750,46 @@ std::string bool_json(bool value) {
   return value ? "true" : "false";
 }
 
-bool detect_cuda_support(const std::vector<std::filesystem::path>& extra_search_roots = {}) {
+std::string accelerator_health_payload(
+    std::string_view variant,
+    bool hardware_detected,
+    bool runtime_detected,
+    bool supported,
+    std::string_view message = {}) {
+  std::ostringstream payload;
+  payload << "{\"variant\":\"" << json_escape(variant) << "\",\"hardwareDetected\":"
+          << bool_json(hardware_detected) << ",\"runtimeDetected\":" << bool_json(runtime_detected)
+          << ",\"supported\":" << bool_json(supported);
+  if (!message.empty()) {
+    payload << ",\"message\":\"" << json_escape(message) << "\"";
+  }
+  payload << "}";
+  return payload.str();
+}
+
+std::optional<std::filesystem::path> find_nvidia_smi_tool() {
+  if (const auto tool = find_tool("nvidia-smi")) {
+    return tool;
+  }
+
+#if defined(_WIN32)
+  const std::array<std::filesystem::path, 2> known_paths = {
+      std::filesystem::path("C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe"),
+      std::filesystem::path("C:\\Windows\\System32\\nvidia-smi.exe"),
+  };
+  for (const auto& candidate : known_paths) {
+    if (path_exists(candidate)) return candidate;
+  }
+#endif
+
+  return std::nullopt;
+}
+
+bool detect_cuda_hardware_support() {
+  return find_nvidia_smi_tool().has_value();
+}
+
+bool detect_cuda_runtime_support(const std::vector<std::filesystem::path>& extra_search_roots = {}) {
 #if defined(_WIN32)
   const std::array<std::string, 2> cuda_dlls = {"cublas64_11.dll", "cublasLt64_11.dll"};
   std::vector<std::filesystem::path> search_roots = extra_search_roots;
@@ -772,16 +811,58 @@ bool detect_cuda_support(const std::vector<std::filesystem::path>& extra_search_
     });
   });
 #else
-  if (std::getenv("CUDA_PATH") != nullptr || std::getenv("CUDA_HOME") != nullptr) {
+  return std::getenv("CUDA_PATH") != nullptr || std::getenv("CUDA_HOME") != nullptr;
+#endif
+}
+
+bool detect_cuda_support(const std::vector<std::filesystem::path>& extra_search_roots = {}) {
+#if defined(_WIN32)
+  return detect_cuda_runtime_support(extra_search_roots);
+#else
+  if (detect_cuda_runtime_support(extra_search_roots)) {
     return true;
   }
 
-  if (find_tool("nvidia-smi").has_value()) {
+  if (detect_cuda_hardware_support()) {
     return true;
   }
 #endif
 
   return false;
+}
+
+std::string cuda_accelerator_message(bool hardware_detected, bool runtime_detected, bool supported) {
+  if (supported && hardware_detected != runtime_detected) {
+    return "CUDA support follows the legacy detector; hardware/runtime split is best-effort.";
+  }
+  if (!supported && hardware_detected && !runtime_detected) {
+    return "NVIDIA hardware was detected, but the CUDA runtime was not detected.";
+  }
+  if (!supported && !hardware_detected && runtime_detected) {
+    return "CUDA runtime files were detected, but NVIDIA hardware was not detected.";
+  }
+  return "";
+}
+
+std::string accelerators_health_payload(bool cuda_supported) {
+  const bool cuda_hardware_detected = detect_cuda_hardware_support();
+  const bool cuda_runtime_detected = detect_cuda_runtime_support();
+  const auto cuda_message = cuda_accelerator_message(cuda_hardware_detected, cuda_runtime_detected, cuda_supported);
+
+  std::ostringstream payload;
+  payload << "["
+          << accelerator_health_payload(
+                 "cuda",
+                 cuda_hardware_detected,
+                 cuda_runtime_detected,
+                 cuda_supported,
+                 cuda_message)
+          << ","
+          << accelerator_health_payload("metal", false, false, false, "Metal accelerator detection is not implemented yet.")
+          << ","
+          << accelerator_health_payload("vulkan", false, false, false, "Vulkan accelerator detection is not implemented yet.")
+          << "]";
+  return payload.str();
 }
 
 std::filesystem::path requested_output_dir(const std::string& request, const std::string& job_id, std::string_view phase) {
@@ -804,7 +885,7 @@ std::string health_payload() {
           << bool_json(ffmpeg_available) << ",\"ffprobeAvailable\":" << bool_json(ffprobe_available)
           << ",\"hardwareAcceleration\":\"" << (cuda_supported ? "gpu" : "cpu") << "\",\"cudaSupported\":"
           << bool_json(cuda_supported) << ",\"recommendedLocalAcceleration\":\"" << (cuda_supported ? "gpu" : "cpu")
-          << "\"}";
+          << "\",\"accelerators\":" << accelerators_health_payload(cuda_supported) << "}";
   return payload.str();
 }
 

@@ -82,6 +82,41 @@ Electron main, not the backend, owns manifest download and SHA-256 verification.
 It also reports `ffmpegAvailable` and `ffprobeAvailable` from the native
 process PATH.
 
+The payload now includes `accelerators`, an array describing native accelerator
+variants that the backend can report:
+
+```json
+[
+  {
+    "variant": "cuda",
+    "hardwareDetected": true,
+    "runtimeDetected": true,
+    "supported": true,
+    "message": "Optional human-readable detail."
+  },
+  {
+    "variant": "metal",
+    "hardwareDetected": false,
+    "runtimeDetected": false,
+    "supported": false
+  },
+  {
+    "variant": "vulkan",
+    "hardwareDetected": false,
+    "runtimeDetected": false,
+    "supported": false
+  }
+]
+```
+
+For CUDA, `hardwareDetected` and `runtimeDetected` are lightweight best-effort
+signals split from the existing probes; `supported` follows the existing backend
+CUDA detection logic for compatibility. Metal and Vulkan may conservatively
+report `supported: false` until the backend grows dedicated detection. The
+legacy fields `cudaSupported`, `hardwareAcceleration`, and
+`recommendedLocalAcceleration` remain part of `runtime.health` for compatibility
+and must not be removed by clients.
+
 `media.probe` accepts:
 
 ```json

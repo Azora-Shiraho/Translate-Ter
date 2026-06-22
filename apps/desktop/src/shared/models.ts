@@ -305,12 +305,21 @@ export type FfmpegStatus = {
   actionRequired?: 'download-required' | 'none';
 };
 
+export type NativeAcceleratorHealth = {
+  variant: 'cuda' | 'metal' | 'vulkan';
+  hardwareDetected: boolean;
+  runtimeDetected: boolean;
+  supported: boolean;
+  message?: string;
+};
+
 export type NativeHealth = {
   protocolVersion: number;
   backendVersion: string;
   status: 'ok' | 'degraded';
   detail?: string;
   capabilities: string[];
+  accelerators: NativeAcceleratorHealth[];
   whisperRuntimeAvailable: boolean;
   ffmpegAvailable?: boolean;
   ffprobeAvailable?: boolean;

@@ -154,11 +154,25 @@ std::wstring run_command_capture(const std::wstring& command) {
   return output;
 }
 
-bool detect_cuda_support() {
+bool detect_cuda_runtime_environment_support() {
   if (GetEnvironmentVariableW(L"CUDA_PATH", nullptr, 0) > 0 || GetEnvironmentVariableW(L"CUDA_HOME", nullptr, 0) > 0) {
     return true;
   }
+  return false;
+}
 
+bool search_path_file_exists(const wchar_t* file_name) {
+  return SearchPathW(nullptr, file_name, nullptr, 0, nullptr, nullptr) > 0;
+}
+
+bool detect_cuda_runtime_support() {
+  if (detect_cuda_runtime_environment_support()) {
+    return true;
+  }
+  return search_path_file_exists(L"cublas64_11.dll") && search_path_file_exists(L"cublasLt64_11.dll");
+}
+
+bool detect_cuda_hardware_support() {
   const std::array<std::filesystem::path, 2> known_paths = {
       std::filesystem::path(L"C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe"),
       std::filesystem::path(L"C:\\Windows\\System32\\nvidia-smi.exe"),
@@ -175,6 +189,13 @@ bool detect_cuda_support() {
   }
 
   return false;
+}
+
+bool detect_cuda_support() {
+  if (detect_cuda_runtime_environment_support()) {
+    return true;
+  }
+  return detect_cuda_hardware_support();
 }
 
 bool start_backend() {
@@ -320,6 +341,8 @@ void draw_text_block(HDC dc, RECT rect, std::wstring_view title, std::wstring_vi
 #if defined(TRANSLATE_TER_WITH_WEBVIEW2)
 std::wstring frontend_host_script() {
   const bool cuda_supported = detect_cuda_support();
+  const bool cuda_hardware_detected = detect_cuda_hardware_support();
+  const bool cuda_runtime_detected = detect_cuda_runtime_support();
   std::wostringstream script;
   script << LR"JS(
 (() => {
@@ -461,7 +484,29 @@ std::wstring frontend_host_script() {
         ffprobeAvailable: false,
         hardwareAcceleration: ')JS" << (cuda_supported ? L"gpu" : L"cpu") << LR"JS(',
         cudaSupported: )JS" << (cuda_supported ? L"true" : L"false") << LR"JS(,
-        recommendedLocalAcceleration: ')JS" << (cuda_supported ? L"gpu" : L"cpu") << LR"JS('
+        recommendedLocalAcceleration: ')JS" << (cuda_supported ? L"gpu" : L"cpu") << LR"JS(',
+        accelerators: [
+          {
+            variant: 'cuda',
+            hardwareDetected: )JS" << (cuda_hardware_detected ? L"true" : L"false") << LR"JS(,
+            runtimeDetected: )JS" << (cuda_runtime_detected ? L"true" : L"false") << LR"JS(,
+            supported: )JS" << (cuda_supported ? L"true" : L"false") << LR"JS(
+          },
+          {
+            variant: 'metal',
+            hardwareDetected: false,
+            runtimeDetected: false,
+            supported: false,
+            message: 'Metal accelerator detection is not implemented yet.'
+          },
+          {
+            variant: 'vulkan',
+            hardwareDetected: false,
+            runtimeDetected: false,
+            supported: false,
+            message: 'Vulkan accelerator detection is not implemented yet.'
+          }
+        ]
       })
     }
   };
