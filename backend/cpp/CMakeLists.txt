@@ -17,3 +17,4 @@ add_executable(translate-ter-backend
 )
 
 target_compile_features(translate-ter-backend PRIVATE cxx_std_20)
+target_include_directories(translate-ter-backend PRIVATE src)
