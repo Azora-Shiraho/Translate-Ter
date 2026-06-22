@@ -8,6 +8,7 @@ import type {
   FasterWhisperCudaRequest,
   FasterWhisperCudaStatus,
   FasterWhisperRuntimeRequest,
+  FasterWhisperRuntimeStatus,
   FfmpegRequest,
   FfmpegStatus,
   JobEvent,
@@ -215,7 +216,7 @@ const api = {
     ensureWhisperRuntime: (request: WhisperRuntimeRequest) =>
       invokeLogged<WhisperRuntimeStatus>('assets:ensure-whisper-runtime', [request]),
     ensureFasterWhisperRuntime: (request: FasterWhisperRuntimeRequest) =>
-      invokeLogged<ProviderHealth>('assets:ensure-faster-whisper-runtime', [request]),
+      invokeLogged<FasterWhisperRuntimeStatus>('assets:ensure-faster-whisper-runtime', [request]),
     ensureFasterWhisperCuda: (request: FasterWhisperCudaRequest) =>
       invokeLogged<FasterWhisperCudaStatus>('assets:ensure-faster-whisper-cuda', [request]),
     ensureFfmpeg: (request: FfmpegRequest) =>

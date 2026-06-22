@@ -96,6 +96,17 @@ export type ProviderHealth = {
   ok: boolean;
   status: 'healthy' | 'degraded' | 'unconfigured' | 'unavailable';
   message?: string;
+  acceleration?: ProviderAccelerationStatus;
+};
+
+export type ProviderAccelerationStatus = {
+  requested: LocalAsrAcceleration;
+  selected: 'gpu' | 'cpu';
+  runtimeVariant: RuntimeVariant;
+  hardwareDetected: boolean;
+  runtimeDetected: boolean;
+  supported: boolean;
+  fallbackReason?: string;
 };
 
 export type ProviderSecretInput = {
@@ -271,8 +282,15 @@ export type FasterWhisperRuntimeRequest = {
   modelId: string;
   allowDownload: boolean;
   preferCuda: boolean;
+  localAsrAcceleration?: LocalAsrAcceleration;
+  preferredRuntimeVariant?: RuntimeVariant;
   useMultiThreadDownload?: boolean;
   forceManaged?: boolean;
+};
+
+export type FasterWhisperRuntimeStatus = ProviderHealth & {
+  providerId: 'local.faster-whisper';
+  acceleration: ProviderAccelerationStatus;
 };
 
 export type FasterWhisperCudaRequest = {
