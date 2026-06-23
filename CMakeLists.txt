@@ -13,5 +13,12 @@ foreach(CONFIG IN ITEMS Debug Release RelWithDebInfo MinSizeRel)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG_UPPER} ${CMAKE_BINARY_DIR}/bin)
 endforeach()
 
+option(TRANSLATE_TER_BUILD_WINDOWS_NATIVE_HOST "Build the Windows WebView2 native host." ${WIN32})
+
 add_subdirectory(backend/cpp)
-add_subdirectory(apps/native-host)
+
+if(TRANSLATE_TER_BUILD_WINDOWS_NATIVE_HOST)
+  add_subdirectory(apps/native-host)
+else()
+  message(STATUS "Skipping Windows-only WebView2 native host on ${CMAKE_SYSTEM_NAME}; building translate-ter-backend only.")
+endif()

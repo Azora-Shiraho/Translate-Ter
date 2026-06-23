@@ -5,11 +5,19 @@ MVP provides a buildable CLI with `--health` and newline-delimited JSON stdio so
 Electron can detect protocol compatibility and route local work without exposing
 runtime paths to the renderer.
 
+This backend helper is the cross-platform native target. The separate
+`apps/native-host` WebView2 window host remains Windows-only.
+
 ```powershell
 cmake -S backend/cpp -B backend/cpp/build
 cmake --build backend/cpp/build --config Release
 backend\cpp\build\bin\translate-ter-backend.exe --health
 ```
+
+From the repository root, `npm run native:build` configures the top-level CMake
+project and builds this helper on every platform. On Windows it also builds the
+WebView2 native host; on macOS/Linux it skips `apps/native-host` and produces
+only `translate-ter-backend`.
 
 Planned commands over stdin/stdout JSON:
 

@@ -1,8 +1,8 @@
 # Translate-Ter
 
-Translate-Ter is a Windows-first subtitle workflow app for importing media, producing subtitles with local-first ASR, translating subtitle segments through provider-neutral LLM adapters, and exporting SRT.
+Translate-Ter is a desktop subtitle workflow app for importing media, producing subtitles with local-first ASR, translating subtitle segments through provider-neutral LLM adapters, and exporting SRT.
 
-The current migration target is a native Windows entry executable. `TranslateTer.exe` owns the app window through WebView2, loads the built web frontend, starts the C++ backend, and shuts the backend down when the entry program exits. Electron remains available as a development/reference shell while the native host reaches feature parity.
+Electron is the cross-platform mainline shell. On Windows, the repository also keeps a native `TranslateTer.exe` entry executable that owns the app window through WebView2, loads the built web frontend, starts the C++ backend, and shuts the backend down when the entry program exits.
 
 ## Quick Start
 
@@ -13,7 +13,7 @@ npm run dev
 
 The desktop worker is an Electron + React + TypeScript + Vite app. `npm run dev` starts the Electron shell with the renderer UI; `npm run build` type-checks and emits production bundles under `out/`. `package.json` points both Electron's `main` field and electron-builder's `files` list at that same production output.
 
-Native unzip-and-run package:
+Windows-only native unzip-and-run package:
 
 ```powershell
 npm run native:package
@@ -45,8 +45,22 @@ Native backend skeleton:
 ```powershell
 npm run native:configure
 npm run native:build
-build\native\bin\translate-ter-backend.exe --health
 ```
+
+`npm run native:build` always configures CMake first. On Windows it builds both `translate-ter-backend` and the WebView2 native host. On macOS/Linux it only builds `translate-ter-backend`, so `apps/native-host` and `windows.h` are never compiled there.
+
+Platform-specific backend helper paths:
+
+- Windows: `build\native\bin\translate-ter-backend.exe --health`
+- macOS/Linux: `./build/native/bin/translate-ter-backend --health`
+
+Electron packaging stays cross-platform:
+
+```powershell
+npm run package:electron
+```
+
+On macOS/Linux, `npm run native:package` now exits with a clear Windows-only message instead of attempting to build the WebView2 host.
 
 This repository intentionally has no initial commit yet. The coordinating agent will decide when the reviewed baseline is ready to commit.
 
@@ -70,7 +84,7 @@ apps/desktop/src/main      Electron main, IPC, job/provider/runtime services
 apps/desktop/src/preload   contextBridge API
 apps/desktop/src/renderer  React UI and i18n resources
 apps/desktop/src/shared    Contracts, SRT model/parser/writer, translation core
-apps/native-host           Native Win32/WebView2 entry executable
+apps/native-host           Windows-only Win32/WebView2 entry executable
 backend/cpp                Native backend CLI skeleton
 contracts                  Protocol notes
 resources                  Whisper runtime/model manifest
