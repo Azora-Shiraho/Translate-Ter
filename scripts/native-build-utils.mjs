@@ -8,6 +8,10 @@ const scriptsDir = dirname(fileURLToPath(import.meta.url));
 export const projectRoot = resolve(scriptsDir, '..');
 export const nativeBuildDir = resolve(projectRoot, 'build', 'native');
 
+export function nativeHostCmakeOptionValue() {
+  return process.platform === 'win32' ? 'ON' : 'OFF';
+}
+
 export function cmakeCommand() {
   if (process.platform === 'win32') {
     const preferred =
