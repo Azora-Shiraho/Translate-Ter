@@ -106,9 +106,17 @@ describe('runtime variant helpers', () => {
   });
 
   it('maps runtime variant selections back to coherent acceleration states', () => {
-    expect(resolveAccelerationForVariantSelection('auto')).toBe('auto');
-    expect(resolveAccelerationForVariantSelection('cpu')).toBe('cpu');
-    expect(resolveAccelerationForVariantSelection('cuda')).toBe('gpu');
+    expect(resolveAccelerationForVariantSelection('auto', 'auto')).toBe('auto');
+    expect(resolveAccelerationForVariantSelection('auto', 'gpu')).toBe('gpu');
+    expect(resolveAccelerationForVariantSelection('cpu', 'gpu')).toBe('cpu');
+    expect(resolveAccelerationForVariantSelection('cuda', 'auto')).toBe('gpu');
+  });
+
+  it('keeps gpu acceleration when users choose runtime variant auto under gpu mode', () => {
+    const patch = buildLocalAsrSettingsPatch(resolveAccelerationForVariantSelection('auto', 'gpu'), 'auto');
+
+    expect(patch.localAsrAcceleration).toBe('gpu');
+    expect(patch.preferredRuntimeVariant).toBeUndefined();
   });
 
   it('shows cuda-only flows only when the current selection can actually use cuda', () => {

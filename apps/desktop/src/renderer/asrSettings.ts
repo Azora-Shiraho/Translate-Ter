@@ -117,10 +117,11 @@ export function resolveVariantSelectionForAcceleration(
 }
 
 export function resolveAccelerationForVariantSelection(
-  variantSelection: RuntimeVariantSelection
+  variantSelection: RuntimeVariantSelection,
+  currentAcceleration: LocalAsrAcceleration
 ): LocalAsrAcceleration {
   if (variantSelection === 'auto') {
-    return 'auto';
+    return currentAcceleration === 'gpu' ? 'gpu' : 'auto';
   }
 
   if (variantSelection === 'cpu') {

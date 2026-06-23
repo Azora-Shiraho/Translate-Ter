@@ -595,7 +595,7 @@ function App(): JSX.Element {
   ): Promise<void> {
     if (!settings) return;
 
-    const nextAcceleration = resolveAccelerationForVariantSelection(variantSelection);
+    const nextAcceleration = resolveAccelerationForVariantSelection(variantSelection, configuredAcceleration);
     await updateSettings(buildLocalAsrSettingsPatch(nextAcceleration, variantSelection));
   }
 
@@ -1302,8 +1302,7 @@ function App(): JSX.Element {
   const backendAccelerationState = deriveBackendAccelerationState({
     t,
     runtimeStatus,
-    asrProviderId,
-    useCuda: effectiveRuntimeVariantSelection === 'cuda'
+    asrProviderId
   });
   const runtimeModelState = deriveRuntimeModelState({
     t,
@@ -3471,7 +3470,9 @@ function buildWhisperRuntimeStatusRows(input: {
     },
     {
       label: t('fallbackReason'),
-      value: runtimeStatus?.acceleration.fallbackReason ? fallbackReasonLabel(runtimeStatus.acceleration.fallbackReason, t) : t('none'),
+      value: runtimeStatus?.acceleration.fallbackReason
+        ? fallbackReasonLabel(runtimeStatus.acceleration.fallbackReason, t, requestedVariant)
+        : t('none'),
       tone: runtimeStatus?.acceleration.fallbackReason ? 'warn' : 'muted'
     },
     {
@@ -3514,7 +3515,7 @@ function buildFasterWhisperRuntimeStatusRows(input: {
     },
     {
       label: t('fallbackReason'),
-      value: acceleration?.fallbackReason ? fallbackReasonLabel(acceleration.fallbackReason, t) : t('none'),
+      value: acceleration?.fallbackReason ? fallbackReasonLabel(acceleration.fallbackReason, t, requestedVariant) : t('none'),
       tone: acceleration?.fallbackReason ? 'warn' : 'muted'
     }
   ];
@@ -3644,10 +3645,7 @@ function describeLocalWhisperTestResult(status: WhisperRuntimeStatus, t: (key: s
   if (!status.model.verified) {
     return t('runtimeModelMissingDetail');
   }
-  if (status.acceleration.requested === 'gpu' || status.acceleration.selected === 'gpu') {
-    return describeCudaStatusDetail(status, t);
-  }
-  return t('runtimeReady');
+  return describeWhisperAccelerationDetail(status, t);
 }
 
 function describeSelectedModelResult(
@@ -3687,7 +3685,31 @@ function describeCudaStatusDetail(
   if (!status.acceleration.hardwareDetected) {
     return t('cudaNoHardware');
   }
-  return fallbackReasonLabel(status.acceleration.fallbackReason, t);
+  return fallbackReasonLabel(status.acceleration.fallbackReason, t, 'cuda');
+}
+
+function describeWhisperAccelerationDetail(
+  status: WhisperRuntimeStatus | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string,
+  ignoreMismatch = false
+): string {
+  if (!status) return t('runtimeNotChecked');
+  if (status.acceleration.selected === 'gpu') {
+    switch (status.acceleration.runtimeVariant) {
+      case 'cuda':
+        return describeCudaStatusDetail(status, t, ignoreMismatch);
+      case 'metal':
+        return t('metalDetected');
+      case 'vulkan':
+        return t('vulkanDetected');
+      default:
+        return t('gpuDetected');
+    }
+  }
+  if (status.acceleration.fallbackReason) {
+    return fallbackReasonLabel(status.acceleration.fallbackReason, t);
+  }
+  return t('runtimeReady');
 }
 
 function describeCudaStatusShort(
@@ -3712,18 +3734,20 @@ function hasBlockingCudaMismatch(status: WhisperRuntimeStatus | undefined, ignor
 
 function fallbackReasonLabel(
   code: string | undefined,
-  t: (key: string) => string
+  t: (key: string) => string,
+  variant: RuntimeVariantSelection = 'auto'
 ): string {
-  if (code === 'gpu-runtime-missing') return t('cudaRuntimeMissing');
-  if (code === 'gpu-not-detected') return t('cudaNoHardware');
+  const isCudaVariant = variant === 'cuda';
+  if (code === 'gpu-runtime-missing') return isCudaVariant ? t('cudaRuntimeMissing') : t('gpuUnavailable');
+  if (code === 'gpu-not-detected') return isCudaVariant ? t('cudaNoHardware') : t('gpuNoHardware');
   if (
     code === 'gpu-not-compatible' ||
     code === 'preferred-variant-unavailable' ||
     code === 'gpu-variant-unavailable'
   ) {
-    return t('cudaUnavailable');
+    return isCudaVariant ? t('cudaUnavailable') : t('gpuUnavailable');
   }
-  return t('cudaUnavailable');
+  return isCudaVariant ? t('cudaUnavailable') : t('gpuUnavailable');
 }
 
 function describeFfmpegStatusDetail(
@@ -4156,10 +4180,7 @@ function deriveRuntimeState(input: {
     return {
       tone: 'good',
       label: t('installed'),
-      detail:
-        runtimeStatus.acceleration.requested === 'gpu' || runtimeStatus.acceleration.selected === 'gpu'
-          ? describeCudaStatusDetail(runtimeStatus, t)
-          : t('runtimeReady')
+      detail: describeWhisperAccelerationDetail(runtimeStatus, t)
     };
   }
   if (!runtimeStatus.binary.verified) {
@@ -4196,22 +4217,35 @@ function deriveBackendAccelerationState(input: {
   t: (key: string) => string;
   runtimeStatus?: WhisperRuntimeStatus;
   asrProviderId: string;
-  useCuda: boolean;
 }): DerivedHealthState {
-  const { t, runtimeStatus, asrProviderId, useCuda } = input;
+  const { t, runtimeStatus, asrProviderId } = input;
   if (asrProviderId !== 'local.whisper.cpp') {
     return { tone: 'muted', label: t('unknown'), detail: t('localWhisperNotRequiredDetail') };
-  }
-  if (!useCuda) {
-    return { tone: 'accent', label: 'CPU', detail: t('cudaDisabledUsesCpu') };
   }
   if (!runtimeStatus || !runtimeStatus.binary.verified || !runtimeStatus.model.verified) {
     return { tone: 'muted', label: t('unknown'), detail: t('runtimeNotChecked') };
   }
-  if (useCuda && runtimeStatus.acceleration.selected === 'gpu') {
-    return { tone: 'good', label: 'CUDA', detail: t('cudaDetected') };
+
+  const selectedVariant =
+    runtimeStatus.acceleration.selected === 'gpu' ? runtimeStatus.acceleration.runtimeVariant : ('cpu' as const);
+
+  if (runtimeStatus.acceleration.selected === 'gpu') {
+    return {
+      tone: 'good',
+      label: t(runtimeVariantOptionLabel(selectedVariant)),
+      detail: describeWhisperAccelerationDetail(runtimeStatus, t)
+    };
   }
-  return { tone: 'accent', label: 'CPU', detail: t('runtimeReady') };
+
+  if (runtimeStatus.acceleration.requested === 'cpu') {
+    return { tone: 'accent', label: t('cpuOption'), detail: t('gpuDisabledUsesCpu') };
+  }
+
+  return {
+    tone: runtimeStatus.acceleration.fallbackReason ? 'warn' : 'accent',
+    label: t('cpuOption'),
+    detail: describeWhisperAccelerationDetail(runtimeStatus, t)
+  };
 }
 
 function deriveRuntimeModelState(input: {
