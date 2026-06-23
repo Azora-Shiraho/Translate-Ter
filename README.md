@@ -40,6 +40,12 @@ Run tests:
 npm test
 ```
 
+Platform verification helper:
+
+```powershell
+npm run verify:platform
+```
+
 Native backend skeleton:
 
 ```powershell
@@ -61,6 +67,12 @@ npm run package:electron
 ```
 
 On macOS/Linux, `npm run native:package` now exits with a clear Windows-only message instead of attempting to build the WebView2 host.
+
+## ASR Runtime Docs
+
+- [ASR runtime architecture](docs/asr-runtime-architecture.md)
+- [Platform validation checklist](docs/platform-validation.md)
+- [Native protocol contract](contracts/native-protocol.md)
 
 This repository intentionally has no initial commit yet. The coordinating agent will decide when the reviewed baseline is ready to commit.
 

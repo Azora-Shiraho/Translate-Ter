@@ -8,6 +8,12 @@ runtime paths to the renderer.
 This backend helper is the cross-platform native target. The separate
 `apps/native-host` WebView2 window host remains Windows-only.
 
+Related runtime docs:
+
+- `../../docs/asr-runtime-architecture.md`
+- `../../docs/platform-validation.md`
+- `../../contracts/native-protocol.md`
+
 ```powershell
 cmake -S backend/cpp -B backend/cpp/build
 cmake --build backend/cpp/build --config Release
