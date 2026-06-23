@@ -157,6 +157,9 @@ function summarizeRendererValue(value: unknown): unknown {
 }
 
 const api = {
+  host: {
+    platform: process.platform
+  },
   selectVideo: () => invokeLogged<string | undefined>('selectVideo'),
   selectDirectory: () => invokeLogged<string | undefined>('selectDirectory'),
   startTranscription: (input: CreateJobRequest) =>

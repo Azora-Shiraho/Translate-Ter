@@ -181,6 +181,46 @@ describe('SettingsStore', () => {
     expect(settings.localWhisperUseCuda).toBe(true);
   });
 
+  it('persists auto acceleration through the new asr fields', async () => {
+    const store = new SettingsStore();
+
+    await store.update({
+      localAsrAcceleration: 'auto'
+    });
+    const persisted = await readPersistedSettings();
+
+    expect(persisted.localAsrAcceleration).toBe('auto');
+    expect(persisted.preferredRuntimeVariant).toBeUndefined();
+  });
+
+  it('persists cpu acceleration and mirrors legacy cuda=false', async () => {
+    const store = new SettingsStore();
+
+    await store.update({
+      localAsrAcceleration: 'cpu',
+      preferredRuntimeVariant: 'cpu'
+    });
+    const persisted = await readPersistedSettings();
+
+    expect(persisted.localAsrAcceleration).toBe('cpu');
+    expect(persisted.preferredRuntimeVariant).toBe('cpu');
+    expect(persisted.localWhisperUseCuda).toBe(false);
+  });
+
+  it('persists gpu cuda acceleration and mirrors legacy cuda=true', async () => {
+    const store = new SettingsStore();
+
+    await store.update({
+      localAsrAcceleration: 'gpu',
+      preferredRuntimeVariant: 'cuda'
+    });
+    const persisted = await readPersistedSettings();
+
+    expect(persisted.localAsrAcceleration).toBe('gpu');
+    expect(persisted.preferredRuntimeVariant).toBe('cuda');
+    expect(persisted.localWhisperUseCuda).toBe(true);
+  });
+
   it('mirrors mappable explicit new fields back into legacy settings', async () => {
     const store = new SettingsStore();
 
