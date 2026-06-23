@@ -66,11 +66,27 @@ export function listRuntimeVariantSelections(input: {
     selections.push('cuda');
   }
 
-  if (input.currentVariant && !selections.includes(input.currentVariant)) {
-    selections.push(input.currentVariant);
+  return selections;
+}
+
+export function resolveSupportedRuntimeVariantSelection(
+  acceleration: LocalAsrAcceleration,
+  currentVariant: RuntimeVariantSelection,
+  availableVariants: RuntimeVariantSelection[]
+): RuntimeVariantSelection {
+  if (acceleration === 'cpu') {
+    return 'cpu';
   }
 
-  return selections;
+  if (acceleration === 'auto') {
+    return 'auto';
+  }
+
+  if (currentVariant !== 'auto' && currentVariant !== 'cpu' && availableVariants.includes(currentVariant)) {
+    return currentVariant;
+  }
+
+  return 'auto';
 }
 
 export function resolveVariantSelectionForAcceleration(

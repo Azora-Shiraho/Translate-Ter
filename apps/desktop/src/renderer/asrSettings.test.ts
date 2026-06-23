@@ -6,6 +6,7 @@ import {
   inferRuntimePlatformFamily,
   isCudaFlowRelevant,
   listRuntimeVariantSelections,
+  resolveSupportedRuntimeVariantSelection,
   resolveAccelerationForVariantSelection,
   resolveVariantSelectionForAcceleration
 } from './asrSettings';
@@ -75,6 +76,16 @@ describe('runtime variant helpers', () => {
     ).toEqual(['auto', 'cpu', 'metal']);
   });
 
+  it('does not re-add unsupported runtime variants from older provider settings', () => {
+    expect(
+      listRuntimeVariantSelections({
+        providerId: 'local.faster-whisper',
+        platformFamily: 'windows-linux',
+        currentVariant: 'metal'
+      })
+    ).toEqual(['auto', 'cpu', 'cuda']);
+  });
+
   it('hides local runtime variant selections for cloud recognition', () => {
     expect(
       listRuntimeVariantSelections({
@@ -87,6 +98,11 @@ describe('runtime variant helpers', () => {
   it('keeps a valid gpu runtime variant when acceleration changes to gpu', () => {
     expect(resolveVariantSelectionForAcceleration('gpu', 'cuda', ['auto', 'cpu', 'cuda'])).toBe('cuda');
     expect(resolveVariantSelectionForAcceleration('gpu', 'cpu', ['auto', 'cpu', 'metal'])).toBe('metal');
+  });
+
+  it('falls back to auto when a provider switch preserves an unsupported gpu variant', () => {
+    expect(resolveSupportedRuntimeVariantSelection('gpu', 'metal', ['auto', 'cpu', 'cuda'])).toBe('auto');
+    expect(resolveSupportedRuntimeVariantSelection('gpu', 'metal', ['auto', 'cpu'])).toBe('auto');
   });
 
   it('maps runtime variant selections back to coherent acceleration states', () => {

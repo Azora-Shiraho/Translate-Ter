@@ -58,6 +58,7 @@ import {
   inferRuntimePlatformFamily,
   isCudaFlowRelevant,
   listRuntimeVariantSelections,
+  resolveSupportedRuntimeVariantSelection,
   resolveAccelerationForVariantSelection,
   resolveVariantSelectionForAcceleration,
   type RuntimeVariantSelection
@@ -226,6 +227,17 @@ function App(): JSX.Element {
         : [],
     [platformFamily, settings]
   );
+  const effectiveRuntimeVariantSelection = useMemo(
+    () =>
+      resolveSupportedRuntimeVariantSelection(
+        configuredAcceleration,
+        configuredRuntimeVariant,
+        runtimeVariantSelections
+      ),
+    [configuredAcceleration, configuredRuntimeVariant, runtimeVariantSelections]
+  );
+  const effectivePreferredRuntimeVariant =
+    effectiveRuntimeVariantSelection === 'auto' ? undefined : effectiveRuntimeVariantSelection;
   const mirroredLegacyUseCuda = Boolean(settings?.localWhisperUseCuda);
   const cudaApproved = Boolean(cudaStatus?.acceleration.cudaSupported);
   const fasterWhisperCudaApproved = Boolean(fasterWhisperCudaStatus?.cudaSupported);
@@ -234,7 +246,7 @@ function App(): JSX.Element {
       (settings?.asrProviderId === 'local.faster-whisper' ? fasterWhisperCudaApproved : cudaApproved)
   );
   const cudaFlowRelevant = settings
-    ? isCudaFlowRelevant(settings.asrProviderId, platformFamily, configuredRuntimeVariant)
+    ? isCudaFlowRelevant(settings.asrProviderId, platformFamily, effectiveRuntimeVariantSelection)
     : false;
   const writeUiLog = useCallback(
     (level: AppLogLevel, event: string, details?: unknown, scope = 'renderer.ui', message?: string) => {
@@ -407,7 +419,7 @@ function App(): JSX.Element {
           allowDownload: false,
           preferCuda: effectiveLocalWhisperUseCuda,
           localAsrAcceleration: settings.localAsrAcceleration,
-          preferredRuntimeVariant: settings.preferredRuntimeVariant,
+          preferredRuntimeVariant: effectivePreferredRuntimeVariant,
           ignoreCudaMismatch,
           useMultiThreadDownload: settings.enableMultiThreadDownload,
           downloadScope: 'none'
@@ -572,7 +584,7 @@ function App(): JSX.Element {
 
     const nextVariant = resolveVariantSelectionForAcceleration(
       acceleration,
-      configuredRuntimeVariant,
+      effectiveRuntimeVariantSelection,
       runtimeVariantSelections
     );
     await updateSettings(buildLocalAsrSettingsPatch(acceleration, nextVariant));
@@ -675,7 +687,7 @@ function App(): JSX.Element {
       allowDownload: false,
       preferCuda: effectiveLocalWhisperUseCuda,
       localAsrAcceleration: settings.localAsrAcceleration,
-      preferredRuntimeVariant: settings.preferredRuntimeVariant,
+      preferredRuntimeVariant: effectivePreferredRuntimeVariant,
       ignoreCudaMismatch,
       useMultiThreadDownload: settings.enableMultiThreadDownload,
       downloadScope: 'none'
@@ -695,7 +707,7 @@ function App(): JSX.Element {
       allowDownload: false,
       preferCuda: effectiveLocalWhisperUseCuda,
       localAsrAcceleration: settings.localAsrAcceleration,
-      preferredRuntimeVariant: settings.preferredRuntimeVariant,
+      preferredRuntimeVariant: effectivePreferredRuntimeVariant,
       ignoreCudaMismatch,
       useMultiThreadDownload: settings.enableMultiThreadDownload,
       downloadScope: 'none'
@@ -721,7 +733,7 @@ function App(): JSX.Element {
         allowDownload: true,
         preferCuda: effectiveLocalWhisperUseCuda,
         localAsrAcceleration: settings.localAsrAcceleration,
-        preferredRuntimeVariant: settings.preferredRuntimeVariant,
+        preferredRuntimeVariant: effectivePreferredRuntimeVariant,
         ignoreCudaMismatch,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'runtime'
@@ -751,7 +763,7 @@ function App(): JSX.Element {
         allowDownload: true,
         preferCuda: Boolean(settings.localWhisperUseCuda),
         localAsrAcceleration: settings.localAsrAcceleration,
-        preferredRuntimeVariant: settings.preferredRuntimeVariant,
+        preferredRuntimeVariant: effectivePreferredRuntimeVariant,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         forceManaged: true
       });
@@ -958,7 +970,7 @@ function App(): JSX.Element {
           allowDownload: false,
           preferCuda: Boolean(settings.localWhisperUseCuda),
           localAsrAcceleration: settings.localAsrAcceleration,
-          preferredRuntimeVariant: settings.preferredRuntimeVariant
+          preferredRuntimeVariant: effectivePreferredRuntimeVariant
         });
         setProviderHealth((current) => ({ ...current, [providerId]: health }));
         pushStatus(health.message ?? t(providerStatusLabel(health.status)), health.ok ? 'success' : 'warning');
@@ -1017,7 +1029,7 @@ function App(): JSX.Element {
         whisperModelId: settings.whisperModelId,
         localWhisperUseCuda: effectiveLocalWhisperUseCuda,
         localAsrAcceleration: settings.localAsrAcceleration,
-        preferredRuntimeVariant: settings.preferredRuntimeVariant,
+        preferredRuntimeVariant: effectivePreferredRuntimeVariant,
         localAsrCpuMode: settings.localAsrCpuMode,
         localWhisperIgnoreCudaMismatch: ignoreCudaMismatch,
         allowWhisperAssetDownload: settings.allowWhisperAssetDownload,
@@ -1191,7 +1203,7 @@ function App(): JSX.Element {
   const cudaBlockingMismatch = hasBlockingCudaMismatch(cudaStatus, ignoreCudaMismatch);
   const cudaStatusDetail = cudaFlowRelevant
     ? describeCudaStatusDetail(cudaStatus, t, ignoreCudaMismatch)
-    : configuredRuntimeVariant === 'metal' || configuredRuntimeVariant === 'vulkan'
+    : effectiveRuntimeVariantSelection === 'metal' || effectiveRuntimeVariantSelection === 'vulkan'
       ? t('cudaNotApplicableForVariant')
       : configuredAcceleration === 'cpu'
         ? t('cudaDisabledUsesCpu')
@@ -1291,7 +1303,7 @@ function App(): JSX.Element {
     t,
     runtimeStatus,
     asrProviderId,
-    useCuda: configuredRuntimeVariant === 'cuda'
+    useCuda: effectiveRuntimeVariantSelection === 'cuda'
   });
   const runtimeModelState = deriveRuntimeModelState({
     t,
@@ -1331,7 +1343,7 @@ function App(): JSX.Element {
     t,
     asrProviderId,
     asrHealth,
-    useCuda: configuredRuntimeVariant === 'cuda',
+    useCuda: effectiveRuntimeVariantSelection === 'cuda',
     runtimeState,
     ffmpegStatus,
     nativeHealth
@@ -1375,14 +1387,14 @@ function App(): JSX.Element {
         t,
         runtimeStatus,
         requestedAcceleration: configuredAcceleration,
-        requestedVariant: configuredRuntimeVariant
+        requestedVariant: effectiveRuntimeVariantSelection
       })
     : usingFasterWhisper
       ? buildFasterWhisperRuntimeStatusRows({
           t,
           acceleration: asrHealth?.acceleration,
           requestedAcceleration: configuredAcceleration,
-          requestedVariant: configuredRuntimeVariant
+          requestedVariant: effectiveRuntimeVariantSelection
         })
       : [];
 
@@ -2470,7 +2482,7 @@ function App(): JSX.Element {
                                 <label>
                                   {t('runtimeVariant')}
                                   <select
-                                    value={configuredRuntimeVariant}
+                                    value={effectiveRuntimeVariantSelection}
                                     onChange={(event) =>
                                       void updateLocalRuntimeVariantSetting(event.target.value as RuntimeVariantSelection)
                                     }
@@ -2655,7 +2667,7 @@ function App(): JSX.Element {
                                 <label>
                                   {t('runtimeVariant')}
                                   <select
-                                    value={configuredRuntimeVariant}
+                                    value={effectiveRuntimeVariantSelection}
                                     onChange={(event) =>
                                       void updateLocalRuntimeVariantSetting(event.target.value as RuntimeVariantSelection)
                                     }
