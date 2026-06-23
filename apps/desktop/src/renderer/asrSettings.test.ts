@@ -5,7 +5,9 @@ import {
   deriveFasterWhisperWorkspaceMode,
   deriveRuntimeVariantSelection,
   inferRuntimePlatformFamily,
+  isExperimentalWhisperRuntimeVariant,
   isCudaFlowRelevant,
+  isVerifiedWhisperGpuRuntimeVariant,
   listRuntimeVariantSelections,
   resolveSupportedRuntimeVariantSelection,
   resolveAccelerationForVariantSelection,
@@ -60,6 +62,13 @@ describe('runtime variant helpers', () => {
         }
       })
     ).toBe('mac');
+  });
+
+  it('treats vulkan as experimental instead of a verified gpu runtime', () => {
+    expect(isExperimentalWhisperRuntimeVariant('vulkan')).toBe(true);
+    expect(isVerifiedWhisperGpuRuntimeVariant('vulkan')).toBe(false);
+    expect(isVerifiedWhisperGpuRuntimeVariant('cuda')).toBe(true);
+    expect(isVerifiedWhisperGpuRuntimeVariant('metal')).toBe(true);
   });
 
   it('falls back to explicit host platform when native accelerators are unavailable', () => {

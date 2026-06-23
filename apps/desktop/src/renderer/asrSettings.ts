@@ -11,6 +11,14 @@ export type RuntimeVariantSelection = 'auto' | RuntimeVariant;
 export type RuntimePlatformFamily = 'windows-linux' | 'mac' | 'unknown';
 export type FasterWhisperWorkspaceMode = 'setup' | 'cpu-ready' | 'cuda-ready' | 'cuda-fallback';
 
+export function isExperimentalWhisperRuntimeVariant(variant: RuntimeVariant): boolean {
+  return variant === 'vulkan';
+}
+
+export function isVerifiedWhisperGpuRuntimeVariant(variant: RuntimeVariant): boolean {
+  return variant === 'cuda' || variant === 'metal';
+}
+
 export function deriveRuntimeVariantSelection(
   acceleration: LocalAsrAcceleration,
   preferredRuntimeVariant: RuntimeVariant | undefined

@@ -57,7 +57,9 @@ import {
   deriveFasterWhisperWorkspaceMode,
   deriveRuntimeVariantSelection,
   inferRuntimePlatformFamily,
+  isExperimentalWhisperRuntimeVariant,
   isCudaFlowRelevant,
+  isVerifiedWhisperGpuRuntimeVariant,
   listRuntimeVariantSelections,
   resolveSupportedRuntimeVariantSelection,
   resolveAccelerationForVariantSelection,
@@ -3458,7 +3460,14 @@ function buildWhisperRuntimeStatusRows(input: {
     {
       label: t('selectedAcceleration'),
       value: runtimeStatus ? t(accelerationOptionLabel(runtimeStatus.acceleration.selected)) : t('notChecked'),
-      tone: runtimeStatus?.acceleration.selected === 'gpu' ? 'good' : runtimeStatus ? 'accent' : 'muted'
+      tone:
+        runtimeStatus?.acceleration.selected === 'gpu'
+          ? isExperimentalWhisperRuntimeVariant(runtimeStatus.acceleration.runtimeVariant)
+            ? 'warn'
+            : 'good'
+          : runtimeStatus
+            ? 'accent'
+            : 'muted'
     },
     {
       label: t('runtimeVariant'),
@@ -3466,6 +3475,8 @@ function buildWhisperRuntimeStatusRows(input: {
       tone:
         runtimeStatus?.acceleration.runtimeVariant === 'cuda' || runtimeStatus?.acceleration.runtimeVariant === 'metal'
           ? 'good'
+          : runtimeStatus?.acceleration.runtimeVariant === 'vulkan'
+            ? 'warn'
           : runtimeStatus
             ? 'accent'
             : 'muted'
@@ -3711,7 +3722,7 @@ function describeWhisperAccelerationDetail(
       case 'metal':
         return t('metalDetected');
       case 'vulkan':
-        return t('vulkanDetected');
+        return t('vulkanExperimental');
       default:
         return t('gpuDetected');
     }
@@ -4186,10 +4197,13 @@ function deriveRuntimeState(input: {
   if (!runtimeStatus) {
     return { tone: 'muted', label: t('notChecked'), detail: t('runtimeNotChecked') };
   }
+  const experimentalGpuPath =
+    runtimeStatus.acceleration.selected === 'gpu' &&
+    isExperimentalWhisperRuntimeVariant(runtimeStatus.acceleration.runtimeVariant);
   if (runtimeStatus.binary.verified && runtimeStatus.model.verified) {
     return {
-      tone: 'good',
-      label: t('installed'),
+      tone: experimentalGpuPath ? 'warn' : 'good',
+      label: t(experimentalGpuPath ? 'experimental' : 'installed'),
       detail: describeWhisperAccelerationDetail(runtimeStatus, t)
     };
   }
@@ -4241,7 +4255,7 @@ function deriveBackendAccelerationState(input: {
 
   if (runtimeStatus.acceleration.selected === 'gpu') {
     return {
-      tone: 'good',
+      tone: isVerifiedWhisperGpuRuntimeVariant(selectedVariant) ? 'good' : 'warn',
       label: t(runtimeVariantOptionLabel(selectedVariant)),
       detail: describeWhisperAccelerationDetail(runtimeStatus, t)
     };
