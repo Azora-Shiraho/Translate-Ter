@@ -2,12 +2,14 @@ import type {
   AppSettingsPublic,
   LocalAsrAcceleration,
   NativeHealth,
+  ProviderAccelerationStatus,
   RuntimeVariant,
   WhisperRuntimeStatus
 } from '@shared/models';
 
 export type RuntimeVariantSelection = 'auto' | RuntimeVariant;
 export type RuntimePlatformFamily = 'windows-linux' | 'mac' | 'unknown';
+export type FasterWhisperWorkspaceMode = 'setup' | 'cpu-ready' | 'cuda-ready' | 'cuda-fallback';
 
 export function deriveRuntimeVariantSelection(
   acceleration: LocalAsrAcceleration,
@@ -22,6 +24,7 @@ export function deriveRuntimeVariantSelection(
 
 export function inferRuntimePlatformFamily(input: {
   runtimeStatus?: Pick<WhisperRuntimeStatus, 'platformKey'>;
+  hostPlatform?: string;
   nativeHealth?: Pick<NativeHealth, 'accelerators'>;
 }): RuntimePlatformFamily {
   const platformKey = input.runtimeStatus?.platformKey;
@@ -29,6 +32,13 @@ export function inferRuntimePlatformFamily(input: {
     return 'mac';
   }
   if (platformKey?.startsWith('win32-') || platformKey?.startsWith('linux-')) {
+    return 'windows-linux';
+  }
+
+  if (input.hostPlatform === 'darwin') {
+    return 'mac';
+  }
+  if (input.hostPlatform === 'win32' || input.hostPlatform === 'linux') {
     return 'windows-linux';
   }
 
@@ -185,6 +195,26 @@ export function isCudaFlowRelevant(
   }
 
   return variantSelection === 'auto' || variantSelection === 'cuda';
+}
+
+export function deriveFasterWhisperWorkspaceMode(input: {
+  ok: boolean;
+  status: 'healthy' | 'degraded' | 'unconfigured' | 'unavailable';
+  acceleration?: ProviderAccelerationStatus;
+}): FasterWhisperWorkspaceMode {
+  const selectedCuda =
+    input.acceleration?.selected === 'gpu' || input.acceleration?.runtimeVariant === 'cuda';
+  const requestedGpu = input.acceleration?.requested === 'gpu';
+
+  if (input.ok) {
+    return selectedCuda ? 'cuda-ready' : 'cpu-ready';
+  }
+
+  if (requestedGpu && input.acceleration?.selected === 'cpu' && input.status === 'degraded') {
+    return 'cuda-fallback';
+  }
+
+  return 'setup';
 }
 
 function mirrorLegacyAccelerationFields(

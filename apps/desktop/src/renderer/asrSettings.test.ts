@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildIgnoreCudaMismatchPatch,
   buildLocalAsrSettingsPatch,
+  deriveFasterWhisperWorkspaceMode,
   deriveRuntimeVariantSelection,
   inferRuntimePlatformFamily,
   isCudaFlowRelevant,
@@ -59,6 +60,17 @@ describe('runtime variant helpers', () => {
         }
       })
     ).toBe('mac');
+  });
+
+  it('falls back to explicit host platform when native accelerators are unavailable', () => {
+    expect(
+      inferRuntimePlatformFamily({
+        hostPlatform: 'win32',
+        nativeHealth: {
+          accelerators: []
+        }
+      })
+    ).toBe('windows-linux');
   });
 
   it('lists whisper.cpp variants conservatively by platform', () => {
@@ -124,5 +136,38 @@ describe('runtime variant helpers', () => {
     expect(isCudaFlowRelevant('local.whisper.cpp', 'windows-linux', 'vulkan')).toBe(false);
     expect(isCudaFlowRelevant('local.faster-whisper', 'windows-linux', 'cuda')).toBe(true);
     expect(isCudaFlowRelevant('local.faster-whisper', 'mac', 'cuda')).toBe(false);
+  });
+
+  it('derives faster-whisper workspace mode from actual acceleration status instead of UI selection', () => {
+    expect(
+      deriveFasterWhisperWorkspaceMode({
+        ok: true,
+        status: 'healthy',
+        acceleration: {
+          requested: 'auto',
+          selected: 'gpu',
+          runtimeVariant: 'cuda',
+          hardwareDetected: true,
+          runtimeDetected: true,
+          supported: true
+        }
+      })
+    ).toBe('cuda-ready');
+
+    expect(
+      deriveFasterWhisperWorkspaceMode({
+        ok: false,
+        status: 'degraded',
+        acceleration: {
+          requested: 'gpu',
+          selected: 'cpu',
+          runtimeVariant: 'cpu',
+          hardwareDetected: true,
+          runtimeDetected: false,
+          supported: true,
+          fallbackReason: 'gpu-runtime-missing'
+        }
+      })
+    ).toBe('cuda-fallback');
   });
 });

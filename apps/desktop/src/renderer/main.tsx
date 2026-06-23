@@ -54,6 +54,7 @@ import { languageLabel, languageRegistry } from '@shared/languages';
 import {
   buildIgnoreCudaMismatchPatch,
   buildLocalAsrSettingsPatch,
+  deriveFasterWhisperWorkspaceMode,
   deriveRuntimeVariantSelection,
   inferRuntimePlatformFamily,
   isCudaFlowRelevant,
@@ -200,6 +201,7 @@ function App(): JSX.Element {
   const whisperModelSettingsRef = useRef<HTMLDivElement | null>(null);
   const translationProviderSettingsRef = useRef<HTMLDivElement | null>(null);
   const settingsJumpResetRef = useRef<number>();
+  const hostPlatform = window.translateTer.host.platform;
   const configuredAcceleration = settings?.localAsrAcceleration ?? 'auto';
   const configuredRuntimeVariant = deriveRuntimeVariantSelection(
     configuredAcceleration,
@@ -212,9 +214,10 @@ function App(): JSX.Element {
     () =>
       inferRuntimePlatformFamily({
         runtimeStatus,
+        hostPlatform,
         nativeHealth
       }),
-    [nativeHealth, runtimeStatus]
+    [hostPlatform, nativeHealth, runtimeStatus]
   );
   const runtimeVariantSelections = useMemo(
     () =>
@@ -1342,7 +1345,6 @@ function App(): JSX.Element {
     t,
     asrProviderId,
     asrHealth,
-    useCuda: effectiveRuntimeVariantSelection === 'cuda',
     runtimeState,
     ffmpegStatus,
     nativeHealth
@@ -3613,12 +3615,11 @@ function deriveWorkspaceRuntimeDetail(input: {
   t: (key: string) => string;
   asrProviderId: string;
   asrHealth?: ProviderHealth;
-  useCuda: boolean;
   runtimeState: DerivedHealthState;
   ffmpegStatus?: FfmpegStatus;
   nativeHealth?: NativeHealth;
 }): string {
-  const { t, asrProviderId, asrHealth, useCuda, runtimeState, ffmpegStatus, nativeHealth } = input;
+  const { t, asrProviderId, asrHealth, runtimeState, ffmpegStatus, nativeHealth } = input;
   const ffmpegAvailable = ffmpegStatus?.available ?? Boolean(nativeHealth?.ffmpegAvailable && nativeHealth?.ffprobeAvailable);
   if (!ffmpegAvailable || asrProviderId !== 'local.faster-whisper') {
     return runtimeState.detail;
@@ -3626,13 +3627,22 @@ function deriveWorkspaceRuntimeDetail(input: {
   if (!asrHealth) {
     return t('fasterWhisperWorkspaceSetupHint');
   }
-  if (asrHealth.ok) {
-    return t(useCuda ? 'fasterWhisperWorkspaceReadyCuda' : 'fasterWhisperWorkspaceReadyCpu');
+  switch (
+    deriveFasterWhisperWorkspaceMode({
+      ok: asrHealth.ok,
+      status: asrHealth.status,
+      acceleration: asrHealth.acceleration
+    })
+  ) {
+    case 'cuda-ready':
+      return t('fasterWhisperWorkspaceReadyCuda');
+    case 'cpu-ready':
+      return t('fasterWhisperWorkspaceReadyCpu');
+    case 'cuda-fallback':
+      return t('fasterWhisperWorkspaceCudaFallback');
+    default:
+      return t('fasterWhisperWorkspaceSetupHint');
   }
-  if (useCuda && asrHealth.status === 'degraded') {
-    return t('fasterWhisperWorkspaceCudaFallback');
-  }
-  return t('fasterWhisperWorkspaceSetupHint');
 }
 
 function describeLocalWhisperTestResult(status: WhisperRuntimeStatus, t: (key: string) => string): string {
