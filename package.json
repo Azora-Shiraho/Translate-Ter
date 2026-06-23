@@ -7,13 +7,13 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json && electron-vite build",
-    "package:electron": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-electron.ps1",
+    "package:electron": "node scripts/package-electron.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "native:deps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ensure-webview2.ps1",
-    "native:configure": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$cmake='C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe'; if (!(Test-Path $cmake)) { $cmake='cmake' }; & $cmake -S . -B build/native\"",
-    "native:build": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$cmake='C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe'; if (!(Test-Path $cmake)) { $cmake='cmake' }; & $cmake --build build/native --config Release\"",
-    "native:package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-native.ps1"
+    "native:configure": "node scripts/build-native.mjs --configure-only",
+    "native:build": "node scripts/build-native.mjs",
+    "native:package": "node scripts/package-native.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
@@ -40,10 +40,10 @@
     "files": [
       "out/**",
       "resources/whisper-manifest.json",
-      "build/native/bin/translate-ter-backend.exe"
+      "build/native/bin/translate-ter-backend*"
     ],
     "asarUnpack": [
-      "build/native/bin/translate-ter-backend.exe"
+      "build/native/bin/translate-ter-backend*"
     ],
     "extraResources": [
       {
