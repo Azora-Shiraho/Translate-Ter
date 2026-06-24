@@ -77,8 +77,9 @@ npm run package:electron
 
 On macOS/Linux, `npm run native:package` now exits with a clear Windows-only message instead of attempting to build the WebView2 host.
 
-## ASR Runtime Docs
+## Project Docs
 
+- [Architecture overview](docs/architecture.md)
 - [ASR runtime architecture](docs/asr-runtime-architecture.md)
 - [Platform validation checklist](docs/platform-validation.md)
 - [Native protocol contract](contracts/native-protocol.md)
