@@ -38,7 +38,8 @@ const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda' | '
   translationBatchStride: 4,
   exportDestinationMode: 'source-directory',
   exportDirectory: '',
-  exportBilingualOrder: 'source-first'
+  exportBilingualOrder: 'source-first',
+  exportFileFormat: 'srt'
 };
 
 export class SettingsStore {
@@ -229,8 +230,13 @@ function normalizeSettings(
     localWhisperIgnoreCudaMismatch: ignoreCudaMismatch,
     preferredRuntimeVariant,
     sourceLanguage: canonicalSourceLanguageCode(settings.sourceLanguage),
-    targetLanguage: canonicalTargetLanguageCode(settings.targetLanguage)
+    targetLanguage: canonicalTargetLanguageCode(settings.targetLanguage),
+    exportFileFormat: normalizeSubtitleFileFormat(settings.exportFileFormat)
   };
+}
+
+function normalizeSubtitleFileFormat(value: unknown): 'srt' | 'ass' {
+  return value === 'ass' ? 'ass' : 'srt';
 }
 
 function detectCudaSupport(): boolean {

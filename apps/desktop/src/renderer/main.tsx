@@ -34,6 +34,7 @@ import type {
   AppLogLevel,
   AppSettingsPublic,
   ExportDestinationMode,
+  SubtitleFileFormat,
   ExportVariant,
   FasterWhisperCudaStatus,
   FfmpegStatus,
@@ -2303,6 +2304,17 @@ function App(): JSX.Element {
                               {settings.exportDirectory || t('chooseFolder')}
                             </button>
                           )}
+                          <div className="segmented two">
+                            {(['srt', 'ass'] as SubtitleFileFormat[]).map((format) => (
+                              <button
+                                className={settings.exportFileFormat === format ? 'selected' : ''}
+                                key={format}
+                                onClick={() => void updateSettings({ exportFileFormat: format })}
+                              >
+                                {t(format === 'srt' ? 'subtitleFormatSrt' : 'subtitleFormatAss')}
+                              </button>
+                            ))}
+                          </div>
                           <div className="segmented two">
                             {(['source-first', 'target-first'] as const).map((order) => (
                               <button

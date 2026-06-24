@@ -31,7 +31,8 @@ function createSettings() {
     translationBatchStride: 4,
     exportDestinationMode: 'source-directory',
     exportDirectory: '',
-    exportBilingualOrder: 'source-first'
+    exportBilingualOrder: 'source-first',
+    exportFileFormat: 'srt'
   };
 
   return {
