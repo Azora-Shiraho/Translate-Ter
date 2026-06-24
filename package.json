@@ -59,6 +59,15 @@
     ],
     "win": {
       "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "mac": {
+      "artifactName": "Translate-Ter-v${version}-macos-${arch}-electron.${ext}",
+      "binaries": [
+        "Contents/Resources/app.asar.unpacked/build/native/bin/translate-ter-backend"
+      ]
+    },
+    "linux": {
+      "artifactName": "Translate-Ter-v${version}-linux-${arch}-electron.${ext}"
     }
   }
 }

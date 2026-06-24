@@ -5,7 +5,9 @@ out/
 coverage/
 .vite/
 .deps/
-build/
+build/*
+!build/entitlements.mac.plist
+!build/entitlements.mac.inherit.plist
 .runtime/
 *.log
 *.tsbuildinfo
