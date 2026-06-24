@@ -1,0 +1,101 @@
+name: Release Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag to package and upload, for example v2.1.0-beta.1
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS ARM64 release asset
+            os: macos-14
+            platform: macos
+            asset_name: Translate-Ter-v${version}-macos-arm64-electron.zip
+          - name: Linux x64 release asset
+            os: ubuntu-24.04
+            platform: linux
+            asset_name: Translate-Ter-v${version}-linux-x64-electron.tar.gz
+
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build Electron package
+        run: npm run package:electron
+
+      - name: Run native smoke
+        run: npm run smoke:native
+
+      - name: Resolve packaged output
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+
+          if [[ "${{ matrix.platform }}" == "macos" ]]; then
+            package_dir="$(find dist -maxdepth 1 -type d -name 'mac*' | head -n 1)"
+            asset_path="dist/Translate-Ter-v${version}-macos-arm64-electron.zip"
+          else
+            package_dir="dist/linux-unpacked"
+            if [[ ! -d "$package_dir" ]]; then
+              package_dir="$(find dist -maxdepth 1 -type d -name 'linux*unpacked*' | head -n 1)"
+            fi
+            asset_path="dist/Translate-Ter-v${version}-linux-x64-electron.tar.gz"
+          fi
+
+          if [[ -z "${package_dir:-}" || ! -d "$package_dir" ]]; then
+            echo "Packaged output directory was not found under dist/." >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "package_dir=$package_dir" >> "$GITHUB_OUTPUT"
+          echo "asset_path=$asset_path" >> "$GITHUB_OUTPUT"
+
+      - name: Archive packaged output
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="${{ steps.package.outputs.package_dir }}"
+          asset_path="${{ steps.package.outputs.asset_path }}"
+
+          if [[ "${{ matrix.platform }}" == "macos" ]]; then
+            ditto -c -k --sequesterRsrc --keepParent "$package_dir" "$asset_path"
+          else
+            tar -C "$(dirname "$package_dir")" -czf "$asset_path" "$(basename "$package_dir")"
+          fi
+
+          ls -lah "$asset_path"
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload ${{ inputs.tag }} "${{ steps.package.outputs.asset_path }}" --clobber
