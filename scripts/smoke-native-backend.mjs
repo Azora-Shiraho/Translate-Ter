@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { projectRoot } from './native-build-utils.mjs';
 
 const backendName = process.platform === 'win32' ? 'translate-ter-backend.exe' : 'translate-ter-backend';
+const expectedBackendPath = resolve(projectRoot, 'build', 'native', 'bin', backendName);
 const sampleSrt = `1
 00:00:00,000 --> 00:00:00,800
 Hello smoke
@@ -44,6 +45,7 @@ async function main() {
       runtimeHealth.payload.capabilities.includes('srt.serialize'),
       'runtime.health capability list includes srt.serialize'
     );
+    assertOk(runtimeHealth.payload.capabilities.includes('job.cancel'), 'runtime.health capability list includes job.cancel');
 
     const parseResponse = await session.request('srt.parse', {
       srt: sampleSrt,
@@ -93,13 +95,9 @@ Second line
 `;
     assertOk(serializeResponse.payload.srt === expectedSerialized, 'srt.serialize returns stable bilingual SRT output');
 
-    if (runtimeHealth.payload.capabilities.includes('job.cancel')) {
-      const cancelResponse = await session.request('job.cancel', { jobId: 'smoke-job' });
-      assertResponseOk(cancelResponse, 'job.cancel');
-      assertOk(cancelResponse.payload.cancelled === true, 'job.cancel acknowledges cancellation');
-    } else {
-      logSkip('job.cancel is not advertised by runtime.health capabilities');
-    }
+    const cancelResponse = await session.request('job.cancel', { jobId: 'smoke-job' });
+    assertResponseOk(cancelResponse, 'job.cancel');
+    assertOk(cancelResponse.payload.cancelled === true, 'job.cancel acknowledges cancellation');
 
     const fixtureDirectory = join(workspace, 'fixtures');
     const outputDirectory = join(workspace, 'audio-output');
@@ -143,21 +141,13 @@ Second line
 }
 
 async function discoverBackendExecutable() {
-  const candidates = [
-    resolve(projectRoot, 'build', 'native', 'bin', backendName),
-    resolve(projectRoot, 'backend', 'cpp', 'build', 'bin', backendName),
-    resolve(projectRoot, 'backend', 'cpp', 'build', 'Release', backendName),
-    resolve(projectRoot, 'backend', 'cpp', 'build', 'Debug', backendName),
-    resolve(projectRoot, 'backend', 'cpp', 'build', backendName)
-  ];
-
-  for (const candidate of candidates) {
-    if (await pathExists(candidate, constants.X_OK)) {
-      return candidate;
-    }
+  if (await pathExists(expectedBackendPath, constants.X_OK)) {
+    return expectedBackendPath;
   }
 
-  throw new Error(`Native backend executable was not found. Checked:\n${candidates.map((item) => `- ${item}`).join('\n')}`);
+  throw new Error(
+    `Native backend executable was not found at the native:build output path.\n- expected: ${expectedBackendPath}\nRun "npm run native:build" first.`
+  );
 }
 
 function runSync(command, args) {
