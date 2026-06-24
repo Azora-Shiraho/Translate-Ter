@@ -40,6 +40,13 @@ Run tests:
 npm test
 ```
 
+Local native smoke check after the native build:
+
+```powershell
+npm run native:build
+npm run smoke:native
+```
+
 Platform verification helper:
 
 ```powershell
@@ -54,6 +61,8 @@ npm run native:build
 ```
 
 `npm run native:build` always configures CMake first. On Windows it builds both `translate-ter-backend` and the WebView2 native host. On macOS/Linux it only builds `translate-ter-backend`, so `apps/native-host` and `windows.h` are never compiled there.
+
+`npm run smoke:native` performs a local-only backend smoke check after `native:build`. It validates backend executable discovery, `runtime.health`, `srt.parse`, `srt.serialize`, and `job.cancel` when advertised by the backend. `media.probe` and `audio.extract` run only when local `ffprobe`/`ffmpeg` are available and otherwise report a clear skip.
 
 Platform-specific backend helper paths:
 
