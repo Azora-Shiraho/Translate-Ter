@@ -20,6 +20,7 @@ import type {
   WhisperRuntimeRequest,
   WhisperRuntimeStatus
 } from '@shared/models';
+import { serializeAss } from '@shared/ass';
 import { serializeSrt } from '@shared/srt';
 import { JobManager } from './services/jobManager';
 import { FasterWhisperService } from './services/fasterWhisperService';
@@ -303,11 +304,19 @@ function registerIpc(): void {
     variant: ExportVariant;
     bilingualOrder: BilingualOrder;
   }): Promise<void> {
-    const srt = serializeSrt(payload.document, {
-      variant: payload.variant,
-      bilingualOrder: payload.bilingualOrder
-    });
-    await writeFile(payload.path, srt, 'utf8');
+    const settings = await settingsStore.get();
+    const format = resolveSubtitleFileFormat(payload.path, settings.exportFileFormat);
+    const serialized =
+      format === 'ass'
+        ? serializeAss(payload.document, {
+            variant: payload.variant,
+            bilingualOrder: payload.bilingualOrder
+          })
+        : serializeSrt(payload.document, {
+            variant: payload.variant,
+            bilingualOrder: payload.bilingualOrder
+          });
+    await writeFile(payload.path, serialized, 'utf8');
   }
 
   async function selectExportDirectory(): Promise<string | undefined> {
@@ -354,12 +363,13 @@ function registerIpc(): void {
     variant: ExportVariant,
     settings: Awaited<ReturnType<SettingsStore['get']>>
   ): Promise<string | undefined> {
-    const defaultName = defaultSubtitleFileName(mediaPath, variant);
+    const defaultName = defaultSubtitleFileName(mediaPath, variant, settings.exportFileFormat);
     if (settings.exportDestinationMode === 'ask-each-time') {
+      const { extension, filterName } = exportFileFormatMeta(settings.exportFileFormat);
       const result = await dialog.showSaveDialog(mainWindow!, {
         title: 'Export subtitle',
         defaultPath: join(dirname(mediaPath), defaultName),
-        filters: [{ name: 'SubRip Subtitle', extensions: ['srt'] }]
+        filters: [{ name: filterName, extensions: [extension] }]
       });
       return result.canceled ? undefined : result.filePath;
     }
@@ -371,11 +381,24 @@ function registerIpc(): void {
     return join(targetDir, defaultName);
   }
 
-  function defaultSubtitleFileName(mediaPath: string, variant: ExportVariant): string {
+  function defaultSubtitleFileName(mediaPath: string, variant: ExportVariant, format: 'srt' | 'ass'): string {
     const extension = extname(mediaPath);
     const name = basename(mediaPath, extension);
     const suffix = variant === 'source' ? 'source' : variant === 'bilingual' ? 'bilingual' : 'translated';
-    return `${name}.${suffix}.srt`;
+    return `${name}.${suffix}.${format}`;
+  }
+
+  function resolveSubtitleFileFormat(path: string, fallback: 'srt' | 'ass'): 'srt' | 'ass' {
+    const extension = extname(path).toLowerCase();
+    if (extension === '.ass') return 'ass';
+    if (extension === '.srt') return 'srt';
+    return fallback;
+  }
+
+  function exportFileFormatMeta(format: 'srt' | 'ass'): { extension: 'srt' | 'ass'; filterName: string } {
+    return format === 'ass'
+      ? { extension: 'ass', filterName: 'Advanced SubStation Alpha' }
+      : { extension: 'srt', filterName: 'SubRip Subtitle' };
   }
 
   registerHandle('selectVideo', async () => selectMedia());

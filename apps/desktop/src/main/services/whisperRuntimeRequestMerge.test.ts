@@ -32,6 +32,7 @@ function createSettings(overrides: Partial<AppSettingsPublic> = {}): AppSettings
     exportDestinationMode: 'source-directory',
     exportDirectory: '',
     exportBilingualOrder: 'source-first',
+    exportFileFormat: 'srt',
     ...overrides
   };
 }

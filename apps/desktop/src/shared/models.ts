@@ -53,6 +53,7 @@ export type WorkflowStep = 'import' | 'asr' | 'subtitles' | 'translate' | 'expor
 export type ExportDestinationMode = 'source-directory' | 'selected-directory' | 'ask-each-time';
 export type ExportVariant = 'source' | 'translated' | 'bilingual';
 export type BilingualOrder = 'source-first' | 'target-first';
+export type SubtitleFileFormat = 'srt' | 'ass';
 export type LocalAsrCpuMode = 'low' | 'balanced' | 'high';
 export type LocalAsrAcceleration = 'auto' | 'cpu' | 'gpu';
 export type RuntimeVariant = 'cpu' | 'cuda' | 'metal' | 'vulkan';
@@ -87,6 +88,7 @@ export type AppSettingsPublic = {
   exportDestinationMode: ExportDestinationMode;
   exportDirectory: string;
   exportBilingualOrder: BilingualOrder;
+  exportFileFormat: SubtitleFileFormat;
 };
 
 export type AppSettingsPatch = Partial<AppSettingsPublic>;
