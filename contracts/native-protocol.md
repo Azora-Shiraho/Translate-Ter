@@ -231,10 +231,12 @@ Legacy compatibility remains enabled:
 - top-level `binaryPath` and `modelPath` still work and are preserved for
   compatibility.
 
-Electron main must assemble the `runtime` object and must only send executable
-or model paths after manifest pinning, local file existence checks, and
-SHA-256 verification. Renderer code does not assemble runtime internals. The
-native backend checks existence but does not trust or download assets.
+Electron main must assemble the `runtime` object and must only send managed
+executable or model paths after manifest pinning, local file existence checks,
+and SHA-256 verification. The current exception is a darwin-arm64 system
+`whisper-cli`, which may be sent after a successful executable probe. Renderer
+code does not assemble runtime internals. The native backend checks existence
+but does not trust or download assets.
 
 For `local.whisper.cpp` on `darwin-arm64`, the initial `metal` runtime path may
 also come from a system `whisper-cli` discovered on `PATH`. This does not add
@@ -254,10 +256,11 @@ used for development UI fallback and is explicit in the request.
 
 ## Runtime Download Strategy
 
-`resources/whisper-manifest.json` is a disabled sample. A production or local
-test manifest must set `enabled: true`, include per-platform runtime entries,
-and pin every executable/model with a non-zero SHA-256 digest before download or
-execution is allowed.
+The checked-in `resources/whisper-manifest.json` is enabled for the current
+validation flow. Windows CPU/CUDA runtime entries and model entries already use
+real URLs plus pinned SHA-256 values. The managed Linux/macOS runtime entries
+still contain placeholder metadata until verified distribution URLs and hashes
+are supplied.
 
 Electron main is responsible for:
 

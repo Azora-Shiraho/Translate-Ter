@@ -93,6 +93,9 @@ item('Native backend', backendPath);
 const backendHealth = run(backendPath, ['--health']);
 if (backendHealth.status !== 0) {
   item('Backend health', `Failed with exit code ${backendHealth.status ?? 'unknown'}`);
+  if (backendHealth.error?.message) {
+    console.error(backendHealth.error.message);
+  }
   if (backendHealth.stderr) {
     console.error(backendHealth.stderr.trim());
   }

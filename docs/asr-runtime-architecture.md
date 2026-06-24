@@ -83,13 +83,16 @@ The current whisper runtime resolution flow is split between asset/probe code an
 - building runtime capability input such as CUDA/Metal availability
 - calling the resolver with concrete candidate state
 
-### `resolveWhisperRuntimeSelection()` adapter
+### `whisperRuntimeResolverAdapter.ts`
 
 `apps/desktop/src/main/services/whisperRuntimeResolverAdapter.ts` is the compatibility boundary that:
 
-- normalizes the current manifest shape
-- translates legacy and new request fields into a single resolver input
-- delegates the actual pick/fallback decision to `resolveRuntime()`
+- uses `resolveWhisperRuntimeRequestOptions()` to translate `preferCuda`,
+  `localAsrAcceleration`, `preferredRuntimeVariant`, and the legacy CUDA
+  compatibility flag into one normalized resolver input
+- uses `resolveWhisperRuntimeSelection()` to normalize the current manifest
+  shape, select the requested model, and delegate the actual
+  pick/fallback decision to `resolveRuntime()`
 
 ### `resolveRuntime()`
 
@@ -178,18 +181,20 @@ Compatibility rules:
 
 - Baseline local path: `local.whisper.cpp` with CPU runtime.
 - Optional accelerator path: CUDA when the machine has supported NVIDIA hardware, local CUDA runtime files, and a matching/pinned CUDA runtime candidate.
+- The checked-in manifest already pins Windows CPU/CUDA managed runtime entries and model entries with real URLs plus SHA-256 values.
 - WebView2 native host packaging exists only on Windows.
 
 ### macOS
 
 - Initial validated GPU path is Apple Silicon `metal` using a system `whisper-cli` found on `PATH`.
 - That system binary is accepted through an executable probe (`--help`), not through SHA-256 pinning.
-- Managed macOS runtime distribution is not the validated path in this PR.
+- The checked-in managed macOS runtime entry is still a placeholder path and is not the validated install path in this PR.
 - WebView2 native host is not built on macOS.
 
 ### Linux
 
 - Baseline local path is CPU-oriented backend/electron validation.
+- The checked-in managed Linux runtime entry still uses placeholder download metadata and is not a fully pinned managed install path yet.
 - WebView2 native host is not built on Linux.
 
 ### CPU fallback
@@ -205,7 +210,7 @@ CPU fallback is part of the current selection behavior, not a separate provider:
 - CUDA and Metal both require matching hardware plus a usable local runtime on the machine.
 - macOS and Linux do not build the WebView2 native host.
 - System `whisper-cli` is trusted by executable probe only; it is not SHA-256 verified by the app.
-- The checked-in manifest is still a sample/validation artifact and is not a promise that every listed platform entry is fully pinned for production distribution.
+- The checked-in manifest is enabled and already pins Windows CPU/CUDA runtime entries plus model entries, but managed macOS/Linux runtime entries are still incomplete placeholders rather than fully pinned install targets.
 - This PR does not promote Vulkan, Core ML, MLX, or TensorRT into the validated runtime matrix.
 
 ## Related Files
