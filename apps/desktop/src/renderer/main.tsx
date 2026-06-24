@@ -34,6 +34,7 @@ import type {
   AppLogLevel,
   AppSettingsPublic,
   ExportDestinationMode,
+  SubtitleFileFormat,
   ExportVariant,
   FasterWhisperCudaStatus,
   FfmpegStatus,
@@ -51,6 +52,21 @@ import type {
 import type { AssetEvent, JobEvent, JobStage } from '@shared/models';
 import { formatTimestamp } from '@shared/srt';
 import { languageLabel, languageRegistry } from '@shared/languages';
+import {
+  buildIgnoreCudaMismatchPatch,
+  buildLocalAsrSettingsPatch,
+  deriveFasterWhisperWorkspaceMode,
+  deriveRuntimeVariantSelection,
+  inferRuntimePlatformFamily,
+  isExperimentalWhisperRuntimeVariant,
+  isCudaFlowRelevant,
+  isVerifiedWhisperGpuRuntimeVariant,
+  listRuntimeVariantSelections,
+  resolveSupportedRuntimeVariantSelection,
+  resolveAccelerationForVariantSelection,
+  resolveVariantSelectionForAcceleration,
+  type RuntimeVariantSelection
+} from './asrSettings';
 
 const steps = ['import', 'asr', 'subtitles', 'translate', 'export'] as const;
 const translationProviders = ['openai.compatible'] as const;
@@ -134,6 +150,11 @@ type DerivedHealthState = {
   detail: string;
 };
 type SettingsJumpTarget = 'asr-provider' | 'ffmpeg' | 'cuda' | 'whisper-model' | 'translation-provider';
+type RuntimeStatusRow = {
+  label: string;
+  value: string;
+  tone?: 'good' | 'warn' | 'error' | 'accent' | 'muted';
+};
 
 const asrProviders = [
   { id: 'local.whisper.cpp', nameKey: 'localProvider', descriptionKey: 'localProviderDetail' },
@@ -183,13 +204,56 @@ function App(): JSX.Element {
   const whisperModelSettingsRef = useRef<HTMLDivElement | null>(null);
   const translationProviderSettingsRef = useRef<HTMLDivElement | null>(null);
   const settingsJumpResetRef = useRef<number>();
-  const configuredLocalWhisperUseCuda = Boolean(settings?.localWhisperUseCuda);
+  const hostPlatform = window.translateTer.host.platform;
+  const configuredAcceleration = settings?.localAsrAcceleration ?? 'auto';
+  const configuredRuntimeVariant = deriveRuntimeVariantSelection(
+    configuredAcceleration,
+    settings?.preferredRuntimeVariant
+  );
+  const ignoreCudaMismatch = Boolean(
+    settings?.localAsrCompatibilityOverrides?.ignoreCudaMismatch ?? settings?.localWhisperIgnoreCudaMismatch
+  );
+  const platformFamily = useMemo(
+    () =>
+      inferRuntimePlatformFamily({
+        runtimeStatus,
+        hostPlatform,
+        nativeHealth
+      }),
+    [hostPlatform, nativeHealth, runtimeStatus]
+  );
+  const runtimeVariantSelections = useMemo(
+    () =>
+      settings
+        ? listRuntimeVariantSelections({
+            providerId: settings.asrProviderId,
+            platformFamily,
+            currentVariant: settings.preferredRuntimeVariant
+          })
+        : [],
+    [platformFamily, settings]
+  );
+  const effectiveRuntimeVariantSelection = useMemo(
+    () =>
+      resolveSupportedRuntimeVariantSelection(
+        configuredAcceleration,
+        configuredRuntimeVariant,
+        runtimeVariantSelections
+      ),
+    [configuredAcceleration, configuredRuntimeVariant, runtimeVariantSelections]
+  );
+  const effectivePreferredRuntimeVariant =
+    effectiveRuntimeVariantSelection === 'auto' ? undefined : effectiveRuntimeVariantSelection;
+  const mirroredLegacyUseCuda = Boolean(settings?.localWhisperUseCuda);
   const cudaApproved = Boolean(cudaStatus?.acceleration.cudaSupported);
   const fasterWhisperCudaApproved = Boolean(fasterWhisperCudaStatus?.cudaSupported);
   const effectiveLocalWhisperUseCuda = Boolean(
-    configuredLocalWhisperUseCuda &&
+    mirroredLegacyUseCuda &&
       (settings?.asrProviderId === 'local.faster-whisper' ? fasterWhisperCudaApproved : cudaApproved)
   );
+  const cudaFlowRelevant = settings
+    ? isCudaFlowRelevant(settings.asrProviderId, platformFamily, effectiveRuntimeVariantSelection)
+    : false;
   const writeUiLog = useCallback(
     (level: AppLogLevel, event: string, details?: unknown, scope = 'renderer.ui', message?: string) => {
       if (level === 'debug') {
@@ -360,7 +424,9 @@ function App(): JSX.Element {
           modelId: settings.whisperModelId,
           allowDownload: false,
           preferCuda: effectiveLocalWhisperUseCuda,
-          ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
+          localAsrAcceleration: settings.localAsrAcceleration,
+          preferredRuntimeVariant: effectivePreferredRuntimeVariant,
+          ignoreCudaMismatch,
           useMultiThreadDownload: settings.enableMultiThreadDownload,
           downloadScope: 'none'
         })
@@ -377,7 +443,9 @@ function App(): JSX.Element {
     settings?.asrProviderId,
     settings?.whisperModelId,
     effectiveLocalWhisperUseCuda,
-    settings?.localWhisperIgnoreCudaMismatch,
+    settings?.localAsrAcceleration,
+    settings?.preferredRuntimeVariant,
+    ignoreCudaMismatch,
     settings?.enableMultiThreadDownload
   ]);
 
@@ -412,7 +480,9 @@ function App(): JSX.Element {
           modelId: settings.whisperModelId,
           allowDownload: false,
           preferCuda: true,
-          ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
+          localAsrAcceleration: 'gpu',
+          preferredRuntimeVariant: 'cuda',
+          ignoreCudaMismatch,
           useMultiThreadDownload: settings.enableMultiThreadDownload,
           downloadScope: 'none'
         })
@@ -428,7 +498,7 @@ function App(): JSX.Element {
     Boolean(cudaStatus),
     settings?.asrProviderId,
     settings?.whisperModelId,
-    settings?.localWhisperIgnoreCudaMismatch,
+    ignoreCudaMismatch,
     settings?.enableMultiThreadDownload
   ]);
 
@@ -513,6 +583,33 @@ function App(): JSX.Element {
     }
   }
 
+  async function updateLocalAsrAccelerationSetting(
+    acceleration: AppSettingsPublic['localAsrAcceleration']
+  ): Promise<void> {
+    if (!settings) return;
+
+    const nextVariant = resolveVariantSelectionForAcceleration(
+      acceleration,
+      effectiveRuntimeVariantSelection,
+      runtimeVariantSelections
+    );
+    await updateSettings(buildLocalAsrSettingsPatch(acceleration, nextVariant));
+  }
+
+  async function updateLocalRuntimeVariantSetting(
+    variantSelection: RuntimeVariantSelection
+  ): Promise<void> {
+    if (!settings) return;
+
+    const nextAcceleration = resolveAccelerationForVariantSelection(variantSelection, configuredAcceleration);
+    await updateSettings(buildLocalAsrSettingsPatch(nextAcceleration, variantSelection));
+  }
+
+  async function updateIgnoreCudaMismatchSetting(nextIgnoreCudaMismatch: boolean): Promise<void> {
+    if (!settings) return;
+    await updateSettings(buildIgnoreCudaMismatchPatch(nextIgnoreCudaMismatch));
+  }
+
   async function readNativeHealthWithRetry(): Promise<NativeHealth | undefined> {
     const first = await window.translateTer.native.health().catch(() => undefined);
     if (!first || !shouldRetryNativeHealth(first)) {
@@ -595,7 +692,9 @@ function App(): JSX.Element {
       modelId: settings.whisperModelId,
       allowDownload: false,
       preferCuda: effectiveLocalWhisperUseCuda,
-      ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
+      localAsrAcceleration: settings.localAsrAcceleration,
+      preferredRuntimeVariant: effectivePreferredRuntimeVariant,
+      ignoreCudaMismatch,
       useMultiThreadDownload: settings.enableMultiThreadDownload,
       downloadScope: 'none'
     });
@@ -613,7 +712,9 @@ function App(): JSX.Element {
       modelId: settings.whisperModelId,
       allowDownload: false,
       preferCuda: effectiveLocalWhisperUseCuda,
-      ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
+      localAsrAcceleration: settings.localAsrAcceleration,
+      preferredRuntimeVariant: effectivePreferredRuntimeVariant,
+      ignoreCudaMismatch,
       useMultiThreadDownload: settings.enableMultiThreadDownload,
       downloadScope: 'none'
     });
@@ -637,7 +738,9 @@ function App(): JSX.Element {
         modelId: settings.whisperModelId,
         allowDownload: true,
         preferCuda: effectiveLocalWhisperUseCuda,
-        ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
+        localAsrAcceleration: settings.localAsrAcceleration,
+        preferredRuntimeVariant: effectivePreferredRuntimeVariant,
+        ignoreCudaMismatch,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'runtime'
       });
@@ -665,6 +768,8 @@ function App(): JSX.Element {
         modelId: settings.whisperModelId,
         allowDownload: true,
         preferCuda: Boolean(settings.localWhisperUseCuda),
+        localAsrAcceleration: settings.localAsrAcceleration,
+        preferredRuntimeVariant: effectivePreferredRuntimeVariant,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         forceManaged: true
       });
@@ -734,12 +839,14 @@ function App(): JSX.Element {
         modelId: settings.whisperModelId,
         allowDownload: false,
         preferCuda: true,
-        ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
+        localAsrAcceleration: 'gpu',
+        preferredRuntimeVariant: 'cuda',
+        ignoreCudaMismatch,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'none'
       });
       setCudaStatus(status);
-      const nextMessage = describeCudaStatusDetail(status, t, settings.localWhisperIgnoreCudaMismatch);
+      const nextMessage = describeCudaStatusDetail(status, t, ignoreCudaMismatch);
       pushStatus(nextMessage, status.acceleration.cudaSupported ? 'success' : 'warning');
     } catch (error) {
       const nextMessage = reportUiError('whisper.cuda.check-failed', error, undefined, 'renderer.runtime');
@@ -763,12 +870,14 @@ function App(): JSX.Element {
         modelId: settings.whisperModelId,
         allowDownload: true,
         preferCuda: true,
-        ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
+        localAsrAcceleration: 'gpu',
+        preferredRuntimeVariant: 'cuda',
+        ignoreCudaMismatch,
         useMultiThreadDownload: settings.enableMultiThreadDownload,
         downloadScope: 'cuda-runtime'
       });
       setCudaStatus(status);
-      const nextMessage = describeCudaStatusDetail(status, t, settings.localWhisperIgnoreCudaMismatch);
+      const nextMessage = describeCudaStatusDetail(status, t, ignoreCudaMismatch);
       pushStatus(nextMessage, status.acceleration.cudaSupported ? 'success' : 'warning');
     } catch (error) {
       const nextMessage = reportUiError('whisper.cuda.download-failed', error, undefined, 'renderer.runtime');
@@ -865,7 +974,9 @@ function App(): JSX.Element {
         const health = await window.translateTer.assets.ensureFasterWhisperRuntime({
           modelId: settings.whisperModelId,
           allowDownload: false,
-          preferCuda: Boolean(settings.localWhisperUseCuda)
+          preferCuda: Boolean(settings.localWhisperUseCuda),
+          localAsrAcceleration: settings.localAsrAcceleration,
+          preferredRuntimeVariant: effectivePreferredRuntimeVariant
         });
         setProviderHealth((current) => ({ ...current, [providerId]: health }));
         pushStatus(health.message ?? t(providerStatusLabel(health.status)), health.ok ? 'success' : 'warning');
@@ -923,8 +1034,10 @@ function App(): JSX.Element {
         asrProviderId: settings.asrProviderId,
         whisperModelId: settings.whisperModelId,
         localWhisperUseCuda: effectiveLocalWhisperUseCuda,
+        localAsrAcceleration: settings.localAsrAcceleration,
+        preferredRuntimeVariant: effectivePreferredRuntimeVariant,
         localAsrCpuMode: settings.localAsrCpuMode,
-        localWhisperIgnoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
+        localWhisperIgnoreCudaMismatch: ignoreCudaMismatch,
         allowWhisperAssetDownload: settings.allowWhisperAssetDownload,
         allowCloudAsrUpload: settings.asrProviderId === 'cloud.openai' ? true : settings.allowCloudAsrUpload,
         translationProviderPriority: settings.translationProviderPriority,
@@ -1093,14 +1206,23 @@ function App(): JSX.Element {
   const selectedModelStatus = modelStatus && modelStatus.id === settings?.whisperModelId ? modelStatus : undefined;
   const selectedModelInstalled = selectedModelStatus?.installed ?? selectedModel?.installed ?? false;
   const selectedModelVerified = selectedModelStatus?.verified ?? false;
-  const ignoreCudaMismatch = Boolean(settings?.localWhisperIgnoreCudaMismatch);
   const cudaBlockingMismatch = hasBlockingCudaMismatch(cudaStatus, ignoreCudaMismatch);
-  const cudaStatusDetail = configuredLocalWhisperUseCuda
+  const cudaStatusDetail = cudaFlowRelevant
     ? describeCudaStatusDetail(cudaStatus, t, ignoreCudaMismatch)
-    : t('cudaDisabledUsesCpu');
-  const cudaStatusShort = configuredLocalWhisperUseCuda
+    : effectiveRuntimeVariantSelection === 'metal' || effectiveRuntimeVariantSelection === 'vulkan'
+      ? t('cudaNotApplicableForVariant')
+      : configuredAcceleration === 'cpu'
+        ? t('cudaDisabledUsesCpu')
+        : configuredAcceleration === 'auto'
+          ? t('runtimeVariantAutomatic')
+          : t('runtimeNotChecked');
+  const cudaStatusShort = cudaFlowRelevant
     ? describeCudaStatusShort(cudaStatus, t, ignoreCudaMismatch)
-    : t('disabledShort');
+    : configuredAcceleration === 'auto'
+      ? t('autoOption')
+      : configuredAcceleration === 'cpu'
+        ? t('disabledShort')
+        : t('notRequired');
   const fasterWhisperCudaDetail = fasterWhisperCudaStatus?.message ?? t('runtimeNotChecked');
   const fasterWhisperCudaShort = fasterWhisperCudaStatus
     ? fasterWhisperCudaStatus.cudaSupported
@@ -1112,14 +1234,14 @@ function App(): JSX.Element {
   const ffmpegState = deriveFfmpegState({ t, ffmpegStatus, nativeHealth });
   const nativeBackendState = deriveNativeBackendState({ t, health: nativeHealth });
   const ffmpegAvailable = ffmpegStatus?.available ?? Boolean(nativeHealth?.ffmpegAvailable && nativeHealth?.ffprobeAvailable);
-  const cudaMismatchDetected = configuredLocalWhisperUseCuda && cudaBlockingMismatch;
+  const cudaMismatchDetected = cudaFlowRelevant && cudaBlockingMismatch;
   const cudaRuntimeMissing = Boolean(
-    configuredLocalWhisperUseCuda &&
+    cudaFlowRelevant &&
       cudaStatus?.acceleration.hardwareDetected &&
       !cudaStatus.acceleration.runtimeDetected
   );
   const showCudaRuntimeDownload = Boolean(
-    settings?.allowWhisperAssetDownload && configuredLocalWhisperUseCuda && cudaRuntimeMissing && !cudaBlockingMismatch
+    settings?.allowWhisperAssetDownload && cudaFlowRelevant && cudaRuntimeMissing && !cudaBlockingMismatch
   );
   const showFasterWhisperCudaDownload = Boolean(
     settings?.allowWhisperAssetDownload && fasterWhisperCudaStatus?.actionRequired === 'download-cuda-runtime'
@@ -1129,6 +1251,9 @@ function App(): JSX.Element {
   const asrHealth = providerHealth[asrProviderId];
   const usingWhisperCpp = asrProviderId === 'local.whisper.cpp';
   const usingFasterWhisper = asrProviderId === 'local.faster-whisper';
+  const fasterWhisperUnsupportedVariant = Boolean(
+    usingFasterWhisper && asrHealth?.acceleration && !asrHealth.acceleration.supported
+  );
   const usingLocalAsr = usingWhisperCpp || usingFasterWhisper;
   const canForceStop = Boolean(job && !['completed', 'failed', 'cancelled'].includes(job.stage));
   const selectedSegment = segments.find((segment) => segment.id === selectedSegmentId) ?? segments[0];
@@ -1183,8 +1308,7 @@ function App(): JSX.Element {
   const backendAccelerationState = deriveBackendAccelerationState({
     t,
     runtimeStatus,
-    asrProviderId,
-    useCuda: configuredLocalWhisperUseCuda
+    asrProviderId
   });
   const runtimeModelState = deriveRuntimeModelState({
     t,
@@ -1224,7 +1348,6 @@ function App(): JSX.Element {
     t,
     asrProviderId,
     asrHealth,
-    useCuda: effectiveLocalWhisperUseCuda,
     runtimeState,
     ffmpegStatus,
     nativeHealth
@@ -1237,7 +1360,7 @@ function App(): JSX.Element {
         ? 'asr-provider'
         : !runtimeStatus?.model.verified
           ? 'whisper-model'
-          : (configuredLocalWhisperUseCuda &&
+          : (cudaFlowRelevant &&
               (runtimeStatus?.acceleration.requested === 'gpu' || cudaRuntimeMissing || cudaMismatchDetected))
             ? 'cuda'
             : 'asr-provider'
@@ -1249,12 +1372,35 @@ function App(): JSX.Element {
   const accelerationJumpTarget: SettingsJumpTarget = usingWhisperCpp ? 'cuda' : 'asr-provider';
   const modelJumpTarget: SettingsJumpTarget = usingLocalAsr ? 'whisper-model' : 'asr-provider';
   const translationJumpTarget: SettingsJumpTarget = 'translation-provider';
+  const showFasterWhisperRuntimeDownloadAction = Boolean(
+    settings?.allowWhisperAssetDownload &&
+      usingFasterWhisper &&
+      !fasterWhisperUnsupportedVariant &&
+      (!asrHealth || asrHealth.status === 'unavailable')
+  );
   const showRuntimeDownloadAction =
-    Boolean(settings?.allowWhisperAssetDownload) && (usingWhisperCpp || usingFasterWhisper) && !asrHealth?.ok;
+    Boolean(settings?.allowWhisperAssetDownload) &&
+    (usingWhisperCpp || showFasterWhisperRuntimeDownloadAction) &&
+    !asrHealth?.ok;
   const runtimeDownloadDisabled =
     runtimeOperation === 'runtime-download' ||
     checkingProvider === asrProviderId ||
     (usingWhisperCpp ? Boolean(runtimeStatus?.binary.verified) : Boolean(asrHealth?.ok));
+  const runtimeStatusRows: RuntimeStatusRow[] = usingWhisperCpp
+    ? buildWhisperRuntimeStatusRows({
+        t,
+        runtimeStatus,
+        requestedAcceleration: configuredAcceleration,
+        requestedVariant: effectiveRuntimeVariantSelection
+      })
+    : usingFasterWhisper
+      ? buildFasterWhisperRuntimeStatusRows({
+          t,
+          acceleration: asrHealth?.acceleration,
+          requestedAcceleration: configuredAcceleration,
+          requestedVariant: effectiveRuntimeVariantSelection
+        })
+      : [];
 
   async function forceStop(): Promise<void> {
     if (!job) return;
@@ -1949,9 +2095,13 @@ function App(): JSX.Element {
                     <SettingsFactCard
                       icon={<MonitorCog size={16} />}
                       label={t('summaryBackendAcceleration')}
-                      value={effectiveLocalWhisperUseCuda && asrHealth?.ok ? 'CUDA' : 'CPU'}
+                      value={
+                        asrHealth?.acceleration
+                          ? t(accelerationOptionLabel(asrHealth.acceleration.selected))
+                          : t(accelerationOptionLabel(configuredAcceleration))
+                      }
                       detail={asrHealth?.message ?? t('fasterWhisperCudaDetail')}
-                      tone={effectiveLocalWhisperUseCuda && asrHealth?.ok ? 'good' : 'accent'}
+                      tone={asrHealth?.acceleration?.selected === 'gpu' ? 'good' : 'accent'}
                       onClick={() => jumpToSettingsTarget(modelJumpTarget)}
                     />
                     <SettingsFactCard
@@ -2155,6 +2305,17 @@ function App(): JSX.Element {
                             </button>
                           )}
                           <div className="segmented two">
+                            {(['srt', 'ass'] as SubtitleFileFormat[]).map((format) => (
+                              <button
+                                className={settings.exportFileFormat === format ? 'selected' : ''}
+                                key={format}
+                                onClick={() => void updateSettings({ exportFileFormat: format })}
+                              >
+                                {t(format === 'srt' ? 'subtitleFormatSrt' : 'subtitleFormatAss')}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="segmented two">
                             {(['source-first', 'target-first'] as const).map((order) => (
                               <button
                                 className={settings.exportBilingualOrder === order ? 'selected' : ''}
@@ -2300,46 +2461,93 @@ function App(): JSX.Element {
                           ref={cudaSettingsRef}
                           tabIndex={-1}
                         >
-                          <InspectorSection icon={<Gauge size={16} />} title={t('cudaAcceleration')}>
+                          <InspectorSection icon={<Gauge size={16} />} title={t('acceleration')}>
                             <div className="modelCard accentCard">
                               <div>
-                                <span className={cudaApproved ? 'signal good' : 'signal'} />
-                                <strong>{t('cudaAcceleration')}</strong>
+                                <span
+                                  className={
+                                    runtimeStatus?.acceleration.selected === 'gpu'
+                                      ? 'signal good'
+                                      : cudaMismatchDetected || cudaRuntimeMissing
+                                        ? 'signal warn'
+                                        : 'signal accent'
+                                  }
+                                />
+                                <strong>{t('acceleration')}</strong>
                                 <small>{cudaStatusDetail}</small>
                               </div>
-                              <div className="settingsActionRow">
-                                <button
-                                  className="secondary compact settingsActionButton"
-                                  disabled={runtimeOperation === 'cuda-check' || runtimeOperation === 'cuda-download'}
-                                  onClick={() => void checkCuda()}
+                              <label>
+                                {t('acceleration')}
+                                <select
+                                  value={configuredAcceleration}
+                                  onChange={(event) =>
+                                    void updateLocalAsrAccelerationSetting(
+                                      event.target.value as AppSettingsPublic['localAsrAcceleration']
+                                    )
+                                  }
                                 >
-                                  <Search size={16} />
-                                  {runtimeOperation === 'cuda-check' ? t('checking') : t('checkCuda')}
-                                </button>
-                                {showCudaRuntimeDownload && (
+                                  {(['auto', 'cpu', 'gpu'] as const).map((option) => (
+                                    <option key={option} value={option}>
+                                      {t(accelerationOptionLabel(option))}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              {runtimeVariantSelections.length > 0 && (
+                                <label>
+                                  {t('runtimeVariant')}
+                                  <select
+                                    value={effectiveRuntimeVariantSelection}
+                                    onChange={(event) =>
+                                      void updateLocalRuntimeVariantSetting(event.target.value as RuntimeVariantSelection)
+                                    }
+                                  >
+                                    {runtimeVariantSelections.map((option) => (
+                                      <option key={option} value={option}>
+                                        {t(runtimeVariantOptionLabel(option))}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              )}
+                              {cudaFlowRelevant && (
+                                <div className="settingsActionRow">
                                   <button
                                     className="secondary compact settingsActionButton"
                                     disabled={runtimeOperation === 'cuda-check' || runtimeOperation === 'cuda-download'}
-                                    onClick={() => void downloadCudaRuntime()}
+                                    onClick={() => void checkCuda()}
                                   >
-                                    <HardDriveDownload size={16} />
-                                    {runtimeOperation === 'cuda-download' ? t('downloadProgress') : t('downloadCudaRuntime')}
+                                    <Search size={16} />
+                                    {runtimeOperation === 'cuda-check' ? t('checking') : t('checkCuda')}
                                   </button>
-                                )}
+                                  {showCudaRuntimeDownload && (
+                                    <button
+                                      className="secondary compact settingsActionButton"
+                                      disabled={runtimeOperation === 'cuda-check' || runtimeOperation === 'cuda-download'}
+                                      onClick={() => void downloadCudaRuntime()}
+                                    >
+                                      <HardDriveDownload size={16} />
+                                      {runtimeOperation === 'cuda-download' ? t('downloadProgress') : t('downloadCudaRuntime')}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                              {cudaFlowRelevant && (
+                                <ToggleField
+                                  label={t('ignoreCudaMismatch')}
+                                  detail={t('ignoreCudaMismatchDetail')}
+                                  checked={ignoreCudaMismatch}
+                                  onChange={(checked) => void updateIgnoreCudaMismatchSetting(checked)}
+                                />
+                              )}
+                              <div className="runtimeGrid">
+                                {runtimeStatusRows.map((row) => (
+                                  <div className="statusLine" key={row.label}>
+                                    <span>{row.label}</span>
+                                    <strong className={row.tone}>{row.value}</strong>
+                                  </div>
+                                ))}
                               </div>
-                              <ToggleField
-                                label={t('useCudaAcceleration')}
-                                detail={t('useCudaAccelerationDetail')}
-                                checked={effectiveLocalWhisperUseCuda}
-                                disabled={!cudaApproved}
-                                onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
-                              />
-                              <ToggleField
-                                label={t('ignoreCudaMismatch')}
-                                detail={t('ignoreCudaMismatchDetail')}
-                                checked={settings.localWhisperIgnoreCudaMismatch}
-                                onChange={(checked) => void updateSettings({ localWhisperIgnoreCudaMismatch: checked })}
-                              />
                             </div>
                           </InspectorSection>
                         </div>
@@ -2438,40 +2646,85 @@ function App(): JSX.Element {
                           ref={cudaSettingsRef}
                           tabIndex={-1}
                         >
-                          <InspectorSection icon={<Gauge size={16} />} title={t('cudaAcceleration')}>
+                          <InspectorSection icon={<Gauge size={16} />} title={t('acceleration')}>
                             <div className="modelCard accentCard">
                               <div>
-                                <span className={fasterWhisperCudaApproved ? 'signal good' : 'signal'} />
-                                <strong>{t('cudaAcceleration')}</strong>
+                                <span
+                                  className={
+                                    asrHealth?.acceleration?.selected === 'gpu'
+                                      ? 'signal good'
+                                      : fasterWhisperCudaStatus?.hardwareDetected
+                                        ? 'signal warn'
+                                        : 'signal accent'
+                                  }
+                                />
+                                <strong>{t('acceleration')}</strong>
                                 <small>{fasterWhisperCudaDetail}</small>
                               </div>
-                              <div className="settingsActionRow">
-                                <button
-                                  className="secondary compact settingsActionButton"
-                                  disabled={runtimeOperation === 'cuda-check' || runtimeOperation === 'cuda-download'}
-                                  onClick={() => void checkFasterWhisperCuda()}
+                              <label>
+                                {t('acceleration')}
+                                <select
+                                  value={configuredAcceleration}
+                                  onChange={(event) =>
+                                    void updateLocalAsrAccelerationSetting(
+                                      event.target.value as AppSettingsPublic['localAsrAcceleration']
+                                    )
+                                  }
                                 >
-                                  <Search size={16} />
-                                  {runtimeOperation === 'cuda-check' ? t('checking') : t('checkCuda')}
-                                </button>
-                                {showFasterWhisperCudaDownload && (
+                                  {(['auto', 'cpu', 'gpu'] as const).map((option) => (
+                                    <option key={option} value={option}>
+                                      {t(accelerationOptionLabel(option))}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              {runtimeVariantSelections.length > 0 && (
+                                <label>
+                                  {t('runtimeVariant')}
+                                  <select
+                                    value={effectiveRuntimeVariantSelection}
+                                    onChange={(event) =>
+                                      void updateLocalRuntimeVariantSetting(event.target.value as RuntimeVariantSelection)
+                                    }
+                                  >
+                                    {runtimeVariantSelections.map((option) => (
+                                      <option key={option} value={option}>
+                                        {t(runtimeVariantOptionLabel(option))}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              )}
+                              {cudaFlowRelevant && (
+                                <div className="settingsActionRow">
                                   <button
                                     className="secondary compact settingsActionButton"
                                     disabled={runtimeOperation === 'cuda-check' || runtimeOperation === 'cuda-download'}
-                                    onClick={() => void downloadFasterWhisperCudaRuntime()}
+                                    onClick={() => void checkFasterWhisperCuda()}
                                   >
-                                    <HardDriveDownload size={16} />
-                                    {runtimeOperation === 'cuda-download' ? t('downloadProgress') : t('downloadCudaRuntime')}
+                                    <Search size={16} />
+                                    {runtimeOperation === 'cuda-check' ? t('checking') : t('checkCuda')}
                                   </button>
-                                )}
+                                  {showFasterWhisperCudaDownload && (
+                                    <button
+                                      className="secondary compact settingsActionButton"
+                                      disabled={runtimeOperation === 'cuda-check' || runtimeOperation === 'cuda-download'}
+                                      onClick={() => void downloadFasterWhisperCudaRuntime()}
+                                    >
+                                      <HardDriveDownload size={16} />
+                                      {runtimeOperation === 'cuda-download' ? t('downloadProgress') : t('downloadCudaRuntime')}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                              <div className="runtimeGrid">
+                                {runtimeStatusRows.map((row) => (
+                                  <div className="statusLine" key={row.label}>
+                                    <span>{row.label}</span>
+                                    <strong className={row.tone}>{row.value}</strong>
+                                  </div>
+                                ))}
                               </div>
-                              <ToggleField
-                                label={t('useCudaAcceleration')}
-                                detail={t('fasterWhisperCudaDetail')}
-                                checked={effectiveLocalWhisperUseCuda}
-                                disabled={!fasterWhisperCudaApproved}
-                                onChange={(checked) => void updateSettings({ localWhisperUseCuda: checked })}
-                              />
                             </div>
                           </InspectorSection>
                         </div>
@@ -3175,6 +3428,124 @@ function providerLabel(providerId: string, t: (key: string) => string): string {
   }
 }
 
+function accelerationOptionLabel(acceleration: AppSettingsPublic['localAsrAcceleration']): string {
+  switch (acceleration) {
+    case 'cpu':
+      return 'cpuOption';
+    case 'gpu':
+      return 'gpuOption';
+    default:
+      return 'autoOption';
+  }
+}
+
+function runtimeVariantOptionLabel(variant: RuntimeVariantSelection): string {
+  switch (variant) {
+    case 'cpu':
+      return 'cpuOption';
+    case 'cuda':
+      return 'runtimeVariantCuda';
+    case 'metal':
+      return 'runtimeVariantMetal';
+    case 'vulkan':
+      return 'runtimeVariantVulkan';
+    default:
+      return 'autoOption';
+  }
+}
+
+function buildWhisperRuntimeStatusRows(input: {
+  t: (key: string, options?: Record<string, unknown>) => string;
+  runtimeStatus?: WhisperRuntimeStatus;
+  requestedAcceleration: AppSettingsPublic['localAsrAcceleration'];
+  requestedVariant: RuntimeVariantSelection;
+}): RuntimeStatusRow[] {
+  const { t, runtimeStatus, requestedAcceleration, requestedVariant } = input;
+
+  return [
+    { label: t('provider'), value: 'whisper.cpp', tone: 'accent' },
+    {
+      label: t('requestedAcceleration'),
+      value: t(accelerationOptionLabel(runtimeStatus?.acceleration.requested ?? requestedAcceleration)),
+      tone: 'accent'
+    },
+    {
+      label: t('selectedAcceleration'),
+      value: runtimeStatus ? t(accelerationOptionLabel(runtimeStatus.acceleration.selected)) : t('notChecked'),
+      tone:
+        runtimeStatus?.acceleration.selected === 'gpu'
+          ? isExperimentalWhisperRuntimeVariant(runtimeStatus.acceleration.runtimeVariant)
+            ? 'warn'
+            : 'good'
+          : runtimeStatus
+            ? 'accent'
+            : 'muted'
+    },
+    {
+      label: t('runtimeVariant'),
+      value: t(runtimeVariantOptionLabel(runtimeStatus?.acceleration.runtimeVariant ?? requestedVariant)),
+      tone:
+        runtimeStatus?.acceleration.runtimeVariant === 'cuda' || runtimeStatus?.acceleration.runtimeVariant === 'metal'
+          ? 'good'
+          : runtimeStatus?.acceleration.runtimeVariant === 'vulkan'
+            ? 'warn'
+          : runtimeStatus
+            ? 'accent'
+            : 'muted'
+    },
+    {
+      label: t('fallbackReason'),
+      value: runtimeStatus?.acceleration.fallbackReason
+        ? fallbackReasonLabel(runtimeStatus.acceleration.fallbackReason, t, requestedVariant)
+        : t('none'),
+      tone: runtimeStatus?.acceleration.fallbackReason ? 'warn' : 'muted'
+    },
+    {
+      label: t('binaryVerified'),
+      value: runtimeStatus ? t(runtimeStatus.binary.verified ? 'verified' : 'notVerified') : t('notChecked'),
+      tone: runtimeStatus?.binary.verified ? 'good' : runtimeStatus ? 'warn' : 'muted'
+    },
+    {
+      label: t('modelVerified'),
+      value: runtimeStatus ? t(runtimeStatus.model.verified ? 'verified' : 'notVerified') : t('notChecked'),
+      tone: runtimeStatus?.model.verified ? 'good' : runtimeStatus ? 'warn' : 'muted'
+    }
+  ];
+}
+
+function buildFasterWhisperRuntimeStatusRows(input: {
+  t: (key: string, options?: Record<string, unknown>) => string;
+  acceleration?: ProviderHealth['acceleration'];
+  requestedAcceleration: AppSettingsPublic['localAsrAcceleration'];
+  requestedVariant: RuntimeVariantSelection;
+}): RuntimeStatusRow[] {
+  const { t, acceleration, requestedAcceleration, requestedVariant } = input;
+
+  return [
+    { label: t('provider'), value: 'faster-whisper', tone: 'accent' },
+    {
+      label: t('requestedAcceleration'),
+      value: t(accelerationOptionLabel(acceleration?.requested ?? requestedAcceleration)),
+      tone: 'accent'
+    },
+    {
+      label: t('selectedAcceleration'),
+      value: acceleration ? t(accelerationOptionLabel(acceleration.selected)) : t('notChecked'),
+      tone: acceleration?.selected === 'gpu' ? 'good' : acceleration ? 'accent' : 'muted'
+    },
+    {
+      label: t('runtimeVariant'),
+      value: t(runtimeVariantOptionLabel(acceleration?.runtimeVariant ?? requestedVariant)),
+      tone: acceleration?.runtimeVariant === 'cuda' ? 'good' : acceleration ? 'accent' : 'muted'
+    },
+    {
+      label: t('fallbackReason'),
+      value: acceleration?.fallbackReason ? fallbackReasonLabel(acceleration.fallbackReason, t, requestedVariant) : t('none'),
+      tone: acceleration?.fallbackReason ? 'warn' : 'muted'
+    }
+  ];
+}
+
 function summarizeJobEventForLog(event: JobEvent): Record<string, unknown> {
   if (event.type === 'snapshot') {
     return {
@@ -3267,12 +3638,11 @@ function deriveWorkspaceRuntimeDetail(input: {
   t: (key: string) => string;
   asrProviderId: string;
   asrHealth?: ProviderHealth;
-  useCuda: boolean;
   runtimeState: DerivedHealthState;
   ffmpegStatus?: FfmpegStatus;
   nativeHealth?: NativeHealth;
 }): string {
-  const { t, asrProviderId, asrHealth, useCuda, runtimeState, ffmpegStatus, nativeHealth } = input;
+  const { t, asrProviderId, asrHealth, runtimeState, ffmpegStatus, nativeHealth } = input;
   const ffmpegAvailable = ffmpegStatus?.available ?? Boolean(nativeHealth?.ffmpegAvailable && nativeHealth?.ffprobeAvailable);
   if (!ffmpegAvailable || asrProviderId !== 'local.faster-whisper') {
     return runtimeState.detail;
@@ -3280,26 +3650,35 @@ function deriveWorkspaceRuntimeDetail(input: {
   if (!asrHealth) {
     return t('fasterWhisperWorkspaceSetupHint');
   }
-  if (asrHealth.ok) {
-    return t(useCuda ? 'fasterWhisperWorkspaceReadyCuda' : 'fasterWhisperWorkspaceReadyCpu');
+  switch (
+    deriveFasterWhisperWorkspaceMode({
+      ok: asrHealth.ok,
+      status: asrHealth.status,
+      acceleration: asrHealth.acceleration
+    })
+  ) {
+    case 'cuda-ready':
+      return t('fasterWhisperWorkspaceReadyCuda');
+    case 'cpu-ready':
+      return t('fasterWhisperWorkspaceReadyCpu');
+    case 'cuda-fallback':
+      return t('fasterWhisperWorkspaceCudaFallback');
+    default:
+      return t('fasterWhisperWorkspaceSetupHint');
   }
-  if (useCuda && asrHealth.status === 'degraded') {
-    return t('fasterWhisperWorkspaceCudaFallback');
-  }
-  return t('fasterWhisperWorkspaceSetupHint');
 }
 
 function describeLocalWhisperTestResult(status: WhisperRuntimeStatus, t: (key: string) => string): string {
+  if (status.actionRequired === 'unsupported-platform') {
+    return t(runtimeActionLabel(status.actionRequired));
+  }
   if (!status.binary.verified) {
     return t('runtimeBinaryMissingDetail');
   }
   if (!status.model.verified) {
     return t('runtimeModelMissingDetail');
   }
-  if (status.acceleration.requested === 'gpu') {
-    return describeCudaStatusDetail(status, t);
-  }
-  return t('runtimeReady');
+  return describeWhisperAccelerationDetail(status, t);
 }
 
 function describeSelectedModelResult(
@@ -3339,7 +3718,31 @@ function describeCudaStatusDetail(
   if (!status.acceleration.hardwareDetected) {
     return t('cudaNoHardware');
   }
-  return status.acceleration.fallbackReason ?? t('cudaUnavailable');
+  return fallbackReasonLabel(status.acceleration.fallbackReason, t, 'cuda');
+}
+
+function describeWhisperAccelerationDetail(
+  status: WhisperRuntimeStatus | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string,
+  ignoreMismatch = false
+): string {
+  if (!status) return t('runtimeNotChecked');
+  if (status.acceleration.selected === 'gpu') {
+    switch (status.acceleration.runtimeVariant) {
+      case 'cuda':
+        return describeCudaStatusDetail(status, t, ignoreMismatch);
+      case 'metal':
+        return t('metalDetected');
+      case 'vulkan':
+        return t('vulkanExperimental');
+      default:
+        return t('gpuDetected');
+    }
+  }
+  if (status.acceleration.fallbackReason) {
+    return fallbackReasonLabel(status.acceleration.fallbackReason, t);
+  }
+  return t('runtimeReady');
 }
 
 function describeCudaStatusShort(
@@ -3360,6 +3763,24 @@ function hasBlockingCudaMismatch(status: WhisperRuntimeStatus | undefined, ignor
   const required = status.acceleration.requiredCudaVersion;
   const current = status.acceleration.runtimeCudaVersion;
   return Boolean(required && current && required !== current);
+}
+
+function fallbackReasonLabel(
+  code: string | undefined,
+  t: (key: string) => string,
+  variant: RuntimeVariantSelection = 'auto'
+): string {
+  const isCudaVariant = variant === 'cuda';
+  if (code === 'gpu-runtime-missing') return isCudaVariant ? t('cudaRuntimeMissing') : t('gpuUnavailable');
+  if (code === 'gpu-not-detected') return isCudaVariant ? t('cudaNoHardware') : t('gpuNoHardware');
+  if (
+    code === 'gpu-not-compatible' ||
+    code === 'preferred-variant-unavailable' ||
+    code === 'gpu-variant-unavailable'
+  ) {
+    return isCudaVariant ? t('cudaUnavailable') : t('gpuUnavailable');
+  }
+  return isCudaVariant ? t('cudaUnavailable') : t('gpuUnavailable');
 }
 
 function describeFfmpegStatusDetail(
@@ -3512,6 +3933,7 @@ function isRuntimeWarningCode(code: string): boolean {
     'download-model',
     'download-cuda-runtime',
     'manifest-not-configured',
+    'unsupported-platform',
     'pin-manifest-hashes'
   ].includes(code);
 }
@@ -3787,14 +4209,14 @@ function deriveRuntimeState(input: {
   if (!runtimeStatus) {
     return { tone: 'muted', label: t('notChecked'), detail: t('runtimeNotChecked') };
   }
+  const experimentalGpuPath =
+    runtimeStatus.acceleration.selected === 'gpu' &&
+    isExperimentalWhisperRuntimeVariant(runtimeStatus.acceleration.runtimeVariant);
   if (runtimeStatus.binary.verified && runtimeStatus.model.verified) {
     return {
-      tone: 'good',
-      label: t('installed'),
-      detail:
-        runtimeStatus.acceleration.requested === 'gpu'
-          ? describeCudaStatusDetail(runtimeStatus, t)
-          : t('runtimeReady')
+      tone: experimentalGpuPath ? 'warn' : 'good',
+      label: t(experimentalGpuPath ? 'experimental' : 'installed'),
+      detail: describeWhisperAccelerationDetail(runtimeStatus, t)
     };
   }
   if (!runtimeStatus.binary.verified) {
@@ -3803,6 +4225,7 @@ function deriveRuntimeState(input: {
       label: t(runtimeActionLabel(runtimeStatus.actionRequired ?? 'download-runtime')),
       detail:
         runtimeStatus.actionRequired === 'manifest-not-configured' ||
+        runtimeStatus.actionRequired === 'unsupported-platform' ||
         runtimeStatus.actionRequired === 'pin-manifest-hashes'
           ? t(runtimeActionLabel(runtimeStatus.actionRequired))
           : t('runtimeBinaryMissingDetail')
@@ -3830,22 +4253,35 @@ function deriveBackendAccelerationState(input: {
   t: (key: string) => string;
   runtimeStatus?: WhisperRuntimeStatus;
   asrProviderId: string;
-  useCuda: boolean;
 }): DerivedHealthState {
-  const { t, runtimeStatus, asrProviderId, useCuda } = input;
+  const { t, runtimeStatus, asrProviderId } = input;
   if (asrProviderId !== 'local.whisper.cpp') {
     return { tone: 'muted', label: t('unknown'), detail: t('localWhisperNotRequiredDetail') };
-  }
-  if (!useCuda) {
-    return { tone: 'accent', label: 'CPU', detail: t('cudaDisabledUsesCpu') };
   }
   if (!runtimeStatus || !runtimeStatus.binary.verified || !runtimeStatus.model.verified) {
     return { tone: 'muted', label: t('unknown'), detail: t('runtimeNotChecked') };
   }
-  if (useCuda && runtimeStatus.acceleration.selected === 'gpu') {
-    return { tone: 'good', label: 'CUDA', detail: t('cudaDetected') };
+
+  const selectedVariant =
+    runtimeStatus.acceleration.selected === 'gpu' ? runtimeStatus.acceleration.runtimeVariant : ('cpu' as const);
+
+  if (runtimeStatus.acceleration.selected === 'gpu') {
+    return {
+      tone: isVerifiedWhisperGpuRuntimeVariant(selectedVariant) ? 'good' : 'warn',
+      label: t(runtimeVariantOptionLabel(selectedVariant)),
+      detail: describeWhisperAccelerationDetail(runtimeStatus, t)
+    };
   }
-  return { tone: 'accent', label: 'CPU', detail: t('runtimeReady') };
+
+  if (runtimeStatus.acceleration.requested === 'cpu') {
+    return { tone: 'accent', label: t('cpuOption'), detail: t('gpuDisabledUsesCpu') };
+  }
+
+  return {
+    tone: runtimeStatus.acceleration.fallbackReason ? 'warn' : 'accent',
+    label: t('cpuOption'),
+    detail: describeWhisperAccelerationDetail(runtimeStatus, t)
+  };
 }
 
 function deriveRuntimeModelState(input: {
@@ -3871,6 +4307,13 @@ function deriveRuntimeModelState(input: {
   if (runtimeStatus.actionRequired === 'manifest-not-configured') {
     return {
       tone: runtimeStatus.binary.verified ? 'warn' : 'error',
+      label: t(runtimeActionLabel(runtimeStatus.actionRequired)),
+      detail: t(runtimeActionLabel(runtimeStatus.actionRequired))
+    };
+  }
+  if (runtimeStatus.actionRequired === 'unsupported-platform') {
+    return {
+      tone: 'error',
       label: t(runtimeActionLabel(runtimeStatus.actionRequired)),
       detail: t(runtimeActionLabel(runtimeStatus.actionRequired))
     };

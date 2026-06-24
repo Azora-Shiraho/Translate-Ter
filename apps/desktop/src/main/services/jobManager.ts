@@ -19,7 +19,9 @@ import { validateAsrRequest } from './asrProviders';
 import { resolveLocalInferenceThreadCount } from './localInferenceProfile';
 import type { FasterWhisperService } from './fasterWhisperService';
 import type { NativeBackendClient } from './nativeBackendClient';
+import { createNativeRuntimePayload } from './nativeTranscribePayload';
 import type { SettingsStore } from './settingsStore';
+import { resolveFasterWhisperRequestOptions } from './fasterWhisperRuntimeOptions';
 import type { WhisperAssetManager } from './whisperAssets';
 
 export class JobManager extends EventEmitter {
@@ -40,6 +42,13 @@ export class JobManager extends EventEmitter {
     validateAsrRequest(request);
     const jobId = `job-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
+    const resolvedFasterWhisper = resolveFasterWhisperRequestOptions({
+      preferCuda: Boolean(request.localWhisperUseCuda),
+      localAsrAcceleration: request.localAsrAcceleration,
+      preferredRuntimeVariant: request.preferredRuntimeVariant
+    });
+    const localAsrAcceleration = resolvedFasterWhisper.acceleration;
+    const preferredRuntimeVariant = resolvedFasterWhisper.preferredVariant;
     const job: JobSnapshot = {
       id: jobId,
       mediaPath: request.mediaPath,
@@ -51,7 +60,9 @@ export class JobManager extends EventEmitter {
       targetLanguage: canonicalTargetLanguageCode(request.targetLanguage),
       asrProviderId: request.asrProviderId,
       whisperModelId: request.whisperModelId,
-      localWhisperUseCuda: request.localWhisperUseCuda ?? false,
+      localWhisperUseCuda: resolvedFasterWhisper.preferCuda,
+      localAsrAcceleration,
+      preferredRuntimeVariant,
       localAsrCpuMode: request.localAsrCpuMode ?? 'balanced',
       localWhisperIgnoreCudaMismatch: request.localWhisperIgnoreCudaMismatch ?? false,
       allowWhisperAssetDownload: request.allowWhisperAssetDownload ?? true,
@@ -97,6 +108,8 @@ export class JobManager extends EventEmitter {
             modelId: job.whisperModelId,
             allowDownload: false,
             preferCuda: job.localWhisperUseCuda,
+            localAsrAcceleration: job.localAsrAcceleration,
+            preferredRuntimeVariant: job.preferredRuntimeVariant,
             ignoreCudaMismatch: job.localWhisperIgnoreCudaMismatch,
             downloadScope: 'none'
           })
@@ -112,7 +125,7 @@ export class JobManager extends EventEmitter {
           job,
           runtimeActionToErrorCode(runtime.actionRequired),
           runtime.message ?? 'Local recognition needs to be set up before starting.',
-          runtime.actionRequired !== 'manifest-not-configured'
+          runtime.actionRequired !== 'manifest-not-configured' && runtime.actionRequired !== 'unsupported-platform'
         );
         return;
       }
@@ -169,6 +182,8 @@ export class JobManager extends EventEmitter {
           targetLanguage: job.targetLanguage,
           modelId: job.whisperModelId,
           preferCuda: job.localWhisperUseCuda,
+          localAsrAcceleration: job.localAsrAcceleration,
+          preferredRuntimeVariant: job.preferredRuntimeVariant,
           cpuThreadCount,
           allowDownload: job.allowWhisperAssetDownload,
           useMultiThreadDownload: currentSettings.enableMultiThreadDownload
@@ -182,6 +197,25 @@ export class JobManager extends EventEmitter {
       }
 
       const cpuThreadCount = resolveLocalInferenceThreadCount(job.localAsrCpuMode);
+      const useCudaForNativeWhisper = runtime?.acceleration.selected === 'gpu';
+      const nativeRuntimePayload =
+        runtime && job.asrProviderId === 'local.whisper.cpp'
+          ? createNativeRuntimePayload({
+              provider: 'whisper.cpp',
+              variant: runtime.acceleration.runtimeVariant,
+              binaryPath: runtime.binary.expectedPath,
+              modelPath: runtime.model.expectedPath
+            })
+          : undefined;
+      const cpuRetryRuntimePayload =
+        runtime && job.asrProviderId === 'local.whisper.cpp'
+          ? createNativeRuntimePayload({
+              provider: 'whisper.cpp',
+              variant: 'cpu',
+              binaryPath: runtime.binary.expectedPath,
+              modelPath: runtime.model.expectedPath
+            })
+          : undefined;
       const response = await this.nativeBackend.transcribe({
         jobId: job.id,
         mediaPath: job.mediaPath,
@@ -190,19 +224,20 @@ export class JobManager extends EventEmitter {
         sourceLanguage: job.sourceLanguage,
         targetLanguage: job.targetLanguage,
         asrProviderId: job.asrProviderId,
-        preferCuda: job.localWhisperUseCuda,
+        preferCuda: useCudaForNativeWhisper ?? job.localWhisperUseCuda,
         cpuThreadCount,
-        runtime: runtime
-          ? {
-              binaryPath: runtime.binary.expectedPath,
-              modelPath: runtime.model.expectedPath
-            }
-          : undefined
+        binaryPath: nativeRuntimePayload?.binaryPath,
+        modelPath: nativeRuntimePayload?.modelPath,
+        runtime: nativeRuntimePayload?.runtime
       });
       if (this.isCancelled(job.id)) return;
 
       if (!response.ok) {
-        const shouldRetryOnCpu = shouldRetryLocalWhisperOnCpu(job, response.error);
+        const shouldRetryOnCpu = shouldRetryLocalWhisperOnCpu(
+          job,
+          useCudaForNativeWhisper ?? job.localWhisperUseCuda,
+          response.error
+        );
         if (shouldRetryOnCpu) {
           job.warnings.push({
             code: 'CudaTranscriptionCrashFallback',
@@ -221,12 +256,9 @@ export class JobManager extends EventEmitter {
             asrProviderId: job.asrProviderId,
             preferCuda: false,
             cpuThreadCount,
-            runtime: runtime
-              ? {
-                  binaryPath: runtime.binary.expectedPath,
-                  modelPath: runtime.model.expectedPath
-                }
-              : undefined
+            binaryPath: cpuRetryRuntimePayload?.binaryPath,
+            modelPath: cpuRetryRuntimePayload?.modelPath,
+            runtime: cpuRetryRuntimePayload?.runtime
           });
           if (this.isCancelled(job.id)) return;
           if (cpuRetry.ok) {
@@ -271,8 +303,16 @@ export class JobManager extends EventEmitter {
       await this.setProgress(job, 'completed', 100, 'Recognition is complete.');
     } catch (error) {
       if (this.isCancelled(job.id)) return;
+      const code =
+        typeof error === 'object' && error && 'code' in error
+          ? String((error as { code?: unknown }).code ?? 'DownloadRequired')
+          : 'DownloadRequired';
+      const retryable =
+        typeof error === 'object' && error && 'retryable' in error
+          ? Boolean((error as { retryable?: unknown }).retryable)
+          : true;
       const message = error instanceof Error ? error.message : String(error);
-      this.fail(job, 'DownloadRequired', message, true);
+      this.fail(job, code, message, retryable);
     }
   }
 
@@ -485,8 +525,16 @@ export class JobManager extends EventEmitter {
   }
 }
 
-function runtimeActionToErrorCode(action: NonNullable<JobSnapshot['error']>['code'] | string): 'ManifestNotConfigured' | 'DownloadRequired' {
-  return action === 'manifest-not-configured' ? 'ManifestNotConfigured' : 'DownloadRequired';
+function runtimeActionToErrorCode(
+  action: NonNullable<JobSnapshot['error']>['code'] | string
+): 'ManifestNotConfigured' | 'DownloadRequired' | 'UnsupportedPlatform' {
+  if (action === 'manifest-not-configured') {
+    return 'ManifestNotConfigured';
+  }
+  if (action === 'unsupported-platform') {
+    return 'UnsupportedPlatform';
+  }
+  return 'DownloadRequired';
 }
 
 function nativePayloadToDocument(payload: unknown, job: JobSnapshot): SubtitleDocument | undefined {
@@ -588,9 +636,10 @@ function translationProviderIdFromPriority(priority: string[]): string {
 
 function shouldRetryLocalWhisperOnCpu(
   job: JobSnapshot,
+  attemptedGpu: boolean,
   error?: { code?: string; message?: string; retryable?: boolean }
 ): boolean {
-  if (job.asrProviderId !== 'local.whisper.cpp' || !job.localWhisperUseCuda) {
+  if (job.asrProviderId !== 'local.whisper.cpp' || !attemptedGpu) {
     return false;
   }
   const message = error?.message?.toLowerCase() ?? '';

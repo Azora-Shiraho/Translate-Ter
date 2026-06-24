@@ -1,3 +1,7 @@
+if(NOT WIN32)
+  message(FATAL_ERROR "apps/native-host is Windows-only and must not be configured on ${CMAKE_SYSTEM_NAME}.")
+endif()
+
 add_executable(TranslateTer WIN32
   src/main.cpp
 )

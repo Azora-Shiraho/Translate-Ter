@@ -4,9 +4,16 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { chmodSync, existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { canonicalSourceLanguageCode, canonicalTargetLanguageCode } from '@shared/languages';
-import type { AppLogLevel, AppSettingsPatch, AppSettingsPublic, ProviderSecretInput } from '@shared/models';
+import type {
+  AppLogLevel,
+  AppSettingsPatch,
+  AppSettingsPublic,
+  LocalAsrAcceleration,
+  ProviderSecretInput,
+  RuntimeVariant
+} from '@shared/models';
 
-const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = {
+const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda' | 'localAsrAcceleration' | 'preferredRuntimeVariant'> = {
   schemaVersion: 1,
   uiLanguage: 'en-US',
   theme: 'system',
@@ -16,6 +23,9 @@ const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = 
   asrProviderId: 'local.whisper.cpp',
   whisperModelId: 'ggml-base',
   localAsrCpuMode: 'balanced',
+  localAsrCompatibilityOverrides: {
+    ignoreCudaMismatch: false
+  },
   localWhisperIgnoreCudaMismatch: false,
   allowWhisperAssetDownload: true,
   enableMultiThreadDownload: false,
@@ -28,7 +38,8 @@ const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda'> = 
   translationBatchStride: 4,
   exportDestinationMode: 'source-directory',
   exportDirectory: '',
-  exportBilingualOrder: 'source-first'
+  exportBilingualOrder: 'source-first',
+  exportFileFormat: 'srt'
 };
 
 export class SettingsStore {
@@ -38,7 +49,8 @@ export class SettingsStore {
     const defaults = await this.defaults();
     try {
       const raw = await readFile(this.settingsPath(), 'utf8');
-      return normalizeSettings({ ...defaults, ...(JSON.parse(raw) as AppSettingsPublic), schemaVersion: 1 });
+      const parsed = JSON.parse(raw) as SettingsSource;
+      return normalizeSettings({ ...defaults, ...(parsed as Partial<AppSettingsPublic>), schemaVersion: 1 }, parsed, 'load');
     } catch {
       await this.write(defaults);
       return defaults;
@@ -84,7 +96,7 @@ export class SettingsStore {
         defaults.translationBatchStride
       )
     };
-    const normalized = normalizeSettings(next);
+    const normalized = normalizeSettings(next, patch as SettingsSource, 'update');
     await this.write(normalized);
     return normalized;
   }
@@ -135,9 +147,11 @@ export class SettingsStore {
 
   private async defaults(): Promise<AppSettingsPublic> {
     if (!this.defaultsPromise) {
+      const localWhisperUseCuda = detectCudaSupport();
       this.defaultsPromise = Promise.resolve({
         ...STATIC_DEFAULT_SETTINGS,
-        localWhisperUseCuda: detectCudaSupport()
+        ...deriveAsrSettingsFromLegacy(localWhisperUseCuda),
+        localWhisperUseCuda
       });
     }
     return this.defaultsPromise;
@@ -159,17 +173,70 @@ export class SettingsStore {
   }
 }
 
-function normalizeSettings(settings: AppSettingsPublic): AppSettingsPublic {
+type SettingsNormalizationMode = 'default' | 'load' | 'update';
+
+type SettingsSource = {
+  localAsrAcceleration?: unknown;
+  preferredRuntimeVariant?: unknown;
+  localWhisperUseCuda?: unknown;
+  localWhisperIgnoreCudaMismatch?: unknown;
+  localAsrCompatibilityOverrides?: { ignoreCudaMismatch?: unknown } | unknown;
+} & Record<string, unknown>;
+
+function normalizeSettings(
+  settings: AppSettingsPublic,
+  source?: SettingsSource,
+  mode: SettingsNormalizationMode = 'default'
+): AppSettingsPublic {
   const usingCloudAsr = settings.asrProviderId === 'cloud.openai';
+  const hasNewAccelerationFields = hasOwn(source, 'localAsrAcceleration') || hasOwn(source, 'preferredRuntimeVariant');
+  const hasLegacyAccelerationField = hasOwn(source, 'localWhisperUseCuda');
+  const hasNewCompatibilityField = hasOwn(source, 'localAsrCompatibilityOverrides');
+  const hasLegacyCompatibilityField = hasOwn(source, 'localWhisperIgnoreCudaMismatch');
+  const legacyUseCuda = Boolean(settings.localWhisperUseCuda);
+  const legacyAcceleration = deriveAsrSettingsFromLegacy(legacyUseCuda);
+  const localAsrAcceleration = resolveLocalAsrAcceleration(settings, source, legacyAcceleration, hasNewAccelerationFields);
+  const preferredRuntimeVariant = resolvePreferredRuntimeVariant(
+    settings,
+    source,
+    mode,
+    legacyAcceleration,
+    localAsrAcceleration,
+    hasNewAccelerationFields,
+    hasLegacyAccelerationField
+  );
+  const ignoreCudaMismatch = resolveIgnoreCudaMismatch(
+    settings,
+    source,
+    hasNewCompatibilityField,
+    hasLegacyCompatibilityField
+  );
+
   return {
     ...settings,
     allowCloudAsrUpload: usingCloudAsr ? true : Boolean(settings.allowCloudAsrUpload),
     logLevel: normalizeAppLogLevel(settings.logLevel),
+    localAsrAcceleration,
     localAsrCpuMode: normalizeLocalAsrCpuMode(settings.localAsrCpuMode),
-    localWhisperIgnoreCudaMismatch: Boolean(settings.localWhisperIgnoreCudaMismatch),
+    localAsrCompatibilityOverrides: {
+      ignoreCudaMismatch
+    },
+    localWhisperUseCuda: mirrorLegacyUseCuda(
+      legacyUseCuda,
+      localAsrAcceleration,
+      preferredRuntimeVariant,
+      hasNewAccelerationFields
+    ),
+    localWhisperIgnoreCudaMismatch: ignoreCudaMismatch,
+    preferredRuntimeVariant,
     sourceLanguage: canonicalSourceLanguageCode(settings.sourceLanguage),
-    targetLanguage: canonicalTargetLanguageCode(settings.targetLanguage)
+    targetLanguage: canonicalTargetLanguageCode(settings.targetLanguage),
+    exportFileFormat: normalizeSubtitleFileFormat(settings.exportFileFormat)
   };
+}
+
+function normalizeSubtitleFileFormat(value: unknown): 'srt' | 'ass' {
+  return value === 'ass' ? 'ass' : 'srt';
 }
 
 function detectCudaSupport(): boolean {
@@ -230,10 +297,137 @@ function clampPositiveInteger(value: number, min: number, max: number, fallback:
   return Math.max(min, Math.min(max, Math.round(value)));
 }
 
+function deriveAsrSettingsFromLegacy(useCuda: boolean): Pick<AppSettingsPublic, 'localAsrAcceleration' | 'preferredRuntimeVariant'> {
+  return useCuda
+    ? {
+        localAsrAcceleration: 'gpu',
+        preferredRuntimeVariant: 'cuda'
+      }
+    : {
+        localAsrAcceleration: 'cpu',
+        preferredRuntimeVariant: 'cpu'
+      };
+}
+
+function resolveLocalAsrAcceleration(
+  settings: AppSettingsPublic,
+  source: SettingsSource | undefined,
+  legacyAcceleration: Pick<AppSettingsPublic, 'localAsrAcceleration' | 'preferredRuntimeVariant'>,
+  hasNewAccelerationFields: boolean
+): LocalAsrAcceleration {
+  if (hasNewAccelerationFields && hasOwn(source, 'localAsrAcceleration')) {
+    return normalizeLocalAsrAcceleration(source?.localAsrAcceleration) ?? legacyAcceleration.localAsrAcceleration;
+  }
+
+  if (!hasNewAccelerationFields && hasOwn(source, 'localWhisperUseCuda')) {
+    return legacyAcceleration.localAsrAcceleration;
+  }
+
+  return normalizeLocalAsrAcceleration(settings.localAsrAcceleration) ?? legacyAcceleration.localAsrAcceleration;
+}
+
+function resolvePreferredRuntimeVariant(
+  settings: AppSettingsPublic,
+  source: SettingsSource | undefined,
+  mode: SettingsNormalizationMode,
+  legacyAcceleration: Pick<AppSettingsPublic, 'localAsrAcceleration' | 'preferredRuntimeVariant'>,
+  localAsrAcceleration: LocalAsrAcceleration,
+  hasNewAccelerationFields: boolean,
+  hasLegacyAccelerationField: boolean
+): RuntimeVariant | undefined {
+  if (hasNewAccelerationFields) {
+    if (hasOwn(source, 'preferredRuntimeVariant')) {
+      return normalizeRuntimeVariant(source?.preferredRuntimeVariant) ?? legacyAcceleration.preferredRuntimeVariant;
+    }
+
+    if (hasOwn(source, 'localAsrAcceleration') && localAsrAcceleration === 'auto') {
+      return undefined;
+    }
+
+    return mode === 'update' ? normalizeRuntimeVariant(settings.preferredRuntimeVariant) : undefined;
+  }
+
+  if (hasLegacyAccelerationField) {
+    return legacyAcceleration.preferredRuntimeVariant;
+  }
+
+  return normalizeRuntimeVariant(settings.preferredRuntimeVariant);
+}
+
+function resolveIgnoreCudaMismatch(
+  settings: AppSettingsPublic,
+  source: SettingsSource | undefined,
+  hasNewCompatibilityField: boolean,
+  hasLegacyCompatibilityField: boolean
+): boolean {
+  if (hasNewCompatibilityField) {
+    return readIgnoreCudaMismatch(source?.localAsrCompatibilityOverrides) ?? Boolean(settings.localWhisperIgnoreCudaMismatch);
+  }
+
+  if (hasLegacyCompatibilityField) {
+    return Boolean(settings.localWhisperIgnoreCudaMismatch);
+  }
+
+  return readIgnoreCudaMismatch(settings.localAsrCompatibilityOverrides) ?? Boolean(settings.localWhisperIgnoreCudaMismatch);
+}
+
+function mirrorLegacyUseCuda(
+  currentLegacyValue: boolean,
+  localAsrAcceleration: LocalAsrAcceleration,
+  preferredRuntimeVariant: RuntimeVariant | undefined,
+  hasNewAccelerationFields: boolean
+): boolean {
+  if (!hasNewAccelerationFields) {
+    return currentLegacyValue;
+  }
+
+  const mirrored = mapLegacyUseCuda(localAsrAcceleration, preferredRuntimeVariant);
+  return mirrored ?? currentLegacyValue;
+}
+
+function mapLegacyUseCuda(
+  localAsrAcceleration: LocalAsrAcceleration,
+  preferredRuntimeVariant: RuntimeVariant | undefined
+): boolean | undefined {
+  if (localAsrAcceleration === 'gpu' && preferredRuntimeVariant === 'cuda') {
+    return true;
+  }
+
+  if (localAsrAcceleration === 'cpu' && preferredRuntimeVariant === 'cpu') {
+    return false;
+  }
+
+  return undefined;
+}
+
 function normalizeLocalAsrCpuMode(value: AppSettingsPublic['localAsrCpuMode'] | undefined): AppSettingsPublic['localAsrCpuMode'] {
   return value === 'low' || value === 'high' ? value : 'balanced';
 }
 
+function normalizeLocalAsrAcceleration(value: unknown): LocalAsrAcceleration | undefined {
+  return value === 'auto' || value === 'cpu' || value === 'gpu' ? value : undefined;
+}
+
+function normalizeRuntimeVariant(value: unknown): RuntimeVariant | undefined {
+  return value === 'cpu' || value === 'cuda' || value === 'metal' || value === 'vulkan' ? value : undefined;
+}
+
 function normalizeAppLogLevel(value: AppLogLevel | undefined): AppLogLevel {
   return value === 'debug' || value === 'info' || value === 'error' ? value : 'warning';
+}
+
+function readIgnoreCudaMismatch(value: unknown): boolean | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(value, 'ignoreCudaMismatch')) {
+    return undefined;
+  }
+
+  return Boolean((value as { ignoreCudaMismatch?: unknown }).ignoreCudaMismatch);
+}
+
+function hasOwn(value: object | undefined, key: PropertyKey): boolean {
+  return Boolean(value) && Object.prototype.hasOwnProperty.call(value, key);
 }

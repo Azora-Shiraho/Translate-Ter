@@ -82,6 +82,41 @@ Electron main, not the backend, owns manifest download and SHA-256 verification.
 It also reports `ffmpegAvailable` and `ffprobeAvailable` from the native
 process PATH.
 
+The payload now includes `accelerators`, an array describing native accelerator
+variants that the backend can report:
+
+```json
+[
+  {
+    "variant": "cuda",
+    "hardwareDetected": true,
+    "runtimeDetected": true,
+    "supported": true,
+    "message": "Optional human-readable detail."
+  },
+  {
+    "variant": "metal",
+    "hardwareDetected": false,
+    "runtimeDetected": false,
+    "supported": false
+  },
+  {
+    "variant": "vulkan",
+    "hardwareDetected": false,
+    "runtimeDetected": false,
+    "supported": false
+  }
+]
+```
+
+For CUDA, `hardwareDetected` and `runtimeDetected` are lightweight best-effort
+signals split from the existing probes; `supported` follows the existing backend
+CUDA detection logic for compatibility. Metal and Vulkan may conservatively
+report `supported: false` until the backend grows dedicated detection. The
+legacy fields `cudaSupported`, `hardwareAcceleration`, and
+`recommendedLocalAcceleration` remain part of `runtime.health` for compatibility
+and must not be removed by clients.
+
 `media.probe` accepts:
 
 ```json
@@ -155,19 +190,61 @@ It returns a `document` payload with parsed segments.
   "targetLanguage": "zh-CN",
   "asrProviderId": "local.whisper.cpp",
   "runtime": {
+    "provider": "whisper.cpp",
+    "variant": "cpu",
     "binaryPath": "D:/userData/runtime/whisper/bin/whisper-cli.exe",
-    "modelPath": "D:/userData/runtime/whisper/models/ggml-base.bin"
+    "modelPath": "D:/userData/runtime/whisper/models/ggml-base.bin",
+    "libraryPaths": ["D:/userData/runtime/whisper/bin"],
+    "env": {
+      "WHISPER_CACHE_DIR": "D:/userData/runtime/whisper/cache"
+    }
   },
+  "binaryPath": "D:/userData/runtime/whisper/bin/whisper-cli.exe",
+  "modelPath": "D:/userData/runtime/whisper/models/ggml-base.bin",
+  "preferCuda": false,
   "ffmpegPath": "D:/tools/ffmpeg.exe",
   "outputDir": "D:/tmp/translate-ter/job-123/asr"
 }
 ```
 
-The backend accepts `binaryPath` and `modelPath` anywhere in the request object
-so current Electron payloads with nested `runtime` work. Electron main must
-only send these paths after manifest pinning, local file existence checks, and
-SHA-256 verification. The native backend checks existence but does not trust or
-download assets.
+`runtime.provider` currently accepts `whisper.cpp`, `faster-whisper`, `mlx`,
+and `coreml` at the contract level, but the C++ backend only executes
+`whisper.cpp`. Other providers return `UnsupportedCommand` and must keep using
+their existing Electron main services.
+
+`runtime.variant` supports `cpu`, `cuda`, `metal`, and `vulkan`. For
+`whisper.cpp`, the backend treats `cpu` as a forced CPU run and adds `-ng` to
+the CLI command. For `cuda`, `metal`, and `vulkan`, it does not add `-ng`. If
+`runtime.variant` is missing, the backend falls back to the legacy `preferCuda`
+flag and preserves existing behavior.
+
+`runtime.libraryPaths` and `runtime.env` are optional runtime launch hints for
+Electron main to pass through. The backend uses them only to augment the native
+child process environment; it does not resolve downloads, manifests, or trust.
+
+Legacy compatibility remains enabled:
+
+- `preferCuda` may still be sent and still works as the fallback selector when
+  `runtime.variant` is absent.
+- `runtime.binaryPath` and `runtime.modelPath` from the older nested structure
+  still work.
+- top-level `binaryPath` and `modelPath` still work and are preserved for
+  compatibility.
+
+Electron main must assemble the `runtime` object and must only send managed
+executable or model paths after manifest pinning, local file existence checks,
+and SHA-256 verification. The current exception is a darwin-arm64 system
+`whisper-cli`, which may be sent after a successful executable probe. Renderer
+code does not assemble runtime internals. The native backend checks existence
+but does not trust or download assets.
+
+For `local.whisper.cpp` on `darwin-arm64`, the initial `metal` runtime path may
+also come from a system `whisper-cli` discovered on `PATH`. This does not add
+new protocol fields: Electron main still sends the same `runtime.provider`,
+`runtime.variant`, `runtime.binaryPath`, and `runtime.modelPath`. The only
+difference is trust policy inside Electron main: managed runtimes stay
+SHA-256-pinned, while a system `metal` runtime is accepted only after an
+executable probe succeeds and is not auto-downloaded or unpacked by the app.
 
 For `local.whisper.cpp`, the backend invokes whisper.cpp CLI with `-osrt` and
 parses the generated SRT into the shared subtitle document shape. Non-WAV input
@@ -179,10 +256,11 @@ used for development UI fallback and is explicit in the request.
 
 ## Runtime Download Strategy
 
-`resources/whisper-manifest.json` is a disabled sample. A production or local
-test manifest must set `enabled: true`, include per-platform runtime entries,
-and pin every executable/model with a non-zero SHA-256 digest before download or
-execution is allowed.
+The checked-in `resources/whisper-manifest.json` is enabled for the current
+validation flow. Windows CPU/CUDA runtime entries and model entries already use
+real URLs plus pinned SHA-256 values. The managed Linux/macOS runtime entries
+still contain placeholder metadata until verified distribution URLs and hashes
+are supplied.
 
 Electron main is responsible for:
 
@@ -191,8 +269,9 @@ Electron main is responsible for:
 - downloading to a temporary file;
 - verifying SHA-256 against the manifest;
 - atomically moving verified files into `userData/runtime/whisper`;
-- passing verified `binaryPath`, `modelPath`, and optional `ffmpegPath` to the
-  backend.
+- assembling the runtime payload and passing verified `binaryPath`,
+  `modelPath`, optional `runtime.libraryPaths`, optional `runtime.env`, and
+  optional `ffmpegPath` to the backend.
 
 The backend returns `DownloadRequired` or `MissingRuntime` when verified paths
 are absent. It does not fetch URLs from the manifest and does not execute

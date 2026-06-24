@@ -11,13 +11,18 @@ import type {
   FasterWhisperCudaRequest,
   FasterWhisperCudaStatus,
   FasterWhisperRuntimeRequest,
+  FasterWhisperRuntimeStatus,
+  LocalAsrAcceleration,
   ProviderHealth,
+  ProviderAccelerationStatus,
+  RuntimeVariant,
   SubtitleDocument,
   SubtitleSegment,
   SubtitleWarning,
   WhisperModelInfo
 } from '@shared/models';
 import { legacyWhisperCudaRuntimeDirs, sharedCudaRuntimeDir } from './cudaRuntimePaths';
+import { resolveFasterWhisperAccelerationStatus } from './fasterWhisperRuntimeOptions';
 import type { ScopedLogger } from './logger';
 
 type CudaRedistribManifest = {
@@ -66,6 +71,19 @@ type FasterWhisperTranscriptionResponse = {
   segments: FasterWhisperSegment[];
 };
 
+type FasterWhisperRunnerError = Error & {
+  code?: string;
+  retryable?: boolean;
+};
+
+type FasterWhisperRunnerFailure = {
+  ok: false;
+  errorMessage: string;
+  message?: string;
+  code?: string;
+  retryable?: boolean;
+};
+
 type DetectedRuntime =
   | {
       ok: true;
@@ -88,6 +106,8 @@ export type FasterWhisperTranscriptionRequest = {
   targetLanguage: string;
   modelId: string;
   preferCuda: boolean;
+  localAsrAcceleration?: LocalAsrAcceleration;
+  preferredRuntimeVariant?: RuntimeVariant;
   cpuThreadCount?: number;
   allowDownload?: boolean;
   useMultiThreadDownload?: boolean;
@@ -185,115 +205,123 @@ export class FasterWhisperService extends EventEmitter {
     return status;
   }
 
-  async health(input: { modelId: string; preferCuda: boolean }): Promise<ProviderHealth> {
-    const cudaStatus = input.preferCuda ? await this.ensureCudaRuntime({ allowDownload: false }) : undefined;
-    const preferredRuntime = await this.detectHealthyPython(input.modelId, input.preferCuda);
-    const preferredRuntimeMessage = preferredRuntime.ok ? undefined : preferredRuntime.message;
-    const cudaRuntimeReady = !input.preferCuda || Boolean(cudaStatus?.cudaSupported);
-    if (preferredRuntime.ok && cudaRuntimeReady) {
-      return this.providerHealth(preferredRuntime, input.preferCuda);
+  async health(input: {
+    modelId: string;
+    preferCuda: boolean;
+    localAsrAcceleration?: LocalAsrAcceleration;
+    preferredRuntimeVariant?: RuntimeVariant;
+  }): Promise<FasterWhisperRuntimeStatus> {
+    const acceleration = this.resolveAccelerationStatus(input);
+    const cudaProbe = await this.tryConfirmCudaRuntime(input.modelId, acceleration);
+    if (cudaProbe.runtime && cudaProbe.acceleration) {
+      return this.providerHealth(cudaProbe.runtime, cudaProbe.acceleration, input.preferredRuntimeVariant);
     }
 
-    if (input.preferCuda) {
+    const preferredRuntime = await this.detectHealthyPython(input.modelId, acceleration.selected === 'gpu');
+    if (preferredRuntime.ok) {
+      return this.providerHealth(preferredRuntime, acceleration, input.preferredRuntimeVariant, cudaProbe.message);
+    }
+
+    if (acceleration.selected === 'gpu') {
       const cpuRuntime = await this.detectHealthyPython(input.modelId, false);
       if (cpuRuntime.ok) {
-        return {
-          providerId: FASTER_WHISPER_PROVIDER_ID,
-          ok: false,
-          status: 'degraded',
-          message: [
-            cudaRuntimeReady ? preferredRuntimeMessage ?? 'CUDA mode is unavailable.' : cudaStatus?.message ?? this.missingCudaRuntimeMessage(),
-            this.baseReadyMessage(cpuRuntime, false)
-          ]
-            .filter(Boolean)
-            .join(' ')
-        };
+        return this.providerHealth(
+          cpuRuntime,
+          this.forceCpuAcceleration(acceleration, acceleration.fallbackReason ?? 'gpu-variant-unavailable'),
+          input.preferredRuntimeVariant,
+          preferredRuntime.message ?? 'CUDA mode is unavailable.'
+        );
       }
     }
 
-    return {
-      providerId: FASTER_WHISPER_PROVIDER_ID,
-      ok: false,
-      status: 'unavailable',
-      message: preferredRuntimeMessage
-    };
+    return this.unavailableProviderHealth(
+      preferredRuntime.message,
+      acceleration,
+      input.preferredRuntimeVariant
+    );
   }
 
-  async ensureRuntime(request: FasterWhisperRuntimeRequest): Promise<ProviderHealth> {
-    const preferredRuntime = await this.detectHealthyPython(request.modelId ?? 'ggml-base', request.preferCuda, {
+  async ensureRuntime(request: FasterWhisperRuntimeRequest): Promise<FasterWhisperRuntimeStatus> {
+    const initialAcceleration = this.resolveAccelerationStatus(request);
+    const initialCudaProbe = await this.tryConfirmCudaRuntime(request.modelId ?? 'ggml-base', initialAcceleration, {
       bundledOnly: Boolean(request.forceManaged)
     });
-    const preferredRuntimeMessage = preferredRuntime.ok ? undefined : preferredRuntime.message;
-    const cudaStatus = request.preferCuda ? await this.ensureCudaRuntime({ allowDownload: false }) : undefined;
-    const cudaRuntimeReady = !request.preferCuda || Boolean(cudaStatus?.cudaSupported);
-    if (preferredRuntime.ok && cudaRuntimeReady) {
-      return this.providerHealth(preferredRuntime, request.preferCuda);
+    if (initialCudaProbe.runtime && initialCudaProbe.acceleration) {
+      return this.providerHealth(initialCudaProbe.runtime, initialCudaProbe.acceleration, request.preferredRuntimeVariant);
+    }
+
+    const preferredRuntime = await this.detectHealthyPython(request.modelId ?? 'ggml-base', initialAcceleration.selected === 'gpu', {
+      bundledOnly: Boolean(request.forceManaged)
+    });
+    if (preferredRuntime.ok) {
+      return this.providerHealth(
+        preferredRuntime,
+        initialAcceleration,
+        request.preferredRuntimeVariant,
+        initialCudaProbe.message
+      );
     }
 
     if (!request.allowDownload) {
-      if (request.preferCuda && !request.forceManaged) {
+      if (initialAcceleration.selected === 'gpu' && !request.forceManaged) {
         const cpuRuntime = await this.detectHealthyPython(request.modelId ?? 'ggml-base', false);
         if (cpuRuntime.ok) {
-          return {
-            providerId: FASTER_WHISPER_PROVIDER_ID,
-            ok: false,
-            status: 'degraded',
-            message: [
-              cudaRuntimeReady ? preferredRuntimeMessage ?? 'CUDA mode is unavailable.' : cudaStatus?.message ?? this.missingCudaRuntimeMessage(),
-              this.baseReadyMessage(cpuRuntime, false)
-            ]
-              .filter(Boolean)
-              .join(' ')
-          };
+          return this.providerHealth(
+            cpuRuntime,
+            this.forceCpuAcceleration(initialAcceleration, initialAcceleration.fallbackReason ?? 'gpu-variant-unavailable'),
+            request.preferredRuntimeVariant,
+            preferredRuntime.message ?? 'CUDA mode is unavailable.'
+          );
         }
       }
-      return {
-        providerId: FASTER_WHISPER_PROVIDER_ID,
-        ok: false,
-        status: 'unavailable',
-        message: preferredRuntimeMessage
-      };
+      return this.unavailableProviderHealth(
+        preferredRuntime.message,
+        initialAcceleration,
+        request.preferredRuntimeVariant
+      );
     }
 
     await this.ensureManagedRuntimeInstalled(request.modelId ?? 'ggml-base', Boolean(request.useMultiThreadDownload));
 
-    const managedPreferred = await this.detectHealthyPython(request.modelId ?? 'ggml-base', request.preferCuda, {
+    const postInstallAcceleration = this.resolveAccelerationStatus(request);
+    const postInstallCudaProbe = await this.tryConfirmCudaRuntime(request.modelId ?? 'ggml-base', postInstallAcceleration, {
       bundledOnly: true
     });
-    const managedPreferredMessage = managedPreferred.ok ? undefined : managedPreferred.message;
-    const managedCudaStatus = request.preferCuda ? await this.ensureCudaRuntime({ allowDownload: false }) : undefined;
-    const managedCudaRuntimeReady = !request.preferCuda || Boolean(managedCudaStatus?.cudaSupported);
-    if (managedPreferred.ok && managedCudaRuntimeReady) {
-      return this.providerHealth(managedPreferred, request.preferCuda);
+    if (postInstallCudaProbe.runtime && postInstallCudaProbe.acceleration) {
+      return this.providerHealth(postInstallCudaProbe.runtime, postInstallCudaProbe.acceleration, request.preferredRuntimeVariant);
     }
 
-    if (request.preferCuda) {
+    const managedPreferred = await this.detectHealthyPython(request.modelId ?? 'ggml-base', postInstallAcceleration.selected === 'gpu', {
+      bundledOnly: true
+    });
+    if (managedPreferred.ok) {
+      return this.providerHealth(
+        managedPreferred,
+        postInstallAcceleration,
+        request.preferredRuntimeVariant,
+        postInstallCudaProbe.message
+      );
+    }
+
+    if (postInstallAcceleration.selected === 'gpu') {
       const managedCpu = await this.detectHealthyPython(request.modelId ?? 'ggml-base', false, {
         bundledOnly: true
       });
       if (managedCpu.ok) {
-        return {
-          providerId: FASTER_WHISPER_PROVIDER_ID,
-          ok: false,
-          status: 'degraded',
-          message: [
-            managedCudaRuntimeReady
-              ? managedPreferredMessage ?? 'CUDA mode is unavailable.'
-              : managedCudaStatus?.message ?? this.missingCudaRuntimeMessage(),
-            this.baseReadyMessage(managedCpu, false)
-          ]
-            .filter(Boolean)
-            .join(' ')
-        };
+        return this.providerHealth(
+          managedCpu,
+          this.forceCpuAcceleration(postInstallAcceleration, postInstallAcceleration.fallbackReason ?? 'gpu-variant-unavailable'),
+          request.preferredRuntimeVariant,
+          managedPreferred.message ?? 'CUDA mode is unavailable.'
+        );
       }
     }
 
-    return {
-      providerId: FASTER_WHISPER_PROVIDER_ID,
-      ok: false,
-      status: 'unavailable',
-      message: managedPreferredMessage ?? 'Bundled faster-whisper runtime is still unavailable after install.'
-    };
+    return this.unavailableProviderHealth(
+      managedPreferred.message ?? 'Bundled faster-whisper runtime is still unavailable after install.',
+      postInstallAcceleration,
+      request.preferredRuntimeVariant
+    );
   }
 
   async transcribe(request: FasterWhisperTranscriptionRequest): Promise<SubtitleDocument> {
@@ -303,16 +331,20 @@ export class FasterWhisperService extends EventEmitter {
     const baseRuntime = await this.ensureRuntime({
       modelId: request.modelId,
       allowDownload: Boolean(request.allowDownload),
-      preferCuda: false,
+      preferCuda: request.preferCuda,
+      localAsrAcceleration: request.localAsrAcceleration,
+      preferredRuntimeVariant: request.preferredRuntimeVariant,
       useMultiThreadDownload: request.useMultiThreadDownload
     });
     if (!baseRuntime.ok && baseRuntime.status === 'unavailable') {
       throw new Error(baseRuntime.message ?? 'The local faster-whisper environment is not ready.');
     }
 
+    const requestedAcceleration = baseRuntime.acceleration ?? this.resolveAccelerationStatus(request);
+
     const firstAttempt = await this.runTranscription({
       ...request,
-      useCuda: request.preferCuda
+      useCuda: requestedAcceleration.selected === 'gpu'
     });
     if (this.cancelledJobs.has(request.jobId)) {
       throw cancellationError();
@@ -320,7 +352,7 @@ export class FasterWhisperService extends EventEmitter {
     let output = firstAttempt;
     let warnings = firstAttempt.warnings;
 
-    if (!firstAttempt.ok && request.preferCuda && shouldFallbackToCpu(firstAttempt.errorMessage)) {
+    if (!firstAttempt.ok && requestedAcceleration.selected === 'gpu' && shouldFallbackToCpu(firstAttempt.errorMessage)) {
       this.logger?.warn('transcribe.cuda-fallback', 'CUDA transcription failed once and will retry on CPU.', {
         jobId: request.jobId,
         modelId: request.modelId,
@@ -348,7 +380,13 @@ export class FasterWhisperService extends EventEmitter {
     }
 
     if (!output.ok) {
-      throw new Error(output.errorMessage ?? 'faster-whisper transcription failed.');
+      const error = new Error(output.errorMessage ?? 'faster-whisper transcription failed.') as Error & {
+        code?: string;
+        retryable?: boolean;
+      };
+      error.code = output.code;
+      error.retryable = output.retryable ?? true;
+      throw error;
     }
     if (this.cancelledJobs.has(request.jobId)) {
       throw cancellationError();
@@ -406,7 +444,7 @@ export class FasterWhisperService extends EventEmitter {
     input: FasterWhisperTranscriptionRequest & { useCuda: boolean }
   ): Promise<
     | { ok: true; payload: FasterWhisperTranscriptionResponse; warnings: SubtitleWarning[] }
-    | { ok: false; errorMessage: string; warnings: SubtitleWarning[] }
+    | { ok: false; errorMessage: string; code?: string; retryable?: boolean; warnings: SubtitleWarning[] }
   > {
     if (input.useCuda && !this.hasRequiredCudaRuntimeLibraries()) {
       return {
@@ -441,13 +479,16 @@ export class FasterWhisperService extends EventEmitter {
       '--cpu-threads',
       String(input.cpuThreadCount ?? defaultTranscriptionThreads()),
       '--cache-dir',
-      this.cacheDir()
+      this.cacheDir(),
+      ...(input.allowDownload ? [] : ['--local-files-only'])
     ];
     const response = await this.runPythonJson(runtime.command, args, 30 * 60 * 1000, input.jobId);
     if (!response.ok) {
       return {
         ok: false,
         errorMessage: response.errorMessage,
+        code: response.code,
+        retryable: response.retryable,
         warnings: []
       };
     }
@@ -549,16 +590,168 @@ export class FasterWhisperService extends EventEmitter {
     };
   }
 
-  private providerHealth(runtime: Extract<DetectedRuntime, { ok: true }>, preferCuda: boolean): ProviderHealth {
+  private providerHealth(
+    runtime: Extract<DetectedRuntime, { ok: true }>,
+    acceleration: ProviderAccelerationStatus,
+    preferredRuntimeVariant?: RuntimeVariant,
+    fallbackPrefix?: string
+  ): FasterWhisperRuntimeStatus {
+    const status = this.providerHealthStatus(acceleration);
+    const prefix =
+      status === 'degraded'
+        ? this.fallbackMessage(acceleration, preferredRuntimeVariant, fallbackPrefix)
+        : undefined;
+
     return {
       providerId: FASTER_WHISPER_PROVIDER_ID,
-      ok: true,
-      status: 'healthy',
-      message: this.baseReadyMessage(runtime, preferCuda)
+      ok: status === 'healthy',
+      status,
+      message: [prefix, this.baseReadyMessage(runtime, acceleration)].filter(Boolean).join(' '),
+      acceleration
     };
   }
 
-  private baseReadyMessage(runtime: Extract<DetectedRuntime, { ok: true }>, preferCuda: boolean): string {
+  private unavailableProviderHealth(
+    message: string | undefined,
+    acceleration: ProviderAccelerationStatus,
+    preferredRuntimeVariant?: RuntimeVariant
+  ): FasterWhisperRuntimeStatus {
+    return {
+      providerId: FASTER_WHISPER_PROVIDER_ID,
+      ok: false,
+      status: 'unavailable',
+      message: this.fallbackMessage(acceleration, preferredRuntimeVariant, message) ?? message,
+      acceleration
+    };
+  }
+
+  private providerHealthStatus(
+    acceleration: ProviderAccelerationStatus
+  ): ProviderHealth['status'] {
+    if (!acceleration.supported) {
+      return 'degraded';
+    }
+
+    if (acceleration.requested === 'gpu' && acceleration.selected !== 'gpu') {
+      return 'degraded';
+    }
+
+    return 'healthy';
+  }
+
+  private fallbackMessage(
+    acceleration: ProviderAccelerationStatus,
+    preferredRuntimeVariant?: RuntimeVariant,
+    detail?: string
+  ): string | undefined {
+    if (!acceleration.supported && (preferredRuntimeVariant === 'metal' || preferredRuntimeVariant === 'vulkan')) {
+      return [
+        `faster-whisper currently supports only CPU and CUDA. The requested ${preferredRuntimeVariant} runtime is not available, so CPU mode will be used instead.`,
+        detail
+      ]
+        .filter(Boolean)
+        .join(' ');
+    }
+
+    if (acceleration.requested === 'gpu' && acceleration.selected === 'cpu') {
+      const reason =
+        acceleration.fallbackReason === 'gpu-runtime-missing'
+          ? this.missingCudaRuntimeMessage()
+          : acceleration.fallbackReason === 'gpu-not-detected'
+            ? 'GPU mode was requested, but no NVIDIA GPU was found.'
+            : detail ?? 'CUDA mode is unavailable.';
+      const suffix =
+        detail && detail !== reason
+          ? ` ${detail}`
+          : '';
+      return `${reason} Falling back to CPU mode.${suffix}`;
+    }
+
+    return detail;
+  }
+
+  private forceCpuAcceleration(
+    acceleration: ProviderAccelerationStatus,
+    fallbackReason: string
+  ): ProviderAccelerationStatus {
+    return {
+      ...acceleration,
+      selected: 'cpu',
+      runtimeVariant: 'cpu',
+      fallbackReason
+    };
+  }
+
+  private promoteGpuAcceleration(
+    acceleration: ProviderAccelerationStatus
+  ): ProviderAccelerationStatus {
+    return {
+      ...acceleration,
+      selected: 'gpu',
+      runtimeVariant: 'cuda',
+      hardwareDetected: true,
+      runtimeDetected: true,
+      supported: true,
+      fallbackReason: undefined
+    };
+  }
+
+  private shouldTryCudaProbe(
+    acceleration: ProviderAccelerationStatus
+  ): boolean {
+    return (
+      acceleration.requested === 'gpu' &&
+      acceleration.selected === 'cpu' &&
+      acceleration.runtimeDetected &&
+      acceleration.fallbackReason === 'gpu-not-detected'
+    );
+  }
+
+  private async tryConfirmCudaRuntime(
+    modelId: string,
+    acceleration: ProviderAccelerationStatus,
+    options: { bundledOnly?: boolean } = {}
+  ): Promise<{
+    runtime?: Extract<DetectedRuntime, { ok: true }>;
+    acceleration?: ProviderAccelerationStatus;
+    message?: string;
+  }> {
+    if (!this.shouldTryCudaProbe(acceleration)) {
+      return {};
+    }
+
+    const runtime = await this.detectHealthyPython(modelId, true, options);
+    if (runtime.ok) {
+      if ((runtime.cuda_device_count ?? 0) > 0) {
+        return {
+          runtime,
+          acceleration: this.promoteGpuAcceleration(acceleration)
+        };
+      }
+
+      return {
+        message: 'A local faster-whisper environment was found, but GPU mode could not be confirmed.'
+      };
+    }
+
+    return {
+      message: runtime.message
+    };
+  }
+
+  private resolveAccelerationStatus(request: {
+    preferCuda: boolean;
+    localAsrAcceleration?: LocalAsrAcceleration;
+    preferredRuntimeVariant?: RuntimeVariant;
+  }): ProviderAccelerationStatus {
+    const cudaStatus = this.cudaRuntimeStatus();
+    return resolveFasterWhisperAccelerationStatus(request, cudaStatus);
+  }
+
+  private baseReadyMessage(
+    runtime: Extract<DetectedRuntime, { ok: true }>,
+    acceleration: ProviderAccelerationStatus
+  ): string {
     const detailParts = [
       runtime.faster_whisper_version ? `faster-whisper ${runtime.faster_whisper_version}` : undefined,
       runtime.ctranslate2_version ? `CTranslate2 ${runtime.ctranslate2_version}` : undefined,
@@ -570,7 +763,7 @@ export class FasterWhisperService extends EventEmitter {
         : runtime.command.source === 'environment'
           ? 'Using your existing local environment.'
           : 'Using a system-installed Python environment.';
-    const deviceDetail = preferCuda
+    const deviceDetail = acceleration.selected === 'gpu'
       ? runtime.cuda_device_count && runtime.cuda_device_count > 0
         ? `CUDA mode is available (${runtime.cuda_device_count} device${runtime.cuda_device_count > 1 ? 's' : ''} reported).`
         : 'CUDA mode is enabled for this Python runtime.'
@@ -1004,7 +1197,7 @@ export class FasterWhisperService extends EventEmitter {
     args: string[],
     timeoutMs: number,
     jobId?: string
-  ): Promise<{ ok: true; payload: unknown } | { ok: false; errorMessage: string }> {
+  ): Promise<{ ok: true; payload: unknown } | FasterWhisperRunnerFailure> {
     try {
       const result = await runCommandCapture(command.executable, args, {
         env: this.pythonEnv(command),
@@ -1031,14 +1224,14 @@ export class FasterWhisperService extends EventEmitter {
       if (result.timedOut) {
         return {
           ok: false,
-          errorMessage: `faster-whisper Python runner timed out after ${Math.round(timeoutMs / 1000)} seconds.`
+          errorMessage: `faster-whisper Python runner timed out after ${Math.round(timeoutMs / 1000)} seconds.`,
+          code: 'Timeout',
+          retryable: true
         };
       }
-      if (result.code !== 0) {
-        return {
-          ok: false,
-          errorMessage: String(result.stderr || result.stdout || 'faster-whisper runner failed.').trim()
-        };
+      const parsedFailure = this.tryParseRunnerFailure(result.stdout);
+      if (parsedFailure) {
+        return parsedFailure;
       }
       try {
         return {
@@ -1046,20 +1239,74 @@ export class FasterWhisperService extends EventEmitter {
           payload: JSON.parse(result.stdout.trim())
         };
       } catch {
+        const normalized = this.normalizeRunnerError(result.stderr || result.stdout || 'faster-whisper runner failed.');
         return {
           ok: false,
-          errorMessage: 'faster-whisper runner returned invalid JSON.'
+          errorMessage: normalized.message,
+          code: normalized.code,
+          retryable: normalized.retryable
         };
       }
     } catch (error) {
+      const normalized = this.normalizeRunnerError(error);
       return {
         ok: false,
-        errorMessage: error instanceof Error ? error.message : String(error)
+        errorMessage: normalized.message,
+        code: normalized.code,
+        retryable: normalized.retryable
       };
     } finally {
       if (jobId) {
         this.activeTranscriptions.delete(jobId);
       }
+    }
+  }
+
+  normalizeRunnerError(error: unknown): FasterWhisperRunnerError {
+    const message = error instanceof Error ? error.message : String(error);
+    const normalized = message.toLowerCase();
+    const runnerError = new Error(message) as FasterWhisperRunnerError;
+    runnerError.retryable = true;
+
+    if (
+      normalized.includes('unexpected_eof_while_reading') ||
+      normalized.includes('local_files_only') ||
+      normalized.includes('localentrynotfounderror') ||
+      normalized.includes('connecterror') ||
+      normalized.includes('snapshot_download') ||
+      normalized.includes('huggingface') ||
+      normalized.includes('ssl:')
+    ) {
+      runnerError.code = 'DownloadRequired';
+      runnerError.message =
+        'faster-whisper 模型下载失败。请检查网络、代理或证书后重试；如果模型已缓存，请确认缓存目录可访问。';
+      return runnerError;
+    }
+
+    if (normalized.includes('permission denied') || normalized.includes('access is denied')) {
+      runnerError.code = 'DownloadRequired';
+      runnerError.message = 'faster-whisper 模型缓存目录不可写或被占用。请检查权限后重试。';
+      return runnerError;
+    }
+
+    return runnerError;
+  }
+
+  private tryParseRunnerFailure(stdout: string): FasterWhisperRunnerFailure | undefined {
+    try {
+      const parsed = JSON.parse(stdout.trim()) as Partial<FasterWhisperRunnerFailure> | undefined;
+      if (!parsed || parsed.ok !== false || typeof parsed.message !== 'string' || !parsed.message.trim()) {
+        return undefined;
+      }
+      return {
+        ok: false,
+        errorMessage: parsed.message.trim(),
+        message: parsed.message.trim(),
+        code: typeof parsed.code === 'string' && parsed.code.trim() ? parsed.code.trim() : undefined,
+        retryable: typeof parsed.retryable === 'boolean' ? parsed.retryable : undefined
+      };
+    } catch {
+      return undefined;
     }
   }
 

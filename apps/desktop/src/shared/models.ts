@@ -53,7 +53,10 @@ export type WorkflowStep = 'import' | 'asr' | 'subtitles' | 'translate' | 'expor
 export type ExportDestinationMode = 'source-directory' | 'selected-directory' | 'ask-each-time';
 export type ExportVariant = 'source' | 'translated' | 'bilingual';
 export type BilingualOrder = 'source-first' | 'target-first';
+export type SubtitleFileFormat = 'srt' | 'ass';
 export type LocalAsrCpuMode = 'low' | 'balanced' | 'high';
+export type LocalAsrAcceleration = 'auto' | 'cpu' | 'gpu';
+export type RuntimeVariant = 'cpu' | 'cuda' | 'metal' | 'vulkan';
 export type AppLogLevel = 'debug' | 'info' | 'warning' | 'error';
 
 export type AppSettingsPublic = {
@@ -65,8 +68,13 @@ export type AppSettingsPublic = {
   targetLanguage: string;
   asrProviderId: string;
   whisperModelId: string;
+  localAsrAcceleration: LocalAsrAcceleration;
+  preferredRuntimeVariant?: RuntimeVariant;
   localWhisperUseCuda: boolean;
   localAsrCpuMode: LocalAsrCpuMode;
+  localAsrCompatibilityOverrides: {
+    ignoreCudaMismatch: boolean;
+  };
   localWhisperIgnoreCudaMismatch: boolean;
   allowWhisperAssetDownload: boolean;
   enableMultiThreadDownload: boolean;
@@ -80,6 +88,7 @@ export type AppSettingsPublic = {
   exportDestinationMode: ExportDestinationMode;
   exportDirectory: string;
   exportBilingualOrder: BilingualOrder;
+  exportFileFormat: SubtitleFileFormat;
 };
 
 export type AppSettingsPatch = Partial<AppSettingsPublic>;
@@ -89,6 +98,17 @@ export type ProviderHealth = {
   ok: boolean;
   status: 'healthy' | 'degraded' | 'unconfigured' | 'unavailable';
   message?: string;
+  acceleration?: ProviderAccelerationStatus;
+};
+
+export type ProviderAccelerationStatus = {
+  requested: LocalAsrAcceleration;
+  selected: 'gpu' | 'cpu';
+  runtimeVariant: RuntimeVariant;
+  hardwareDetected: boolean;
+  runtimeDetected: boolean;
+  supported: boolean;
+  fallbackReason?: string;
 };
 
 export type ProviderSecretInput = {
@@ -112,6 +132,8 @@ export type WhisperRuntimeRequest = {
   modelId: string;
   allowDownload: boolean;
   preferCuda: boolean;
+  localAsrAcceleration?: LocalAsrAcceleration;
+  preferredRuntimeVariant?: RuntimeVariant;
   ignoreCudaMismatch?: boolean;
   useMultiThreadDownload?: boolean;
   downloadScope?: 'all' | 'runtime' | 'cuda-runtime' | 'model' | 'none';
@@ -163,6 +185,7 @@ export type WhisperRuntimeStatus = {
   actionRequired?:
     | 'download-runtime'
     | 'download-model'
+    | 'unsupported-platform'
     | 'pin-manifest-hashes'
     | 'manifest-not-configured'
     | 'download-required'
@@ -177,6 +200,8 @@ export type CreateJobRequest = {
   asrProviderId: string;
   whisperModelId: string;
   localWhisperUseCuda?: boolean;
+  localAsrAcceleration?: LocalAsrAcceleration;
+  preferredRuntimeVariant?: RuntimeVariant;
   localAsrCpuMode?: LocalAsrCpuMode;
   localWhisperIgnoreCudaMismatch?: boolean;
   allowWhisperAssetDownload?: boolean;
@@ -214,6 +239,8 @@ export type JobSnapshot = {
   asrProviderId: string;
   whisperModelId: string;
   localWhisperUseCuda: boolean;
+  localAsrAcceleration: LocalAsrAcceleration;
+  preferredRuntimeVariant?: RuntimeVariant;
   localAsrCpuMode: LocalAsrCpuMode;
   localWhisperIgnoreCudaMismatch: boolean;
   allowWhisperAssetDownload: boolean;
@@ -257,8 +284,15 @@ export type FasterWhisperRuntimeRequest = {
   modelId: string;
   allowDownload: boolean;
   preferCuda: boolean;
+  localAsrAcceleration?: LocalAsrAcceleration;
+  preferredRuntimeVariant?: RuntimeVariant;
   useMultiThreadDownload?: boolean;
   forceManaged?: boolean;
+};
+
+export type FasterWhisperRuntimeStatus = ProviderHealth & {
+  providerId: 'local.faster-whisper';
+  acceleration: ProviderAccelerationStatus;
 };
 
 export type FasterWhisperCudaRequest = {
@@ -291,12 +325,21 @@ export type FfmpegStatus = {
   actionRequired?: 'download-required' | 'none';
 };
 
+export type NativeAcceleratorHealth = {
+  variant: 'cuda' | 'metal' | 'vulkan';
+  hardwareDetected: boolean;
+  runtimeDetected: boolean;
+  supported: boolean;
+  message?: string;
+};
+
 export type NativeHealth = {
   protocolVersion: number;
   backendVersion: string;
   status: 'ok' | 'degraded';
   detail?: string;
   capabilities: string[];
+  accelerators: NativeAcceleratorHealth[];
   whisperRuntimeAvailable: boolean;
   ffmpegAvailable?: boolean;
   ffprobeAvailable?: boolean;

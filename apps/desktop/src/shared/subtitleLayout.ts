@@ -135,6 +135,7 @@ function splitTextIntoBalancedChunks(text: string, chunkCount: number): string[]
     const remainingWeight = totalWeight - consumedWeight;
     if (remainingChunks === 1) {
       chunks.push(joinUnits(units.slice(unitIndex), separator));
+      unitIndex = units.length;
       break;
     }
 
