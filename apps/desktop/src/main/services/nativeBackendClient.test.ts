@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { NativeHealth, NativeProtocolResponse, NativeProtocolType } from '@shared/models';
+
+vi.mock('electron', () => ({
+  app: {
+    isPackaged: false,
+    getPath: vi.fn(() => '/tmp/translate-ter')
+  }
+}));
+
 import { NativeBackendClient } from './nativeBackendClient';
 
 class TestNativeBackendClient extends NativeBackendClient {

@@ -1,4 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('electron', () => ({
+  app: {
+    isPackaged: false,
+    getPath: vi.fn(() => '/tmp/translate-ter')
+  }
+}));
+
 import { FasterWhisperService } from './fasterWhisperService';
 
 describe('FasterWhisperService error normalization', () => {
