@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json && electron-vite build",
     "package:electron": "node scripts/package-electron.mjs",
     "verify:platform": "node scripts/verify-platform.mjs",
+    "smoke:native": "node scripts/smoke-native-backend.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "native:deps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ensure-webview2.ps1",

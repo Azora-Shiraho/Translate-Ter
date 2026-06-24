@@ -20,6 +20,7 @@ Run from the repository root:
 npm test
 npm run build
 npm run native:build
+npm run smoke:native
 ```
 
 If the lightweight helper exists:
@@ -55,6 +56,7 @@ npm run package:electron
   - `build/native/bin/TranslateTer.exe`
   - `build/native/bin/WebView2Loader.dll`
 - [ ] `npm run verify:platform` succeeds if the helper script is present.
+- [ ] `npm run smoke:native` succeeds.
 - [ ] Running `build/native/bin/translate-ter-backend.exe --health` returns a valid health payload.
 - [ ] The validation result is acceptable even when no GPU runtime is available, because CPU is the baseline path.
 
@@ -84,6 +86,7 @@ Expected outcome:
 
 - [ ] Validate only on Apple Silicon when testing the Metal path.
 - [ ] `npm run native:build` builds `translate-ter-backend` only.
+- [ ] `npm run smoke:native` succeeds.
 - [ ] Confirm `apps/native-host` is not part of the macOS build.
 - [ ] If testing Metal, ensure `whisper-cli` is already available on system `PATH`.
 - [ ] Confirm the documentation states that the app trusts this path through an executable probe, not SHA-256 verification.
@@ -108,6 +111,7 @@ Expected outcome:
 - [ ] `npm test` passes.
 - [ ] `npm run build` passes.
 - [ ] `npm run native:build` produces `build/native/bin/translate-ter-backend`.
+- [ ] `npm run smoke:native` succeeds.
 - [ ] `npm run verify:platform` succeeds if the helper script is present.
 - [ ] `./build/native/bin/translate-ter-backend --health` succeeds.
 - [ ] Confirm the docs keep Linux in the Electron mainline and backend baseline path, without claiming a WebView2 host.
