@@ -10,6 +10,7 @@ const TRANSLATED_BASE_SIZE = 30;
 const SOURCE_BASE_SIZE = 20;
 const MIN_TRANSLATED_SIZE = 10;
 const MIN_SOURCE_SIZE = 8;
+const ASS_LITERAL_BACKSLASH_ESCAPE = '\u2060';
 
 export type SerializeAssOptions = {
   variant?: ExportVariant;
@@ -154,7 +155,10 @@ function collapseSubtitleLine(text: string): string {
 }
 
 function escapeAssText(text: string): string {
-  return collapseSubtitleLine(text).replace(/{/g, '\\{').replace(/}/g, '\\}');
+  return collapseSubtitleLine(text)
+    .replace(/\\([Nnh])/g, `\\${ASS_LITERAL_BACKSLASH_ESCAPE}$1`)
+    .replace(/{/g, '\\{')
+    .replace(/}/g, '\\}');
 }
 
 function stripAssFormatting(text: string): string {

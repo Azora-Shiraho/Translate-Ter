@@ -36,4 +36,13 @@ describe('ASS serializer', () => {
     expect(output).toContain('\\alpha&H00&');
     expect(output).toContain('\\N{\\q2\\fs');
   });
+
+  it('escapes literal ASS control sequences inside subtitle text', () => {
+    const doc = parseSrt('1\n00:00:01,000 --> 00:00:03,000\nInstall to C:\\New\\home and keep \\N \\n \\h literal.\n');
+
+    const output = serializeAss(doc, { variant: 'source' });
+
+    expect(output).toContain(`Install to C:\\\u2060New\\\u2060home and keep \\\u2060N \\\u2060n \\\u2060h literal.`);
+    expect(output).not.toContain('Install to C:\\New\\home and keep \\N \\n \\h literal.');
+  });
 });
