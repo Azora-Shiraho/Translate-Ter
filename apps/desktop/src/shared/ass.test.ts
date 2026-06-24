@@ -14,7 +14,7 @@ describe('ASS serializer', () => {
     const output = serializeAss(doc, { variant: 'bilingual', bilingualOrder: 'target-first' });
 
     expect(output).toContain('Style: Default,Microsoft YaHei,30');
-    expect(output).toContain('Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\q2\\fs30\\b1\\c&HFFFFFF&}你好，世界\\N{\\q2\\fs20\\b0\\c&HCFD6DE&\\alpha&H18&}Hello world');
+    expect(output).toContain('Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\q2\\fs30\\b1\\c&HFFFFFF&\\alpha&H00&}你好，世界\\N{\\q2\\fs20\\b0\\c&HCFD6DE&\\alpha&H18&}Hello world');
   });
 
   it('collapses wrapped lines and shrinks long bilingual text to stay on a single line per language', () => {
@@ -33,6 +33,7 @@ describe('ASS serializer', () => {
     expect(output).not.toContain('wrapped once.\\NAnd it keeps going.');
     expect(output).toContain('wrapped once. And it keeps going.');
     expect(output).toMatch(/\\fs1\d\\b1\\c&HFFFFFF&/);
+    expect(output).toContain('\\alpha&H00&');
     expect(output).toContain('\\N{\\q2\\fs');
   });
 });

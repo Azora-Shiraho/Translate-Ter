@@ -101,7 +101,7 @@ function buildTranslatedLine(text: string, baseSize: number, minSize: number): s
   const collapsed = collapseSubtitleLine(text);
   if (!collapsed) return '';
   const fontSize = fitFontSize(collapsed, baseSize, minSize);
-  return `{\\q2\\fs${fontSize}\\b1\\c&HFFFFFF&}${escapeAssText(collapsed)}`;
+  return `{\\q2\\fs${fontSize}\\b1\\c&HFFFFFF&\\alpha&H00&}${escapeAssText(collapsed)}`;
 }
 
 function buildSourceLine(text: string, baseSize: number, minSize: number): string {
