@@ -1,6 +1,9 @@
 name: Release Assets
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -22,18 +25,27 @@ jobs:
           - name: macOS ARM64 release asset
             os: macos-14
             platform: macos
-            asset_name: Translate-Ter-v${version}-macos-arm64-electron.zip
           - name: Linux x64 release asset
             os: ubuntu-24.04
             platform: linux
-            asset_name: Translate-Ter-v${version}-linux-x64-electron.tar.gz
 
     steps:
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag }}"
+          if [[ -z "$tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       - name: Checkout tagged source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ inputs.tag }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -98,4 +110,4 @@ jobs:
       - name: Upload release asset
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload ${{ inputs.tag }} "${{ steps.package.outputs.asset_path }}" --clobber
+        run: gh release upload ${{ steps.release.outputs.tag }} "${{ steps.package.outputs.asset_path }}" --clobber
