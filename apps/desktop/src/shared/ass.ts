@@ -162,7 +162,7 @@ function escapeAssText(text: string): string {
 }
 
 function stripAssFormatting(text: string): string {
-  return text.replace(/\{[^}]*\}/g, '').replace(/\\N/g, '\n');
+  return text.replace(/(?<!\\)\{[^}]*\}/g, '').replace(/\\N/g, '\n');
 }
 
 function pad(value: number, length: number): string {

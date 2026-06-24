@@ -45,4 +45,11 @@ describe('ASS serializer', () => {
     expect(output).toContain(`Install to C:\\\u2060New\\\u2060home and keep \\\u2060N \\\u2060n \\\u2060h literal.`);
     expect(output).not.toContain('Install to C:\\New\\home and keep \\N \\n \\h literal.');
   });
+
+  it('keeps escaped brace-only captions during empty-segment checks', () => {
+    const doc = parseSrt('1\n00:00:01,000 --> 00:00:03,000\n{laughs}\n');
+
+    expect(() => serializeAss(doc, { variant: 'source' })).not.toThrow();
+    expect(serializeAss(doc, { variant: 'source' })).toContain('\\{laughs\\}');
+  });
 });
