@@ -7,6 +7,36 @@ describe('subtitle layout helpers', () => {
     expect(wrapSubtitleText('这是一个用于测试自动换行的中文句子', 6)).toBe('这是一个用于\n测试自动换行\n的中文句子');
   });
 
+  it('does not duplicate the trailing chunk when splitting a long ASR segment', () => {
+    const document: SubtitleDocument = {
+      id: 'doc-repeat',
+      format: 'srt',
+      sourceLanguage: 'en',
+      targetLanguage: 'zh-CN',
+      segments: [
+        {
+          id: 'seg-repeat',
+          index: 1,
+          startMs: 66000,
+          endMs: 72000,
+          sourceText: "But there's a higher metal level notion of what a proof is. Beyond that.",
+          status: 'transcribed'
+        }
+      ],
+      metadata: {
+        createdAt: new Date().toISOString(),
+        warnings: []
+      }
+    };
+
+    const normalized = normalizeSubtitleDocumentLayout(document);
+
+    expect(normalized.segments.at(-1)?.sourceText).toBe('proof is. Beyond that.');
+    expect(normalized.segments.map((segment) => segment.sourceText).join('\n')).not.toContain(
+      'proof is. Beyond that.\nproof is. Beyond that.'
+    );
+  });
+
   it('splits long ASR segments into shorter subtitle cues', () => {
     const document: SubtitleDocument = {
       id: 'doc-1',
