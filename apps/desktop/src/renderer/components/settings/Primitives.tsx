@@ -15,7 +15,7 @@ export function SettingsOverviewCard(props: {
 }): JSX.Element {
   return (
     <button
-      className={`settingsOverviewCard tone-${props.tone}${props.featured ? ' featured' : ''}`}
+      className={`settingsSummaryCard settingsOverviewCard interactive tone-${props.tone}${props.featured ? ' featured' : ''}`}
       onClick={props.onClick}
       type="button"
     >
@@ -38,7 +38,7 @@ export function SettingsFactCard(props: {
   onClick?: () => void;
 }): JSX.Element {
   return (
-    <button className={`settingsFactCard tone-${props.tone}`} onClick={props.onClick} type="button">
+    <button className={`settingsSummaryCard settingsFactCard interactive tone-${props.tone}`} onClick={props.onClick} type="button">
       <div className="settingsFactIcon">{props.icon}</div>
       <div>
         <span>{props.label}</span>
