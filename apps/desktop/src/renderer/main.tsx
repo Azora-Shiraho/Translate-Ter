@@ -52,6 +52,7 @@ import type {
 import type { AssetEvent, JobEvent, JobStage } from '@shared/models';
 import { formatTimestamp } from '@shared/srt';
 import { languageLabel, languageRegistry } from '@shared/languages';
+import { translateTerGateway } from './api/translateTerGateway';
 import {
   buildIgnoreCudaMismatchPatch,
   buildLocalAsrSettingsPatch,
@@ -67,6 +68,8 @@ import {
   resolveVariantSelectionForAcceleration,
   type RuntimeVariantSelection
 } from './asrSettings';
+import { useAssetEvents } from './viewModels/useAssetEvents';
+import { useJobEvents } from './viewModels/useJobEvents';
 
 const steps = ['import', 'asr', 'subtitles', 'translate', 'export'] as const;
 const translationProviders = ['openai.compatible'] as const;
@@ -204,7 +207,7 @@ function App(): JSX.Element {
   const whisperModelSettingsRef = useRef<HTMLDivElement | null>(null);
   const translationProviderSettingsRef = useRef<HTMLDivElement | null>(null);
   const settingsJumpResetRef = useRef<number>();
-  const hostPlatform = window.translateTer.host.platform;
+  const hostPlatform = translateTerGateway.host.platform;
   const configuredAcceleration = settings?.localAsrAcceleration ?? 'auto';
   const configuredRuntimeVariant = deriveRuntimeVariantSelection(
     configuredAcceleration,
@@ -257,18 +260,18 @@ function App(): JSX.Element {
   const writeUiLog = useCallback(
     (level: AppLogLevel, event: string, details?: unknown, scope = 'renderer.ui', message?: string) => {
       if (level === 'debug') {
-        window.translateTer.logs.debug(event, details, scope, message);
+        translateTerGateway.logs.debug(event, details, scope, message);
         return;
       }
       if (level === 'info') {
-        window.translateTer.logs.info(event, details, scope, message);
+        translateTerGateway.logs.info(event, details, scope, message);
         return;
       }
       if (level === 'warning') {
-        window.translateTer.logs.warning(event, details, scope, message);
+        translateTerGateway.logs.warning(event, details, scope, message);
         return;
       }
-      window.translateTer.logs.error(event, details, scope, message);
+      translateTerGateway.logs.error(event, details, scope, message);
     },
     []
   );
@@ -287,13 +290,13 @@ function App(): JSX.Element {
     let mounted = true;
 
     void (async () => {
-      const nextSettings = await window.translateTer.getSettings();
+      const nextSettings = await translateTerGateway.getSettings();
       const [nextModels, cloudAsrSecret, llmSecret] = await Promise.all([
-        window.translateTer.assets.listWhisperModels(nextSettings.asrProviderId),
-        window.translateTer.settings.getSecret('cloud.openai'),
-        window.translateTer.settings.getSecret('openai.compatible')
+        translateTerGateway.assets.listWhisperModels(nextSettings.asrProviderId),
+        translateTerGateway.settings.getSecret('cloud.openai'),
+        translateTerGateway.settings.getSecret('openai.compatible')
       ]);
-      const nextFfmpegStatus = await window.translateTer.assets
+      const nextFfmpegStatus = await translateTerGateway.assets
         .ensureFfmpeg({
           allowDownload: false,
           useMultiThreadDownload: nextSettings.enableMultiThreadDownload
@@ -328,45 +331,10 @@ function App(): JSX.Element {
       }
     })();
 
-    const unsubscribeJobs = window.translateTer.jobs.onEvent((event) => {
-      writeUiLog('debug', 'jobs.event-received', summarizeJobEventForLog(event), 'renderer.jobs');
-      if (event.type === 'snapshot') setJob(event.job);
-      if (event.type === 'progress') setMessage(event.message ?? translateStage(event.stage));
-      if (event.type === 'error') pushStatus(event.message, 'error');
-    });
-    const unsubscribeAssets = window.translateTer.assets.onEvent((event) => {
-      writeUiLog('debug', 'assets.event-received', event, 'renderer.assets');
-      const nextMessage = assetEventLabel(event, (key, options) => i18n.t(key, options));
-      if (event.type === 'download-start' || event.type === 'download-progress') {
-        setActiveDownload({
-          scope: event.scope,
-          receivedBytes: event.type === 'download-progress' ? (event.receivedBytes ?? 0) : 0,
-          totalBytes: event.type === 'download-progress' ? event.totalBytes : undefined,
-          message: nextMessage
-        });
-      } else {
-        setActiveDownload(undefined);
-      }
-      if (event.scope === 'model') {
-        setModelActivity(nextMessage);
-      } else if (event.scope === 'ffmpeg') {
-        setFfmpegActivity(nextMessage);
-      }
-      setMessage(nextMessage);
-      if (event.type !== 'download-progress') {
-        pushToast(nextMessage, toastToneForAssetEvent(event));
-      }
-      if (event.type === 'ready' || event.type === 'error') {
-        void refreshModels();
-      }
-    });
-
     return () => {
       mounted = false;
-      unsubscribeJobs();
-      unsubscribeAssets();
     };
-  }, [i18n, translateStage, writeUiLog]);
+  }, [i18n, writeUiLog]);
 
   useEffect(() => {
     if (settings?.logLevel !== 'debug') return;
@@ -570,7 +538,7 @@ function App(): JSX.Element {
     writeUiLog('info', 'settings.update', { patch }, 'renderer.settings', 'Saving settings changes.');
     setSettings((current) => (current ? { ...current, ...patch } : current));
     try {
-      const next = await window.translateTer.saveSettings(patch);
+      const next = await translateTerGateway.saveSettings(patch);
       setSettings(next);
       if (patch.uiLanguage) {
         await i18n.changeLanguage(next.uiLanguage);
@@ -611,12 +579,12 @@ function App(): JSX.Element {
   }
 
   async function readNativeHealthWithRetry(): Promise<NativeHealth | undefined> {
-    const first = await window.translateTer.native.health().catch(() => undefined);
+    const first = await translateTerGateway.native.health().catch(() => undefined);
     if (!first || !shouldRetryNativeHealth(first)) {
       return first;
     }
     await new Promise((resolve) => window.setTimeout(resolve, 220));
-    return (await window.translateTer.native.health().catch(() => first)) ?? first;
+    return (await translateTerGateway.native.health().catch(() => first)) ?? first;
   }
 
   async function refreshNativeHealth(): Promise<void> {
@@ -624,8 +592,51 @@ function App(): JSX.Element {
   }
 
   async function refreshModels(): Promise<void> {
-    setModels(await window.translateTer.assets.listWhisperModels(settings?.asrProviderId));
+    setModels(await translateTerGateway.assets.listWhisperModels(settings?.asrProviderId));
   }
+
+  const handleJobEvent = useCallback(
+    (event: JobEvent) => {
+      writeUiLog('debug', 'jobs.event-received', summarizeJobEventForLog(event), 'renderer.jobs');
+      if (event.type === 'snapshot') setJob(event.job);
+      if (event.type === 'progress') setMessage(event.message ?? translateStage(event.stage));
+      if (event.type === 'error') pushStatus(event.message, 'error');
+    },
+    [translateStage, writeUiLog]
+  );
+
+  const handleAssetEvent = useCallback(
+    (event: AssetEvent) => {
+      writeUiLog('debug', 'assets.event-received', event, 'renderer.assets');
+      const nextMessage = assetEventLabel(event, (key, options) => i18n.t(key, options));
+      if (event.type === 'download-start' || event.type === 'download-progress') {
+        setActiveDownload({
+          scope: event.scope,
+          receivedBytes: event.type === 'download-progress' ? (event.receivedBytes ?? 0) : 0,
+          totalBytes: event.type === 'download-progress' ? event.totalBytes : undefined,
+          message: nextMessage
+        });
+      } else {
+        setActiveDownload(undefined);
+      }
+      if (event.scope === 'model') {
+        setModelActivity(nextMessage);
+      } else if (event.scope === 'ffmpeg') {
+        setFfmpegActivity(nextMessage);
+      }
+      setMessage(nextMessage);
+      if (event.type !== 'download-progress') {
+        pushToast(nextMessage, toastToneForAssetEvent(event));
+      }
+      if (event.type === 'ready' || event.type === 'error') {
+        void refreshModels();
+      }
+    },
+    [i18n, settings?.asrProviderId, writeUiLog]
+  );
+
+  useJobEvents(handleJobEvent);
+  useAssetEvents(handleAssetEvent);
 
   useEffect(() => {
     if (!settings?.asrProviderId) return;
