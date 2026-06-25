@@ -174,7 +174,7 @@ export function WorkspaceView(props: WorkspaceViewProps): JSX.Element {
         )}
 
         <section className="workspaceMain">
-          <section className="workspaceHero" aria-label={props.t('currentJob')}>
+          <section className={`workspaceHero${props.asrProviderId === 'local.faster-whisper' ? ' fasterWhisperHero' : ''}`} aria-label={props.t('currentJob')}>
             <div className="jobMediaCard">
               <div className="workspaceCardTop">
                 <span className="fieldLabel">{props.t('currentJob')}</span>

@@ -227,17 +227,19 @@ export function SelectField(props: {
   targetOnly?: boolean;
   onChange: (value: string) => void;
 }): JSX.Element {
+  const options = languageRegistry.filter((language) =>
+    props.targetOnly ? language.supportsTranslationTarget : language.supportsAsr
+  );
+
   return (
     <label>
       {props.label}
       <select value={props.value} onChange={(event) => props.onChange(event.target.value)}>
-        {languageRegistry
-          .filter((language) => (props.targetOnly ? language.code !== 'auto' : true))
-          .map((language) => (
-            <option key={language.code} value={language.code}>
-              {props.uiLanguage === 'zh-CN' ? language.nativeName : language.englishName}
-            </option>
-          ))}
+        {options.map((language) => (
+          <option key={language.code} value={language.code}>
+            {props.uiLanguage === 'zh-CN' ? language.nativeName : language.englishName}
+          </option>
+        ))}
       </select>
     </label>
   );
