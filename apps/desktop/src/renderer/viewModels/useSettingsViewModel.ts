@@ -969,11 +969,11 @@ function providerStatusLabel(status: ProviderHealth['status']): string {
 }
 
 function runtimeActionLabel(action: WhisperRuntimeStatus['actionRequired'] = 'none'): string {
-  return action === 'none' ? 'ready' : action.replace(/-/g, '');
+  return `runtimeAction.${action}`;
 }
 
 function modelActionLabel(action: WhisperModelStatus['actionRequired'] = 'none'): string {
-  return action === 'none' ? 'ready' : action.replace(/-/g, '');
+  return `runtimeAction.${action}`;
 }
 
 function assetEventLabel(event: AssetEvent, t: (key: string, options?: Record<string, unknown>) => string): string {

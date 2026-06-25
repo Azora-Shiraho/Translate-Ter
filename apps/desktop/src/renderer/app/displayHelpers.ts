@@ -16,7 +16,7 @@ import { formatTimestamp } from '@shared/srt';
 import type { ActiveDownload } from './types';
 
 export function stageLabel(stage: JobStage): string {
-  return stage === 'checking-runtime' ? 'checkingRuntime' : stage.replace(/-/g, '');
+  return `stage.${stage}`;
 }
 
 export function statusLabel(status: SubtitleStatus): string {
@@ -42,11 +42,11 @@ export function providerStatusLabel(status: ProviderHealth['status']): string {
 }
 
 export function runtimeActionLabel(action: WhisperRuntimeStatus['actionRequired'] = 'none'): string {
-  return action === 'none' ? 'ready' : action.replace(/-/g, '');
+  return `runtimeAction.${action}`;
 }
 
 export function modelActionLabel(action: WhisperModelStatus['actionRequired'] = 'none'): string {
-  return action === 'none' ? 'ready' : action.replace(/-/g, '');
+  return `runtimeAction.${action}`;
 }
 
 export function exportDestinationModeLabel(mode: ExportDestinationMode): string {

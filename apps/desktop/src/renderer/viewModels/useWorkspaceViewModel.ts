@@ -245,7 +245,7 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
 }
 
 function stageLabel(stage: JobStage): string {
-  return stage === 'checking-runtime' ? 'checkingRuntime' : stage.replace(/-/g, '');
+  return `stage.${stage}`;
 }
 
 function summarizeJobEventForLog(event: JobEvent): Record<string, unknown> {
