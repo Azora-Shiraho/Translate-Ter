@@ -275,10 +275,14 @@ function summarizeJobEventForLog(event: JobEvent): Record<string, unknown> {
 }
 
 function deriveWorkflowWarnings(job?: JobSnapshot): SubtitleWarning[] {
-  if (!job?.warnings?.length) return [];
+  if (!job) return [];
+  const jobWarnings = job.warnings ?? [];
+  const documentWarnings = job.subtitleDocument?.metadata.warnings ?? [];
+  const allWarnings = [...jobWarnings, ...documentWarnings];
+  if (!allWarnings.length) return [];
   const segments = job.subtitleDocument?.segments ?? [];
   const seen = new Set<string>();
-  return job.warnings
+  return allWarnings
     .filter((warning) => {
       if (warning.stage === 'translate') return true;
       return ['ParseError', 'InvalidTiming', 'EmptyText', 'TimingOverlap', 'CudaFallback', 'CudaTranscriptionCrashFallback', 'NativeCapabilityUnavailable'].includes(warning.code);
