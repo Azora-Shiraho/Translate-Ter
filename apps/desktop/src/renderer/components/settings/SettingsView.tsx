@@ -21,6 +21,7 @@ import {
   describeFfmpegLocation,
   describeModelFootprint,
   exportDestinationModeLabel,
+  formatBytes,
   localCpuModeDetailLabel,
   localCpuModeLabel,
   logLevelDetailLabel,
@@ -567,6 +568,49 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
                               </div>
                             ))}
                           </div>
+                        </div>
+                      </InspectorSection>
+                    </div>
+
+                    <div
+                      className={`settingsGroupCard settingsGroupCardAccent${settingsVm.activeSettingsJumpTarget === 'whisper-model' ? ' settingsJumpTargetActive' : ''}`}
+                      ref={settingsVm.whisperModelSettingsRef}
+                      tabIndex={-1}
+                    >
+                      <InspectorSection icon={<HardDriveDownload size={16} />} title={t('whisperModel')}>
+                        <label>
+                          {t('whisperModel')}
+                          <select
+                            value={settings.whisperModelId}
+                            onChange={(event) => void settingsVm.updateSettings({ whisperModelId: event.target.value })}
+                          >
+                            {settingsVm.models.map((model) => (
+                              <option key={model.id} value={model.id}>
+                                {model.displayName} · {describeModelFootprint(model, t)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <div className="modelCard accentCard">
+                          <div>
+                            <span className="signal accent" />
+                            <strong>{statusVm.selectedModel?.displayName ?? t('whisperModel')}</strong>
+                            <small>
+                              {statusVm.selectedModel
+                                ? describeModelFootprint(statusVm.selectedModel, t)
+                                : t('whisperModel')}
+                            </small>
+                          </div>
+                          {statusVm.selectedModel && (
+                            <div className="modelMetaRow">
+                              {statusVm.selectedModel.estimatedVramBytes && (
+                                <span className="modelMetaChip">
+                                  {t('estimatedVramLabel')}: {formatBytes(statusVm.selectedModel.estimatedVramBytes)}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          <p>{t('fasterWhisperModelManagedDetail')}</p>
                         </div>
                       </InspectorSection>
                     </div>

@@ -94,7 +94,12 @@ export function ProviderCard(props: {
           <small>{props.showMessage ? props.state.detail : props.detail}</small>
         </div>
         <div className="settingsActionRow">
-          <button className="secondary compact settingsActionButton" disabled={props.loading} onClick={props.onTest} type="button">
+          <button
+            className="secondary compact settingsActionButton"
+            disabled={props.loading || props.actionDisabled}
+            onClick={props.onTest}
+            type="button"
+          >
             <CheckCircle2 size={16} />
             {props.loading ? props.actionLabel ?? '...' : props.actionLabel ?? 'Test'}
           </button>
