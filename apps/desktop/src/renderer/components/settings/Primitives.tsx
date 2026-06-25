@@ -136,15 +136,16 @@ export function TextField(props: {
   return (
     <label>
       {props.label}
-      <div className="textFieldShell">
+      <div className="textFieldControl textFieldShell">
         <input
+          className="textFieldInput"
           type={inputType}
           value={props.value}
           placeholder={props.placeholder}
           onChange={(event) => props.onChange(event.target.value)}
         />
         {props.revealable ? (
-          <button className="iconButton" onClick={() => setRevealed((current) => !current)} type="button">
+          <button className="textFieldActionButton iconButton" onClick={() => setRevealed((current) => !current)} type="button">
             {revealed ? <EyeOff size={15} /> : <Eye size={15} />}
             <span>{revealed ? props.hideToggleLabel : props.showToggleLabel}</span>
           </button>
