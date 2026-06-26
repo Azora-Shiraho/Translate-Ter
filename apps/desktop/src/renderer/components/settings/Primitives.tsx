@@ -89,34 +89,32 @@ export function ProviderCard(props: {
 
   return (
     <div className={`providerCard tone-${props.state.tone}`}>
-      <div className="providerCardHeader">
-        <div>
-          <span className={`signal ${props.state.tone}`} />
-          <strong>{props.state.label}</strong>
-          <small>{detailText}</small>
-        </div>
-        <div className="settingsActionRow">
+      <div>
+        <span className={`signal ${props.state.tone}`} />
+        <strong>{props.state.label}</strong>
+        <small>{detailText}</small>
+      </div>
+      <div className="settingsActionRow">
+        <button
+          className="secondary compact settingsActionButton"
+          disabled={props.loading || props.actionDisabled}
+          onClick={props.onTest}
+          type="button"
+        >
+          <CheckCircle2 size={16} />
+          {props.loading ? props.actionLabel ?? '...' : props.actionLabel ?? 'Test'}
+        </button>
+        {props.secondaryActionLabel ? (
           <button
             className="secondary compact settingsActionButton"
-            disabled={props.loading || props.actionDisabled}
-            onClick={props.onTest}
+            disabled={props.secondaryActionDisabled || props.secondaryActionLoading}
+            onClick={props.onSecondaryAction}
             type="button"
           >
-            <CheckCircle2 size={16} />
-            {props.loading ? props.actionLabel ?? '...' : props.actionLabel ?? 'Test'}
+            <ArrowUpRight size={16} />
+            {props.secondaryActionLabel}
           </button>
-          {props.secondaryActionLabel ? (
-            <button
-              className="secondary compact settingsActionButton"
-              disabled={props.secondaryActionDisabled || props.secondaryActionLoading}
-              onClick={props.onSecondaryAction}
-              type="button"
-            >
-              <ArrowUpRight size={16} />
-              {props.secondaryActionLabel}
-            </button>
-          ) : null}
-        </div>
+        ) : null}
       </div>
       {props.health?.message ? <p>{props.health.message}</p> : null}
     </div>
