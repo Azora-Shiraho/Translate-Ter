@@ -108,9 +108,22 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
             <SettingsFactCard
               icon={<Gauge size={16} />}
               label={t('summaryCudaEnvironment')}
-              value={statusVm.cudaStatusShort}
-              tone={statusVm.cudaMismatchDetected || statusVm.cudaRuntimeMissing ? 'warn' : statusVm.cudaStatusShort === t('ok') ? 'good' : 'muted'}
-              onClick={() => settingsVm.jumpToSettingsTarget(statusVm.accelerationJumpTarget)}
+              value={statusVm.usingFasterWhisper ? statusVm.fasterWhisperCudaShort : statusVm.cudaStatusShort}
+              detail={statusVm.usingFasterWhisper ? statusVm.fasterWhisperCudaDetail : undefined}
+              tone={
+                statusVm.usingFasterWhisper
+                  ? statusVm.fasterWhisperCudaShort === t('ok')
+                    ? 'good'
+                    : statusVm.fasterWhisperCudaShort === t('notChecked')
+                      ? 'muted'
+                      : 'warn'
+                  : statusVm.cudaMismatchDetected || statusVm.cudaRuntimeMissing
+                    ? 'warn'
+                    : statusVm.cudaStatusShort === t('ok')
+                      ? 'good'
+                      : 'muted'
+              }
+              onClick={() => settingsVm.jumpToSettingsTarget(statusVm.usingFasterWhisper ? 'cuda' : statusVm.accelerationJumpTarget)}
             />
             <SettingsFactCard
               icon={<HardDriveDownload size={16} />}
