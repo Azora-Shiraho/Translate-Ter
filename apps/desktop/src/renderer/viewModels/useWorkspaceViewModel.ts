@@ -302,6 +302,8 @@ function deriveWorkflowWarnings(job?: JobSnapshot): SubtitleWarning[] {
         'TimingOverlap',
         'CudaFallback',
         'CudaTranscriptionCrashFallback',
+        'CudaRuntimeNotDetected',
+        'CudaDisabled',
         'NativeCapabilityUnavailable',
         'download-runtime',
         'download-model',
