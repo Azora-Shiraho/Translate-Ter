@@ -85,13 +85,15 @@ export function ProviderCard(props: {
   onSecondaryAction?: () => void;
   showMessage?: boolean;
 }): JSX.Element {
+  const detailText = props.showMessage ? props.state.detail : (props.health?.message ? props.detail : props.state.detail);
+
   return (
     <div className={`providerCard tone-${props.state.tone}`}>
       <div className="providerCardHeader">
         <div>
           <span className={`signal ${props.state.tone}`} />
           <strong>{props.state.label}</strong>
-          <small>{props.showMessage ? props.state.detail : props.detail}</small>
+          <small>{detailText}</small>
         </div>
         <div className="settingsActionRow">
           <button
