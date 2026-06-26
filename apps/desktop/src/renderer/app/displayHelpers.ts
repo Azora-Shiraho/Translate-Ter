@@ -56,9 +56,9 @@ export function exportDestinationModeLabel(mode: ExportDestinationMode): string 
 export function providerLabel(providerId: string, t: (key: string) => string): string {
   switch (providerId) {
     case 'local.whisper.cpp':
-      return t('localProvider');
+      return t('localWhisperCppProvider');
     case 'local.faster-whisper':
-      return t('localProvider');
+      return t('localFasterWhisperProvider');
     case 'cloud.openai':
       return t('cloudProvider');
     case 'openai.compatible':

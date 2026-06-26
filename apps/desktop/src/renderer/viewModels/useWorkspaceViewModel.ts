@@ -285,7 +285,22 @@ function deriveWorkflowWarnings(job?: JobSnapshot): SubtitleWarning[] {
   return allWarnings
     .filter((warning) => {
       if (warning.stage === 'translate') return true;
-      return ['ParseError', 'InvalidTiming', 'EmptyText', 'TimingOverlap', 'CudaFallback', 'CudaTranscriptionCrashFallback', 'NativeCapabilityUnavailable'].includes(warning.code);
+      return [
+        'ParseError',
+        'InvalidTiming',
+        'EmptyText',
+        'TimingOverlap',
+        'CudaFallback',
+        'CudaTranscriptionCrashFallback',
+        'NativeCapabilityUnavailable',
+        'download-runtime',
+        'download-model',
+        'download-cuda-runtime',
+        'manifest-not-configured',
+        'unsupported-platform',
+        'pin-manifest-hashes',
+        'download-required'
+      ].includes(warning.code);
     })
     .map((warning, index) => enrichWarning(warning, segments, index))
     .filter((warning) => {
