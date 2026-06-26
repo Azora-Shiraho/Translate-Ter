@@ -73,10 +73,11 @@ export function useProviderStatusViewModel(input: UseProviderStatusViewModelInpu
       asrHealth,
       job
     });
-    const backendAccelerationState = deriveBackendAccelerationState({ t, runtimeStatus, asrProviderId });
+    const backendAccelerationState = deriveBackendAccelerationState({ t, runtimeStatus, asrHealth, asrProviderId });
     const runtimeModelState = deriveRuntimeModelState({
       t,
       runtimeStatus,
+      selectedModel,
       selectedModelInstalled,
       selectedModelVerified,
       asrProviderId
@@ -624,9 +625,34 @@ function deriveRuntimeState(input: {
 function deriveBackendAccelerationState(input: {
   t: (key: string) => string;
   runtimeStatus?: WhisperRuntimeStatus;
+  asrHealth?: ProviderHealth;
   asrProviderId: string;
 }): DerivedHealthState {
-  const { t, runtimeStatus, asrProviderId } = input;
+  const { t, runtimeStatus, asrHealth, asrProviderId } = input;
+  if (asrProviderId === 'local.faster-whisper') {
+    if (!asrHealth?.acceleration) {
+      return { tone: 'muted', label: t('notChecked'), detail: t('runtimeNotChecked') };
+    }
+
+    const acceleration = asrHealth.acceleration;
+    if (acceleration.selected === 'gpu') {
+      return {
+        tone: 'good',
+        label: t(runtimeVariantOptionLabel(acceleration.runtimeVariant)),
+        detail: describeProviderAccelerationDetail(acceleration, t)
+      };
+    }
+
+    if (acceleration.requested === 'cpu') {
+      return { tone: 'accent', label: t('cpuOption'), detail: t('gpuDisabledUsesCpu') };
+    }
+
+    return {
+      tone: acceleration.fallbackReason ? 'warn' : 'accent',
+      label: t('cpuOption'),
+      detail: describeProviderAccelerationDetail(acceleration, t)
+    };
+  }
   if (asrProviderId !== 'local.whisper.cpp') {
     return { tone: 'muted', label: t('unknown'), detail: t('localWhisperNotRequiredDetail') };
   }
@@ -659,11 +685,20 @@ function deriveBackendAccelerationState(input: {
 function deriveRuntimeModelState(input: {
   t: (key: string) => string;
   runtimeStatus?: WhisperRuntimeStatus;
+  selectedModel?: WhisperModelInfo;
   selectedModelInstalled: boolean;
   selectedModelVerified: boolean;
   asrProviderId: string;
 }): DerivedHealthState {
-  const { t, runtimeStatus, selectedModelInstalled, selectedModelVerified, asrProviderId } = input;
+  const { t, runtimeStatus, selectedModel, selectedModelInstalled, selectedModelVerified, asrProviderId } = input;
+  if (asrProviderId === 'local.faster-whisper') {
+    const footprint = selectedModel ? describeModelFootprint(selectedModel, t) : undefined;
+    return {
+      tone: 'accent',
+      label: selectedModel?.displayName ?? t('whisperModel'),
+      detail: [t('fasterWhisperModelManagedDetail'), footprint].filter(Boolean).join(' · ')
+    };
+  }
   if (asrProviderId !== 'local.whisper.cpp') {
     return { tone: 'muted', label: t('notRequired'), detail: t('localWhisperNotRequiredDetail') };
   }
@@ -732,6 +767,20 @@ function deriveSelectedModelOverviewState(input: {
     label: selectedModel?.displayName ?? t('whisperModel'),
     detail: [t('runtimeModelMissingDetail'), footprint].filter(Boolean).join(' · ')
   };
+}
+
+function describeProviderAccelerationDetail(
+  acceleration: ProviderHealth['acceleration'],
+  t: (key: string) => string
+): string {
+  if (!acceleration) return t('runtimeNotChecked');
+  if (acceleration.selected === 'gpu') {
+    return t('gpuEnabledUsesCuda');
+  }
+  if (acceleration.requested === 'cpu') {
+    return t('gpuDisabledUsesCpu');
+  }
+  return acceleration.fallbackReason ? t(fallbackReasonLabel(acceleration.fallbackReason)) : t('autoOption');
 }
 
 function describeCudaStatusDetail(

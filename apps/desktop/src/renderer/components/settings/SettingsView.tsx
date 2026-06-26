@@ -129,6 +129,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
               icon={<HardDriveDownload size={16} />}
               label={t('summaryModelFiles')}
               value={statusVm.runtimeModelState.label}
+              detail={statusVm.runtimeModelState.detail}
               tone={statusVm.runtimeModelState.tone}
               onClick={() => settingsVm.jumpToSettingsTarget(statusVm.modelJumpTarget)}
             />
@@ -318,6 +319,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
                     </label>
                     <ProviderCard
                       activeId={settings.asrProviderId}
+                      title={providerLabel(settings.asrProviderId, t)}
                       detail={statusVm.asrProviderState.detail}
                       health={statusVm.asrHealth}
                       state={statusVm.runtimeState}
@@ -671,6 +673,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
                     </label>
                     <ProviderCard
                       activeId={statusVm.translationProviderId}
+                      title={providerLabel(statusVm.translationProviderId, t)}
                       detail={t('translationProviderDetail')}
                       health={statusVm.llmHealth}
                       state={statusVm.translationState}

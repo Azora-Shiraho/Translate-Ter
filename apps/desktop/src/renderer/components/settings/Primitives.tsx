@@ -72,6 +72,7 @@ export function SectionTitle(props: { icon: React.ReactNode; title: string }): J
 
 export function ProviderCard(props: {
   activeId: string;
+  title: string;
   detail: string;
   health?: ProviderHealth;
   state: DerivedHealthState;
@@ -86,13 +87,14 @@ export function ProviderCard(props: {
   showMessage?: boolean;
 }): JSX.Element {
   const detailText = props.showMessage ? props.state.detail : (props.health?.message ? props.detail : props.state.detail);
+  const detailWithStatus = detailText === props.state.label ? detailText : `${props.state.label} · ${detailText}`;
 
   return (
     <div className={`providerCard tone-${props.state.tone}`}>
       <div>
         <span className={`signal ${props.state.tone}`} />
-        <strong>{props.state.label}</strong>
-        <small>{detailText}</small>
+        <strong>{props.title}</strong>
+        <small>{detailWithStatus}</small>
       </div>
       <div className="settingsActionRow">
         <button
