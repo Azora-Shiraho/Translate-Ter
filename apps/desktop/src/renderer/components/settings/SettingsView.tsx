@@ -14,6 +14,11 @@ import {
   ArrowRightLeft
 } from 'lucide-react';
 import type { AppLogLevel, AppSettingsPublic, ExportDestinationMode, SubtitleFileFormat } from '@shared/types';
+import {
+  getProviderCatalogEntry,
+  settingsVisibleAsrProviders,
+  settingsVisibleTranslationProviders
+} from '@shared/providers/catalog';
 import type { useSettingsViewModel } from '../../viewModels/useSettingsViewModel';
 import type { useProviderStatusViewModel } from '../../viewModels/useProviderStatusViewModel';
 import {
@@ -49,6 +54,8 @@ type SettingsViewProps = {
 export function SettingsView(props: SettingsViewProps): JSX.Element | null {
   const { t, settingsVm, statusVm } = props;
   const settings = settingsVm.settings;
+  const currentAsrProvider = getProviderCatalogEntry(settings?.asrProviderId ?? '');
+  const currentTranslationProvider = getProviderCatalogEntry(statusVm.translationProviderId);
 
   if (!settings) return null;
 
@@ -312,9 +319,11 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
                         value={settings.asrProviderId}
                         onChange={(event) => void settingsVm.updateSettings({ asrProviderId: event.target.value })}
                       >
-                        <option value="local.whisper.cpp">{providerLabel('local.whisper.cpp', t)}</option>
-                        <option value="local.faster-whisper">{providerLabel('local.faster-whisper', t)}</option>
-                        <option value="cloud.openai">{providerLabel('cloud.openai', t)}</option>
+                        {settingsVisibleAsrProviders.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {providerLabel(provider.id, t)}
+                          </option>
+                        ))}
                       </select>
                     </label>
                     <ProviderCard
@@ -628,11 +637,11 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
                   </div>
                 )}
 
-                {settings.asrProviderId === 'cloud.openai' && (
+                {currentAsrProvider?.visibleInSettings && currentAsrProvider.secretFields.length > 0 && (
                   <ProviderApiSettingsCard
                     t={t}
-                    providerId="cloud.openai"
-                    secret={settingsVm.providerSecrets['cloud.openai'] ?? {}}
+                    provider={currentAsrProvider}
+                    secret={settingsVm.providerSecrets[currentAsrProvider.id] ?? {}}
                     checkingProvider={settingsVm.checkingProvider}
                     onUpdateProviderSecret={settingsVm.updateProviderSecret}
                     onSaveProviderSecret={(providerId) => void settingsVm.saveProviderSecret(providerId)}
@@ -668,7 +677,11 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
                         value={statusVm.translationProviderId}
                         onChange={(event) => void settingsVm.updateSettings({ translationProviderPriority: [event.target.value] })}
                       >
-                        <option value="openai.compatible">{providerLabel('openai.compatible', t)}</option>
+                        {settingsVisibleTranslationProviders.map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {providerLabel(provider.id, t)}
+                          </option>
+                        ))}
                       </select>
                     </label>
                     <ProviderCard
@@ -684,12 +697,12 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
                   </InspectorSection>
                 </div>
 
-                {statusVm.translationProviderId === 'openai.compatible' && (
+                {currentTranslationProvider?.visibleInSettings && currentTranslationProvider.secretFields.length > 0 && (
                   <>
                     <ProviderApiSettingsCard
                       t={t}
-                      providerId="openai.compatible"
-                      secret={settingsVm.providerSecrets['openai.compatible'] ?? {}}
+                      provider={currentTranslationProvider}
+                      secret={settingsVm.providerSecrets[currentTranslationProvider.id] ?? {}}
                       checkingProvider={settingsVm.checkingProvider}
                       onUpdateProviderSecret={settingsVm.updateProviderSecret}
                       onSaveProviderSecret={(providerId) => void settingsVm.saveProviderSecret(providerId)}

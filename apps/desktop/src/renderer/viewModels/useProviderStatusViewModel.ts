@@ -10,9 +10,9 @@ import type {
   WhisperModelStatus,
   WhisperRuntimeStatus
 } from '@shared/types';
+import { getProviderCatalogEntry } from '@shared/providers/catalog';
 import type { RuntimeVariantSelection } from '../asrSettings';
 import { isExperimentalWhisperRuntimeVariant, isVerifiedWhisperGpuRuntimeVariant } from '../asrSettings';
-import { asrProviders } from '../app/constants';
 import type { DerivedHealthState, RuntimeStatusRow, SettingsJumpTarget } from '../app/types';
 
 type UseProviderStatusViewModelInput = {
@@ -92,12 +92,11 @@ export function useProviderStatusViewModel(input: UseProviderStatusViewModelInpu
     const translationState = deriveTranslationState({
       t,
       providerId: translationProviderId,
+      description: t(getProviderCatalogEntry(translationProviderId)?.descriptionKey ?? 'translationProviderDetail'),
       health: llmHealth,
       job
     });
-    const asrProviderDescription = t(
-      asrProviders.find((provider) => provider.id === asrProviderId)?.descriptionKey ?? 'providerReady'
-    );
+    const asrProviderDescription = t(getProviderCatalogEntry(asrProviderId)?.descriptionKey ?? 'providerReady');
     const asrProviderState = deriveAsrProviderState({
       t,
       asrProviderId,
@@ -242,7 +241,6 @@ export function useProviderStatusViewModel(input: UseProviderStatusViewModelInpu
       fasterWhisperCudaShort
     };
   }, [
-    asrProviders,
     configuredAcceleration,
     cudaFlowRelevant,
     cudaStatus,
@@ -362,10 +360,11 @@ function buildFasterWhisperRuntimeStatusRows(input: {
 function deriveTranslationState(input: {
   t: (key: string) => string;
   providerId: string;
+  description: string;
   health?: ProviderHealth;
   job?: JobSnapshot;
 }): DerivedHealthState {
-  const { t, providerId, health, job } = input;
+  const { t, description, health, job } = input;
   if (job?.stage === 'failed' && job.error && job.step === 'translate') {
     return { tone: 'error', label: t('error'), detail: job.error.message };
   }
@@ -373,7 +372,7 @@ function deriveTranslationState(input: {
     return {
       tone: 'muted',
       label: t('notChecked'),
-      detail: t(providerId === 'openai.compatible' ? 'translationProviderNotChecked' : 'notChecked')
+      detail: description
     };
   }
   if (health.ok) {
