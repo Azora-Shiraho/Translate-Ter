@@ -984,9 +984,13 @@ function modelActionLabel(action: WhisperModelStatus['actionRequired'] = 'none')
 function assetEventLabel(event: AssetEvent, t: (key: string, options?: Record<string, unknown>) => string): string {
   switch (event.type) {
     case 'download-start':
-      return t('downloadStarting');
+      return event.scope === 'ffmpeg' ? t('ffmpegDownloading') : t('runtimeDownloading');
     case 'download-progress':
-      return t('downloadProgress');
+      return event.receivedBytes
+        ? t(event.scope === 'ffmpeg' ? 'ffmpegDownloadingBytes' : 'runtimeDownloadingBytes', {
+            bytes: formatBytes(event.receivedBytes)
+          })
+        : t(event.scope === 'ffmpeg' ? 'ffmpegDownloading' : 'runtimeDownloading');
     case 'ready':
       return event.scope === 'ffmpeg' ? t('ffmpegReady') : event.scope === 'model' ? t('modelReady') : t('runtimeReady');
     case 'error':
@@ -1025,6 +1029,9 @@ function describeDomValue(target: EventTarget | null): unknown {
   if (target instanceof HTMLInputElement && target.type === 'checkbox') {
     return target.checked;
   }
+  if (target instanceof HTMLInputElement && target.type === 'password') {
+    return '[REDACTED]';
+  }
   return target.value;
 }
 
@@ -1056,46 +1063,80 @@ function describeSelectedModelResult(
 
 function describeCudaStatusDetail(
   status: WhisperRuntimeStatus | undefined,
-  t: (key: string) => string,
+  t: (key: string, options?: Record<string, unknown>) => string,
   ignoreMismatch: boolean
 ): string {
   if (!status) return t('runtimeNotChecked');
   if (status.acceleration.cudaSupported) {
-    return describeWhisperAccelerationDetail(status, t);
+    return status.acceleration.versionMismatch ? t('cudaDetectedIgnoredMismatch') : t('cudaDetected');
+  }
+  if (hasBlockingCudaMismatch(status, ignoreMismatch)) {
+    return t('cudaRuntimeMismatchWithVersion', {
+      required: status.acceleration.requiredCudaVersion ?? 'unknown',
+      current: status.acceleration.runtimeCudaVersion ?? 'unknown'
+    });
   }
   if (status.acceleration.hardwareDetected && !status.acceleration.runtimeDetected) {
-    return t('cudaRuntimeMissingDetail');
+    return t('cudaRuntimeMissing');
   }
-  if (!ignoreMismatch && status.acceleration.fallbackReason === 'cuda-mismatch') {
-    return t('cudaMismatchDetail');
+  if (!status.acceleration.hardwareDetected) {
+    return t('cudaNoHardware');
   }
-  return status.message ?? t('runtimeNotChecked');
+  return status.message ?? fallbackReasonLabel(status.acceleration.fallbackReason, t, 'cuda');
 }
 
 function describeWhisperAccelerationDetail(
   status: WhisperRuntimeStatus,
-  t: (key: string) => string
+  t: (key: string, options?: Record<string, unknown>) => string
 ): string {
   if (status.acceleration.selected === 'gpu') {
-    return t('gpuEnabledUsesCuda');
+    switch (status.acceleration.runtimeVariant) {
+      case 'cuda':
+        return describeCudaStatusDetail(status, t, false);
+      case 'metal':
+        return t('metalDetected');
+      case 'vulkan':
+        return t('vulkanExperimental');
+      default:
+        return t('gpuDetected');
+    }
   }
   if (status.acceleration.requested === 'cpu') {
     return t('gpuDisabledUsesCpu');
   }
-  return status.acceleration.fallbackReason ? t(fallbackReasonLabel(status.acceleration.fallbackReason)) : t('autoOption');
+  return status.acceleration.fallbackReason
+    ? fallbackReasonLabel(status.acceleration.fallbackReason, t)
+    : t('runtimeReady');
 }
 
-function fallbackReasonLabel(reason?: WhisperRuntimeStatus['acceleration']['fallbackReason']): string {
-  switch (reason) {
-    case 'cuda-mismatch':
-      return 'cudaMismatchDetail';
-    case 'cuda-unavailable':
-      return 'cudaUnavailableDetail';
-    case 'gpu-not-supported':
-      return 'gpuNotSupportedDetail';
-    default:
-      return 'runtimeVariantAutomatic';
+function hasBlockingCudaMismatch(status: WhisperRuntimeStatus | undefined, ignoreMismatch = false): boolean {
+  if (!status || ignoreMismatch) return false;
+  const required = status.acceleration.requiredCudaVersion;
+  const current = status.acceleration.runtimeCudaVersion;
+  return (
+    status.acceleration.fallbackReason === 'cuda-mismatch' ||
+    (Boolean(required) && Boolean(current) && required !== current)
+  );
+}
+
+function fallbackReasonLabel(
+  reason: WhisperRuntimeStatus['acceleration']['fallbackReason'],
+  t: (key: string) => string,
+  variant: RuntimeVariantSelection = 'auto'
+): string {
+  const isCudaVariant = variant === 'cuda';
+  if (reason === 'gpu-runtime-missing') return isCudaVariant ? t('cudaRuntimeMissing') : t('gpuUnavailable');
+  if (reason === 'gpu-not-detected') return isCudaVariant ? t('cudaNoHardware') : t('gpuNoHardware');
+  if (
+    reason === 'gpu-not-supported' ||
+    reason === 'gpu-not-compatible' ||
+    reason === 'preferred-variant-unavailable' ||
+    reason === 'gpu-variant-unavailable' ||
+    reason === 'cuda-unavailable'
+  ) {
+    return isCudaVariant ? t('cudaUnavailable') : t('gpuUnavailable');
   }
+  return isCudaVariant ? t('cudaUnavailable') : t('gpuUnavailable');
 }
 
 function describeFfmpegStatusDetail(
@@ -1106,6 +1147,18 @@ function describeFfmpegStatusDetail(
   if (status.available) return t('ffmpegReady');
   if (status.ffmpegAvailable || status.ffprobeAvailable) return t('ffmpegPartialDetail');
   return t('ffmpegMissingDetail');
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 MB';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let next = value;
+  let index = 0;
+  while (next >= 1024 && index < units.length - 1) {
+    next /= 1024;
+    index += 1;
+  }
+  return `${next.toFixed(index <= 1 ? 0 : 1)} ${units[index]}`;
 }
 
 function shouldRetryNativeHealth(health: NativeHealth): boolean {
