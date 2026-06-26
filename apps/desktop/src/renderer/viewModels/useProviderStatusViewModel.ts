@@ -261,7 +261,7 @@ export function useProviderStatusViewModel(input: UseProviderStatusViewModelInpu
 }
 
 function providerStatusLabel(status: ProviderHealth['status']): string {
-  return status === 'healthy' ? 'healthy' : status === 'degraded' ? 'degraded' : 'unavailable';
+  return `providerStatus.${status}`;
 }
 
 function runtimeActionLabel(action: WhisperRuntimeStatus['actionRequired'] = 'none'): string {

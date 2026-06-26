@@ -21,24 +21,24 @@ export function stageLabel(stage: JobStage): string {
 
 export function statusLabel(status: SubtitleStatus): string {
   switch (status) {
-    case 'translated':
-      return 'translated';
-    case 'edited':
-      return 'edited';
-    case 'warning':
-      return 'warning';
-    case 'failed':
-      return 'failed';
-    case 'transcribed':
-      return 'transcribed';
     case 'new':
+      return 'segmentStatus.new';
+    case 'transcribed':
+      return 'segmentStatus.transcribed';
+    case 'translated':
+      return 'segmentStatus.translated';
+    case 'edited':
+      return 'segmentStatus.edited';
+    case 'warning':
+      return 'segmentStatus.warning';
+    case 'failed':
     default:
-      return 'pending';
+      return 'segmentStatus.failed';
   }
 }
 
 export function providerStatusLabel(status: ProviderHealth['status']): string {
-  return status === 'healthy' ? 'healthy' : status === 'degraded' ? 'degraded' : 'unavailable';
+  return `providerStatus.${status}`;
 }
 
 export function runtimeActionLabel(action: WhisperRuntimeStatus['actionRequired'] = 'none'): string {
@@ -50,11 +50,7 @@ export function modelActionLabel(action: WhisperModelStatus['actionRequired'] = 
 }
 
 export function exportDestinationModeLabel(mode: ExportDestinationMode): string {
-  return mode === 'source-directory'
-    ? 'exportSourceDirectory'
-    : mode === 'selected-directory'
-      ? 'exportSelectedDirectory'
-      : 'exportAskEachTime';
+  return `exportDestination.${mode}`;
 }
 
 export function providerLabel(providerId: string, t: (key: string) => string): string {

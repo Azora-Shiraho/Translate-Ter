@@ -965,7 +965,7 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
 }
 
 function providerStatusLabel(status: ProviderHealth['status']): string {
-  return status === 'healthy' ? 'healthy' : status === 'degraded' ? 'degraded' : 'unavailable';
+  return `providerStatus.${status}`;
 }
 
 function runtimeActionLabel(action: WhisperRuntimeStatus['actionRequired'] = 'none'): string {
