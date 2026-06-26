@@ -73,56 +73,52 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
             </div>
           </div>
           <div className="settingsSummaryGrid">
-            {statusVm.usingWhisperCpp ? (
-              <>
-                <SettingsOverviewCard
-                  icon={<ShieldCheck size={16} />}
-                  eyebrow={t('summaryRecognitionRuntime')}
-                  title={statusVm.runtimeState.label}
-                  detail={statusVm.runtimeState.detail}
-                  tone={statusVm.runtimeState.tone}
-                  featured
-                  onClick={() => settingsVm.jumpToSettingsTarget(statusVm.runtimeSummaryJumpTarget)}
-                />
-                <SettingsFactCard
-                  icon={<ShieldCheck size={16} />}
-                  label={t('summaryDesktopBackend')}
-                  value={statusVm.nativeBackendState.label}
-                  detail={statusVm.nativeBackendState.detail}
-                  tone={statusVm.nativeBackendState.tone}
-                  onClick={() => settingsVm.jumpToSettingsTarget(statusVm.backendJumpTarget)}
-                />
-                <SettingsFactCard
-                  icon={<Download size={16} />}
-                  label={t('summaryFfmpegTools')}
-                  value={statusVm.ffmpegState.label}
-                  tone={statusVm.ffmpegState.tone}
-                  onClick={() => settingsVm.jumpToSettingsTarget(statusVm.ffmpegJumpTarget)}
-                />
-                <SettingsFactCard
-                  icon={<MonitorCog size={16} />}
-                  label={t('summaryBackendAcceleration')}
-                  value={statusVm.backendAccelerationState.label}
-                  detail={statusVm.backendAccelerationState.detail}
-                  tone={statusVm.backendAccelerationState.tone}
-                  onClick={() => settingsVm.jumpToSettingsTarget(statusVm.accelerationJumpTarget)}
-                />
-                <SettingsFactCard
-                  icon={<Gauge size={16} />}
-                  label={t('summaryCudaEnvironment')}
-                  value={statusVm.cudaStatusShort}
-                  tone={statusVm.cudaMismatchDetected || statusVm.cudaRuntimeMissing ? 'warn' : statusVm.cudaStatusShort === t('ok') ? 'good' : 'muted'}
-                  onClick={() => settingsVm.jumpToSettingsTarget(statusVm.accelerationJumpTarget)}
-                />
-                <SettingsFactCard
-                  icon={<HardDriveDownload size={16} />}
-                  label={t('summaryModelFiles')}
-                  value={statusVm.runtimeModelState.label}
-                  tone={statusVm.runtimeModelState.tone}
-                  onClick={() => settingsVm.jumpToSettingsTarget(statusVm.modelJumpTarget)}
-                />
-              </>
-            ) : null}
+            <SettingsOverviewCard
+              icon={<ShieldCheck size={16} />}
+              eyebrow={t('summaryRecognitionRuntime')}
+              title={statusVm.runtimeState.label}
+              detail={statusVm.runtimeState.detail}
+              tone={statusVm.runtimeState.tone}
+              featured={statusVm.usingWhisperCpp}
+              onClick={() => settingsVm.jumpToSettingsTarget(statusVm.runtimeSummaryJumpTarget)}
+            />
+            <SettingsFactCard
+              icon={<ShieldCheck size={16} />}
+              label={t('summaryDesktopBackend')}
+              value={statusVm.nativeBackendState.label}
+              detail={statusVm.nativeBackendState.detail}
+              tone={statusVm.nativeBackendState.tone}
+              onClick={() => settingsVm.jumpToSettingsTarget(statusVm.backendJumpTarget)}
+            />
+            <SettingsFactCard
+              icon={<Download size={16} />}
+              label={t('summaryFfmpegTools')}
+              value={statusVm.ffmpegState.label}
+              tone={statusVm.ffmpegState.tone}
+              onClick={() => settingsVm.jumpToSettingsTarget(statusVm.ffmpegJumpTarget)}
+            />
+            <SettingsFactCard
+              icon={<MonitorCog size={16} />}
+              label={t('summaryBackendAcceleration')}
+              value={statusVm.backendAccelerationState.label}
+              detail={statusVm.backendAccelerationState.detail}
+              tone={statusVm.backendAccelerationState.tone}
+              onClick={() => settingsVm.jumpToSettingsTarget(statusVm.accelerationJumpTarget)}
+            />
+            <SettingsFactCard
+              icon={<Gauge size={16} />}
+              label={t('summaryCudaEnvironment')}
+              value={statusVm.cudaStatusShort}
+              tone={statusVm.cudaMismatchDetected || statusVm.cudaRuntimeMissing ? 'warn' : statusVm.cudaStatusShort === t('ok') ? 'good' : 'muted'}
+              onClick={() => settingsVm.jumpToSettingsTarget(statusVm.accelerationJumpTarget)}
+            />
+            <SettingsFactCard
+              icon={<HardDriveDownload size={16} />}
+              label={t('summaryModelFiles')}
+              value={statusVm.runtimeModelState.label}
+              tone={statusVm.runtimeModelState.tone}
+              onClick={() => settingsVm.jumpToSettingsTarget(statusVm.modelJumpTarget)}
+            />
             <SettingsOverviewCard
               icon={<MonitorCog size={16} />}
               eyebrow={t('summaryAsrProvider')}
