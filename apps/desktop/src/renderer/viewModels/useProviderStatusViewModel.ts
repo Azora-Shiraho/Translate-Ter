@@ -853,14 +853,23 @@ function describeCudaStatusShort(
 ): string {
   if (!status) return t('notChecked');
   if (status.acceleration.cudaSupported) return t('ok');
-  if (!ignoreMismatch && status.acceleration.fallbackReason === 'cuda-mismatch') return t('degraded');
+  if (hasBlockingCudaMismatch(status, ignoreMismatch)) return t('degraded');
   if (status.acceleration.hardwareDetected && !status.acceleration.runtimeDetected) return t('downloadCudaRuntime');
   return t('notRequired');
 }
 
 function hasBlockingCudaMismatch(status: WhisperRuntimeStatus | undefined, ignoreMismatch = false): boolean {
   if (ignoreMismatch || !status) return false;
-  return status.acceleration.hardwareDetected && status.acceleration.fallbackReason === 'cuda-mismatch';
+  const required = status.acceleration.requiredCudaVersion;
+  const current = status.acceleration.runtimeCudaVersion;
+  return (
+    status.acceleration.fallbackReason === 'cuda-mismatch' ||
+    (status.acceleration.hardwareDetected &&
+      Boolean(required) &&
+      Boolean(current) &&
+      required !== current) ||
+    status.acceleration.versionMismatch
+  );
 }
 
 function fallbackReasonLabel(
