@@ -88,7 +88,8 @@ export function App(): JSX.Element {
     settings: settingsVm.settings,
     effectiveLocalWhisperUseCuda: settingsVm.effectiveLocalWhisperUseCuda,
     effectivePreferredRuntimeVariant: settingsVm.effectivePreferredRuntimeVariant,
-    ignoreCudaMismatch: settingsVm.ignoreCudaMismatch
+    ignoreCudaMismatch: settingsVm.ignoreCudaMismatch,
+    clearActiveDownload: settingsVm.clearActiveDownload
   });
   const statusVm = useProviderStatusViewModel({
     t,

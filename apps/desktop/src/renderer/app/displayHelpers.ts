@@ -272,13 +272,15 @@ export function deriveWorkspaceRuntimeDetail(input: {
   nativeHealth?: NativeHealth;
 }): string {
   if (input.asrProviderId === 'local.whisper.cpp') return input.runtimeState.detail;
+  const ffmpegAvailable =
+    input.ffmpegStatus?.available ?? Boolean(input.nativeHealth?.ffmpegAvailable && input.nativeHealth?.ffprobeAvailable);
+  if (!ffmpegAvailable) {
+    return input.t('ffmpegMissingDetail');
+  }
   if (input.asrProviderId === 'local.faster-whisper') {
     return input.asrHealth?.message ?? input.t('fasterWhisperPythonDetail');
   }
-  if (input.ffmpegStatus?.available ?? Boolean(input.nativeHealth?.ffmpegAvailable && input.nativeHealth?.ffprobeAvailable)) {
-    return input.asrHealth?.message ?? input.t('cloudProviderDetail');
-  }
-  return input.t('ffmpegMissingDetail');
+  return input.asrHealth?.message ?? input.t('cloudProviderDetail');
 }
 
 function isSubtitleWarningCode(code: string): boolean {

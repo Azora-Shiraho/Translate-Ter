@@ -13,10 +13,19 @@ type UseWorkspaceViewModelInput = {
   effectiveLocalWhisperUseCuda: boolean;
   effectivePreferredRuntimeVariant?: RuntimeVariantSelection;
   ignoreCudaMismatch: boolean;
+  clearActiveDownload: () => void;
 };
 
 export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
-  const { t, feedback, settings, effectiveLocalWhisperUseCuda, effectivePreferredRuntimeVariant, ignoreCudaMismatch } = input;
+  const {
+    t,
+    feedback,
+    settings,
+    effectiveLocalWhisperUseCuda,
+    effectivePreferredRuntimeVariant,
+    ignoreCudaMismatch,
+    clearActiveDownload
+  } = input;
   const [job, setJob] = useState<JobSnapshot>();
   const [mediaPath, setMediaPath] = useState('');
   const [selectedSegmentId, setSelectedSegmentId] = useState<string>();
@@ -179,6 +188,7 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
     if (!job) return;
     feedback.writeUiLog('warning', 'job.force-stop', { jobId: job.id }, 'renderer.workspace');
     invalidateActiveAction();
+    clearActiveDownload();
     await translateTerGateway.jobs.cancel(job.id);
     setJob(await translateTerGateway.jobs.get(job.id));
     feedback.pushStatus(t('stopped'), 'warning');

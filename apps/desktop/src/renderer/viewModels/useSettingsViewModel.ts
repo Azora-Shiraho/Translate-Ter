@@ -904,6 +904,10 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
     }));
   }
 
+  function clearActiveDownload(): void {
+    setActiveDownload(undefined);
+  }
+
   return {
     settings,
     models,
@@ -938,6 +942,7 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
     cudaApproved,
     fasterWhisperCudaApproved,
     hostPlatform,
+    clearActiveDownload,
     setProviderHealth,
     refreshModels,
     updateSettings,
