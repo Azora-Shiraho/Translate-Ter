@@ -60,9 +60,9 @@ export function providerLabel(providerId: string, t: (key: string) => string): s
     case 'local.faster-whisper':
       return t('localFasterWhisperProvider');
     case 'cloud.openai':
-      return t('cloudProvider');
+      return t('cloudOpenaiProvider');
     case 'openai.compatible':
-      return t('translationProvider');
+      return t('openaiCompatibleProvider');
     default:
       return providerId;
   }
