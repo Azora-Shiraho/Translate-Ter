@@ -91,13 +91,57 @@ inline std::string warning_json(const SubtitleWarning& warning) {
   return stream.str();
 }
 
+inline std::vector<std::string> extract_top_level_objects(const std::string& json_array) {
+  std::vector<std::string> objects;
+  int depth = 0;
+  bool in_string = false;
+  bool escaped = false;
+  std::size_t object_start = std::string::npos;
+
+  for (std::size_t index = 0; index < json_array.size(); ++index) {
+    const char ch = json_array[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\' && in_string) {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"') {
+      in_string = !in_string;
+      continue;
+    }
+    if (in_string) {
+      continue;
+    }
+    if (ch == '{') {
+      if (depth == 0) {
+        object_start = index;
+      }
+      ++depth;
+      continue;
+    }
+    if (ch == '}') {
+      --depth;
+      if (depth == 0 && object_start != std::string::npos) {
+        objects.push_back(json_array.substr(object_start, index - object_start + 1));
+        object_start = std::string::npos;
+      }
+    }
+  }
+
+  return objects;
+}
+
 inline std::vector<Segment> extract_segments_from_request(const std::string& request) {
   std::vector<Segment> segments;
-  const std::regex object_pattern("\\{[^{}]*\\\"startMs\\\"\\s*:\\s*-?\\d+[^{}]*\\\"endMs\\\"\\s*:\\s*-?\\d+[^{}]*\\\"sourceText\\\"\\s*:\\s*\\\"(?:\\\\.|[^\\\"\\\\])*\\\"[^{}]*\\}");
-  auto begin = std::sregex_iterator(request.begin(), request.end(), object_pattern);
-  auto end = std::sregex_iterator();
-  for (auto it = begin; it != end; ++it) {
-    const std::string object = it->str();
+  const auto raw_segments = extract_array(request, "segments");
+  if (!raw_segments) {
+    return segments;
+  }
+
+  for (const auto& object : extract_top_level_objects(*raw_segments)) {
     const auto start = extract_int(object, "startMs");
     const auto finish = extract_int(object, "endMs");
     const auto source_text = extract_string(object, "sourceText");
