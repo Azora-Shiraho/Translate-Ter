@@ -127,12 +127,17 @@ describe('JobManager', () => {
     const nativeBackend = {
       cancelRunningWork: vi.fn()
     };
+    const nativeMedia = {
+      probeMedia: vi.fn(),
+      extractAudio: vi.fn()
+    };
     const fasterWhisper = {
       cancel: vi.fn()
     };
     const manager = new JobManager(
       settings as any,
       nativeBackend as any,
+      nativeMedia as any,
       fasterWhisper as any,
       createAsrRegistry({ has: false }),
       createTranslationRegistry([])
@@ -154,6 +159,9 @@ describe('JobManager', () => {
         cudaSupported: true,
         recommendedLocalAcceleration: 'gpu'
       }),
+      cancelRunningWork: vi.fn()
+    };
+    const nativeMedia = {
       probeMedia: vi.fn().mockResolvedValue({
         ok: true,
         payload: {}
@@ -163,8 +171,7 @@ describe('JobManager', () => {
         payload: {
           audioPath: 'D:/media/demo.wav'
         }
-      }),
-      cancelRunningWork: vi.fn()
+      })
     };
     const fasterWhisper = {
       cancel: vi.fn()
@@ -174,6 +181,7 @@ describe('JobManager', () => {
     const manager = new JobManager(
       settings as any,
       nativeBackend as any,
+      nativeMedia as any,
       fasterWhisper as any,
       asrRegistry,
       createTranslationRegistry([])
@@ -201,6 +209,10 @@ describe('JobManager', () => {
     const settings = createSettings();
     const nativeBackend = {
       cancelRunningWork: vi.fn()
+    };
+    const nativeMedia = {
+      probeMedia: vi.fn(),
+      extractAudio: vi.fn()
     };
     const fasterWhisper = {
       cancel: vi.fn()
@@ -248,6 +260,7 @@ describe('JobManager', () => {
     const manager = new JobManager(
       settings as any,
       nativeBackend as any,
+      nativeMedia as any,
       fasterWhisper as any,
       createAsrRegistry(),
       translationRegistry

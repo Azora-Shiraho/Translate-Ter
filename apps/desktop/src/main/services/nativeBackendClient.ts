@@ -5,6 +5,7 @@ import { delimiter, dirname, join, resolve } from 'node:path';
 import type {
   NativeHealth,
   NativeProtocolError,
+  NativeProtocolErrorCode,
   NativeProtocolRequest,
   NativeProtocolResponse,
   NativeProtocolType
@@ -29,11 +30,118 @@ export type NativeTranscribePayload = {
   runtime?: NativeRuntimePayload;
 };
 
+export type NativeMediaProbeRequest = {
+  mediaPath: string;
+  ffprobePath?: string;
+};
+
+export type NativeMediaProbePayload = {
+  tool?: string;
+  ffprobePath?: string;
+  durationMs?: number;
+  streams?: unknown[];
+  raw?: {
+    streams?: unknown[];
+    format?: Record<string, unknown>;
+  };
+};
+
+export type NativeAudioExtractRequest = {
+  jobId?: string;
+  mediaPath: string;
+  outputDir?: string;
+  outputDirectory?: string;
+  segmentSeconds?: number;
+  segmentDurationSec?: number;
+  format?: string;
+  ffmpegPath?: string;
+  audioCodec?: string;
+  sampleRate?: number;
+  channels?: number;
+  startMs?: number;
+  durationMs?: number;
+};
+
+export type NativeAudioExtractFile = {
+  path: string;
+  index?: number;
+  startMs: number;
+  endMs?: number;
+  durationMs?: number;
+  sizeBytes?: number;
+};
+
+export type NativeAudioExtractPayload = {
+  tool?: string;
+  ffmpegPath?: string;
+  sampleRate?: number;
+  channels?: number;
+  format?: string;
+  segmentSeconds?: number;
+  audioPath?: string;
+  files?: NativeAudioExtractFile[];
+};
+
+export class NativeProtocolServiceError extends Error {
+  readonly code: NativeProtocolErrorCode;
+  readonly retryable: boolean;
+  readonly requestId: string;
+  readonly type: NativeProtocolType;
+  readonly response: NativeProtocolResponse<unknown>;
+
+  constructor(response: NativeProtocolResponse<unknown>, fallbackMessage: string) {
+    const code = response.error?.code ?? 'InternalError';
+    const message = response.error?.message ?? fallbackMessage;
+    super(message);
+    this.name = 'NativeProtocolServiceError';
+    this.code = code;
+    this.retryable = Boolean(response.error?.retryable);
+    this.requestId = response.requestId;
+    this.type = response.type;
+    this.response = response;
+  }
+}
+
 const MISSING_EXECUTABLE_ERROR: NativeProtocolError = {
   code: 'MissingRuntime',
   message: 'The local helper program is missing.',
   retryable: false
 };
+
+export function createNativeProtocolErrorResponse<TPayload>(
+  type: NativeProtocolType,
+  requestId: string,
+  error: NativeProtocolError
+): NativeProtocolResponse<TPayload> {
+  return {
+    protocolVersion: 1,
+    requestId,
+    type,
+    ok: false,
+    error
+  };
+}
+
+export function createNativeProtocolServiceError(
+  response: NativeProtocolResponse<unknown>,
+  fallbackMessage: string
+): NativeProtocolServiceError {
+  return new NativeProtocolServiceError(response, fallbackMessage);
+}
+
+export function normalizeThrownNativeProtocolError<TPayload>(
+  type: NativeProtocolType,
+  error: unknown,
+  fallbackMessage: string
+): NativeProtocolResponse<TPayload> {
+  const detail = error instanceof Error ? error.message : String(error ?? fallbackMessage);
+  const message = detail && detail !== 'undefined' ? detail : fallbackMessage;
+  return createNativeProtocolErrorResponse(type, `native-${crypto.randomUUID()}`, {
+    code: 'InternalError',
+    message,
+    retryable: true
+  });
+}
 
 export class NativeBackendClient {
   constructor(private readonly logger?: ScopedLogger) {}
@@ -78,15 +186,11 @@ export class NativeBackendClient {
     return this.request('asr.transcribe', payload);
   }
 
-  async probeMedia(payload: { mediaPath: string }): Promise<NativeProtocolResponse<{ durationMs?: number; streams?: unknown[] }>> {
+  async probeMedia(payload: NativeMediaProbeRequest): Promise<NativeProtocolResponse<NativeMediaProbePayload>> {
     return this.request('media.probe', payload);
   }
 
-  async extractAudio(payload: {
-    mediaPath: string;
-    outputDirectory?: string;
-    segmentDurationSec?: number;
-  }): Promise<NativeProtocolResponse<{ audioPath?: string; files?: Array<{ path: string; startMs: number; endMs?: number }> }>> {
+  async extractAudio(payload: NativeAudioExtractRequest): Promise<NativeProtocolResponse<NativeAudioExtractPayload>> {
     return this.request('audio.extract', payload);
   }
 
@@ -236,13 +340,7 @@ export class NativeBackendClient {
     requestId: string,
     error: NativeProtocolError
   ): NativeProtocolResponse<TPayload> {
-    return {
-      protocolVersion: 1,
-      requestId,
-      type,
-      ok: false,
-      error
-    };
+    return createNativeProtocolErrorResponse(type, requestId, error);
   }
 
   private async findExecutable(): Promise<string | undefined> {

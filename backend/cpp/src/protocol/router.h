@@ -34,8 +34,11 @@ class NativeProtocolRouter {
       return response_ok(request_id, type, payload);
     }
     if (type == "srt.serialize") {
-      const auto payload = srt_serialize_payload(line);
-      return response_ok(request_id, type, payload);
+      const auto result = srt_serialize_result(line);
+      if (!result.ok) {
+        return response_error(request_id, type, result.code, result.message, result.retryable);
+      }
+      return response_ok(request_id, type, result.payload);
     }
     if (type == "asr.transcribe") {
       const auto result = transcribe_with_backends(line, asr_backends_);
