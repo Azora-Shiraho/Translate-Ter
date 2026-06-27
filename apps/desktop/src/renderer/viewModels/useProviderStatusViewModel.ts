@@ -91,7 +91,6 @@ export function useProviderStatusViewModel(input: UseProviderStatusViewModelInpu
     });
     const translationState = deriveTranslationState({
       t,
-      providerId: translationProviderId,
       description: t(getProviderCatalogEntry(translationProviderId)?.descriptionKey ?? 'translationProviderDetail'),
       health: llmHealth,
       job
@@ -359,7 +358,6 @@ function buildFasterWhisperRuntimeStatusRows(input: {
 
 function deriveTranslationState(input: {
   t: (key: string) => string;
-  providerId: string;
   description: string;
   health?: ProviderHealth;
   job?: JobSnapshot;
