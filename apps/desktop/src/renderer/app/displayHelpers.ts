@@ -11,6 +11,7 @@ import type {
   WhisperModelStatus,
   WhisperRuntimeStatus
 } from '@shared/types';
+import { getProviderCatalogEntry } from '@shared/providers/catalog';
 import type { JobStage } from '@shared/models';
 import { formatTimestamp } from '@shared/srt';
 import type { ActiveDownload } from './types';
@@ -54,18 +55,8 @@ export function exportDestinationModeLabel(mode: ExportDestinationMode): string 
 }
 
 export function providerLabel(providerId: string, t: (key: string) => string): string {
-  switch (providerId) {
-    case 'local.whisper.cpp':
-      return t('localWhisperCppProvider');
-    case 'local.faster-whisper':
-      return t('localFasterWhisperProvider');
-    case 'cloud.openai':
-      return t('cloudOpenaiProvider');
-    case 'openai.compatible':
-      return t('openaiCompatibleProvider');
-    default:
-      return providerId;
-  }
+  const provider = getProviderCatalogEntry(providerId);
+  return provider?.labelKey ? t(provider.labelKey) : providerId;
 }
 
 export function accelerationOptionLabel(acceleration: 'auto' | 'cpu' | 'gpu'): string {

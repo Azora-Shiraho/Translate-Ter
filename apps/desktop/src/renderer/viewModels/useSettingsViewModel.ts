@@ -15,6 +15,13 @@ import type {
   WhisperRuntimeStatus
 } from '@shared/types';
 import type { AssetEvent } from '@shared/models';
+import {
+  DEFAULT_ASR_PROVIDER_ID,
+  DEFAULT_TRANSLATION_PROVIDER_ID,
+  getProviderCatalogEntry,
+  providerCatalogWithSecrets,
+  workflowVisibleTranslationProviders
+} from '@shared/providers/catalog';
 import { translateTerGateway } from '../api/translateTerGateway';
 import {
   buildIgnoreCudaMismatchPatch,
@@ -36,6 +43,11 @@ type UseSettingsViewModelInput = {
   i18n: I18n;
   feedback: UiFeedback;
 };
+
+const providerIdsWithSecrets = providerCatalogWithSecrets.map((provider) => provider.id);
+const workflowVisibleTranslationProviderIds = new Set<string>(
+  workflowVisibleTranslationProviders.map((provider) => provider.id)
+);
 
 export function useSettingsViewModel(input: UseSettingsViewModelInput) {
   const { t, i18n, feedback } = input;
@@ -121,10 +133,14 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
 
     void (async () => {
       const nextSettings = await translateTerGateway.getSettings();
-      const [nextModels, cloudAsrSecret, llmSecret] = await Promise.all([
+      const [nextModels, nextProviderSecrets] = await Promise.all([
         translateTerGateway.assets.listWhisperModels(nextSettings.asrProviderId),
-        translateTerGateway.settings.getSecret('cloud.openai'),
-        translateTerGateway.settings.getSecret('openai.compatible')
+        Promise.all(
+          providerIdsWithSecrets.map(async (providerId) => [
+            providerId,
+            (await translateTerGateway.settings.getSecret(providerId)) ?? {}
+          ] as const)
+        )
       ]);
       const nextFfmpegStatus = await translateTerGateway.assets
         .ensureFfmpeg({
@@ -140,10 +156,7 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
       setModels(nextModels);
       setNativeHealth(nextHealth);
       setFfmpegStatus(nextFfmpegStatus);
-      setProviderSecrets({
-        'cloud.openai': cloudAsrSecret ?? {},
-        'openai.compatible': llmSecret ?? {}
-      });
+      setProviderSecrets(Object.fromEntries(nextProviderSecrets));
       await i18n.changeLanguage(nextSettings.uiLanguage);
       if (mounted) {
         feedback.setMessage(i18n.t('ready'));
@@ -316,11 +329,14 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
 
   useEffect(() => {
     if (!settings) return;
-    const migratedTranslationPriority = settings.translationProviderPriority.filter(
-      (providerId) => providerId !== 'mock.local'
+    const migratedTranslationPriority = settings.translationProviderPriority.filter((providerId) =>
+      workflowVisibleTranslationProviderIds.has(providerId)
     );
+    const asrProviderEntry = getProviderCatalogEntry(settings.asrProviderId);
     const migratedAsrProviderId =
-      settings.asrProviderId === 'mock.asr' ? 'local.whisper.cpp' : settings.asrProviderId;
+      asrProviderEntry?.kind === 'asr' && asrProviderEntry.visibleInWorkflow
+        ? settings.asrProviderId
+        : DEFAULT_ASR_PROVIDER_ID;
     const needsMigration =
       migratedAsrProviderId !== settings.asrProviderId ||
       migratedTranslationPriority.length !== settings.translationProviderPriority.length ||
@@ -331,7 +347,7 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
     void updateSettings({
       asrProviderId: migratedAsrProviderId,
       translationProviderPriority:
-        migratedTranslationPriority.length > 0 ? migratedTranslationPriority : ['openai.compatible']
+        migratedTranslationPriority.length > 0 ? migratedTranslationPriority : [DEFAULT_TRANSLATION_PROVIDER_ID]
     });
   }, [settings]);
 
