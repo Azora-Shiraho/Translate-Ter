@@ -1,6 +1,6 @@
 # ASR Runtime Architecture
 
-This document records the current local ASR runtime architecture for PR12 validation. It is intentionally descriptive: it documents the existing layering, compatibility behavior, protocol payload, and platform boundaries without changing runtime selection rules, native protocol fields, or backend behavior.
+This document records the current local ASR runtime architecture after the PR13 integration branch was closed out. It is intentionally descriptive: it documents the existing layering, compatibility behavior, protocol payload, and platform boundaries without changing runtime selection rules, native protocol fields, or backend behavior.
 
 ## Scope
 
@@ -31,6 +31,24 @@ Important boundary:
 - `coreml`, `mlx`, and `tensorrt` are not runtime variants in the current app model.
 - `vulkan` already exists in the TypeScript enum as a reserved/experimental placeholder, but it is not part of the currently validated support matrix and should not be treated as an approved platform target in this PR.
 - This PR does not add any new `RuntimeVariant` values.
+
+## Main-side Execution Boundary
+
+The current Electron main path is split into orchestration, provider selection, and native capability services:
+
+- `JobManager` owns workflow sequencing, job snapshots, cancellation, and user-facing failure normalization.
+- `NativeMediaService` owns the `media.probe` and `audio.extract` boundary before provider execution starts.
+- `createMainAsrProviderRegistry()` wires provider ids to concrete adapters.
+- provider adapters own provider-specific transcription behavior.
+
+Current adapter boundary:
+
+- `local.whisper.cpp`: resolves runtime/model state in Electron main and sends a native runtime payload to the C++ backend.
+- `local.faster-whisper`: stays in the Python-side service and does not use the C++ whisper runtime.
+- `cloud.openai`: stays in the Electron main HTTP adapter and does not move provider HTTP into C++.
+- `mock.asr`: remains development-only and explicit.
+
+This keeps provider implementation details out of `JobManager` while preserving one orchestration path for media probe, audio extraction, transcription, and follow-up translation/export steps.
 
 ## Settings Compatibility
 
@@ -216,10 +234,17 @@ CPU fallback is part of the current selection behavior, not a separate provider:
 ## Related Files
 
 - `apps/desktop/src/shared/models.ts`
+- `apps/desktop/src/shared/providers/catalog.ts`
 - `apps/desktop/src/main/services/settingsStore.ts`
+- `apps/desktop/src/main/services/jobManager.ts`
+- `apps/desktop/src/main/services/nativeMediaService.ts`
 - `apps/desktop/src/main/services/whisperRuntimeResolverAdapter.ts`
 - `apps/desktop/src/main/services/runtimeResolver.ts`
 - `apps/desktop/src/main/services/whisperAssets.ts`
 - `apps/desktop/src/main/services/nativeTranscribePayload.ts`
+- `apps/desktop/src/main/providers/asrProviderRegistry.ts`
+- `apps/desktop/src/main/providers/adapters/localWhisperCppAsrProvider.ts`
+- `apps/desktop/src/main/providers/adapters/fasterWhisperAsrProvider.ts`
+- `apps/desktop/src/main/providers/adapters/cloudOpenAiAsrProvider.ts`
 - `backend/cpp/src/runtime/health.h`
 - `contracts/native-protocol.md`
