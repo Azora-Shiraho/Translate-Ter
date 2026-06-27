@@ -81,6 +81,12 @@ inline std::string status_for_notes(const std::vector<std::string>& notes) {
   return notes.empty() ? "transcribed" : "warning";
 }
 
+inline bool has_non_whitespace(std::string_view value) {
+  return std::any_of(value.begin(), value.end(), [](unsigned char ch) {
+    return !std::isspace(ch);
+  });
+}
+
 inline std::string warning_json(const SubtitleWarning& warning) {
   std::ostringstream stream;
   stream << "{\"code\":\"" << json_escape(warning.code) << "\",\"message\":\"" << json_escape(warning.message) << "\"";
@@ -148,11 +154,16 @@ inline std::vector<Segment> extract_segments_from_request(const std::string& req
     if (!start || !finish || !source_text) continue;
 
     Segment segment;
+    segment.id = extract_string(object, "id").value_or("");
     segment.index = extract_int(object, "index").value_or(static_cast<int>(segments.size()) + 1);
     segment.start_ms = *start;
     segment.end_ms = *finish;
     segment.source_text = *source_text;
-    segment.translated_text = extract_string(object, "translatedText").value_or("");
+    const auto translated_text = extract_string(object, "translatedText");
+    if (translated_text.has_value()) {
+      segment.translated_text = *translated_text;
+      segment.has_translated_text = true;
+    }
     segment.status = extract_string(object, "status").value_or("transcribed");
     if (const auto confidence = extract_number(object, "confidence")) {
       segment.confidence = *confidence;
@@ -181,14 +192,15 @@ inline std::string text_for_variant(
     std::string_view variant,
     std::string_view bilingual_order) {
   if (variant == "source") return segment.source_text;
-  if (variant == "translated") return segment.translated_text.empty() ? segment.source_text : segment.translated_text;
+  if (variant == "translated") {
+    return segment.has_translated_text ? segment.translated_text : segment.source_text;
+  }
 
-  const std::string first = bilingual_order == "target-first"
-                                ? (segment.translated_text.empty() ? "" : segment.translated_text)
-                                : segment.source_text;
+  const std::string translated = segment.has_translated_text ? segment.translated_text : "";
+  const std::string first = bilingual_order == "target-first" ? translated : segment.source_text;
   const std::string second = bilingual_order == "target-first"
                                  ? segment.source_text
-                                 : (segment.translated_text.empty() ? "" : segment.translated_text);
+                                 : translated;
   if (first.empty()) return second;
   if (second.empty()) return first;
   return first + "\n" + second;
@@ -310,7 +322,7 @@ inline std::string document_payload_from_segments(
     payload << "{\"id\":\"seg-" << std::setw(4) << std::setfill('0') << (i + 1) << "\",\"index\":"
             << segments[i].index << ",\"startMs\":" << segments[i].start_ms << ",\"endMs\":"
             << segments[i].end_ms << ",\"sourceText\":\"" << json_escape(segments[i].source_text) << "\"";
-    if (!segments[i].translated_text.empty()) {
+    if (segments[i].has_translated_text) {
       payload << ",\"translatedText\":\"" << json_escape(segments[i].translated_text) << "\"";
     }
     if (segments[i].has_confidence) {
@@ -361,7 +373,7 @@ inline std::string srt_parse_payload(const std::string& request) {
       warnings);
 }
 
-inline std::string srt_serialize_payload(const std::string& request) {
+inline NativeResult srt_serialize_result(const std::string& request) {
   auto segments = detail::extract_segments_from_request(request);
   std::sort(segments.begin(), segments.end(), [](const Segment& left, const Segment& right) {
     if (left.start_ms != right.start_ms) return left.start_ms < right.start_ms;
@@ -373,11 +385,21 @@ inline std::string srt_serialize_payload(const std::string& request) {
 
   std::ostringstream srt;
   for (std::size_t i = 0; i < segments.size(); ++i) {
+    const auto text = detail::text_for_variant(segments[i], variant, bilingual_order);
+    if (!detail::has_non_whitespace(text)) {
+      const std::string segment_id =
+          !segments[i].id.empty() ? segments[i].id : ("seg-" + std::to_string(static_cast<int>(i) + 1));
+      return {
+          false,
+          "",
+          "MalformedRequest",
+          "Cannot export empty subtitle segment " + segment_id + ".",
+          false};
+    }
     srt << (i + 1) << "\n" << detail::format_timestamp(segments[i].start_ms) << " --> "
-        << detail::format_timestamp(segments[i].end_ms) << "\n"
-        << detail::text_for_variant(segments[i], variant, bilingual_order) << "\n\n";
+        << detail::format_timestamp(segments[i].end_ms) << "\n" << text << "\n\n";
   }
-  return "{\"srt\":\"" + json_escape(srt.str()) + "\"}";
+  return {true, "{\"srt\":\"" + json_escape(srt.str()) + "\"}", "", "", false};
 }
 
 }  // namespace translate_ter::backend

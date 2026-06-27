@@ -98,6 +98,25 @@ Second line {speaker}
       'srt.serialize preserves brace-containing bilingual SRT output'
     );
 
+    const emptyTranslatedResponse = await session.request('srt.serialize', {
+      segments: [
+        {
+          id: 'seg-empty',
+          index: 1,
+          startMs: 0,
+          endMs: 800,
+          sourceText: 'Hello source',
+          translatedText: ''
+        }
+      ],
+      variant: 'translated'
+    });
+    assertOk(emptyTranslatedResponse.ok === false, 'srt.serialize rejects empty translated subtitle segments');
+    assertOk(
+      emptyTranslatedResponse.error?.message === 'Cannot export empty subtitle segment seg-empty.',
+      'srt.serialize reports a clear empty translated segment error'
+    );
+
     const cancelResponse = await session.request('job.cancel', { jobId: 'smoke-job' });
     assertResponseOk(cancelResponse, 'job.cancel');
     assertOk(cancelResponse.payload.cancelled === true, 'job.cancel acknowledges cancellation');
