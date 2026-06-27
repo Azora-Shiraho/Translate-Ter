@@ -15,6 +15,7 @@ import { normalizeSubtitleDocumentLayout } from '@shared/subtitleLayout';
 import { TranslationScheduler } from '@shared/translation/scheduler';
 import type { FasterWhisperService } from './fasterWhisperService';
 import type { NativeBackendClient } from './nativeBackendClient';
+import type { NativeMediaService } from './nativeMediaService';
 import type { SettingsStore } from './settingsStore';
 import { resolveFasterWhisperRequestOptions } from './fasterWhisperRuntimeOptions';
 import type {
@@ -30,6 +31,7 @@ export class JobManager extends EventEmitter {
   constructor(
     private readonly settings: SettingsStore,
     private readonly nativeBackend: NativeBackendClient,
+    private readonly nativeMedia: NativeMediaService,
     private readonly fasterWhisper: FasterWhisperService,
     private readonly asrProviders: AsrProviderRegistry,
     private readonly translationProviders: TranslationProviderRegistry
@@ -104,7 +106,7 @@ export class JobManager extends EventEmitter {
       }
 
       await this.setProgress(job, 'probing', 18, 'Checking the media file.');
-      const probe = await this.nativeBackend.probeMedia({ mediaPath: job.mediaPath });
+      const probe = await this.nativeMedia.probeMedia({ mediaPath: job.mediaPath });
       if (this.isCancelled(job.id)) return;
       if (!probe.ok) {
         this.fail(
@@ -117,7 +119,7 @@ export class JobManager extends EventEmitter {
       }
 
       await this.setProgress(job, 'extracting-audio', 38, 'Extracting audio.');
-      const extraction = await this.nativeBackend.extractAudio({
+      const extraction = await this.nativeMedia.extractAudio({
         mediaPath: job.mediaPath
       });
       if (this.isCancelled(job.id)) return;

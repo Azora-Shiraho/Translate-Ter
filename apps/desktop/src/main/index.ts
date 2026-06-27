@@ -20,10 +20,18 @@ import type {
   WhisperRuntimeRequest
 } from '@shared/models';
 import { serializeAss } from '@shared/ass';
-import { serializeSrt } from '@shared/srt';
 import { JobManager } from './services/jobManager';
 import { FasterWhisperService } from './services/fasterWhisperService';
 import { NativeBackendClient } from './services/nativeBackendClient';
+import { NativeMediaService } from './services/nativeMediaService';
+import {
+  assertNativeSubtitlePayload,
+  NativeSubtitleService
+} from './services/nativeSubtitleService';
+import {
+  shouldUseNativeSrtSerialization,
+  shouldUseTypeScriptAssSerialization
+} from './services/nativeLocalCapabilityPolicy';
 import { SettingsStore } from './services/settingsStore';
 import { FfmpegAssetManager } from './services/ffmpegAssets';
 import { AppLogger, type RendererLogWriteInput } from './services/logger';
@@ -44,6 +52,8 @@ const settingsStore = new SettingsStore();
 const whisperAssets = new WhisperAssetManager();
 const ffmpegAssets = new FfmpegAssetManager();
 const nativeBackend = new NativeBackendClient(logger.createScope('native-backend'));
+const nativeMediaService = new NativeMediaService(nativeBackend);
+const nativeSubtitleService = new NativeSubtitleService(nativeBackend);
 const fasterWhisper = new FasterWhisperService(logger.createScope('faster-whisper'));
 const providerHealthLogger = logger.createScope('provider-health');
 const asrProviderRegistry = createMainAsrProviderRegistry({
@@ -60,6 +70,7 @@ const translationProviderRegistry = createMainTranslationProviderRegistry({
 const jobManager = new JobManager(
   settingsStore,
   nativeBackend,
+  nativeMediaService,
   fasterWhisper,
   asrProviderRegistry,
   translationProviderRegistry
@@ -287,16 +298,24 @@ function registerIpc(): void {
   }): Promise<void> {
     const settings = await settingsStore.get();
     const format = resolveSubtitleFileFormat(payload.path, settings.exportFileFormat);
-    const serialized =
-      format === 'ass'
-        ? serializeAss(payload.document, {
-            variant: payload.variant,
-            bilingualOrder: payload.bilingualOrder
-          })
-        : serializeSrt(payload.document, {
-            variant: payload.variant,
-            bilingualOrder: payload.bilingualOrder
-          });
+    let serialized: string;
+    if (shouldUseTypeScriptAssSerialization(format)) {
+      serialized = serializeAss(payload.document, {
+        variant: payload.variant,
+        bilingualOrder: payload.bilingualOrder
+      });
+    } else if (shouldUseNativeSrtSerialization(format)) {
+      const response = await nativeSubtitleService.serializeSrt(payload.document, {
+        variant: payload.variant,
+        bilingualOrder: payload.bilingualOrder
+      });
+      serialized = assertNativeSubtitlePayload(
+        response,
+        'The subtitle file could not be exported through the native backend.'
+      ).srt;
+    } else {
+      throw new Error(`Unsupported subtitle export format: ${format}`);
+    }
     await writeFile(payload.path, serialized, 'utf8');
   }
 
@@ -417,11 +436,8 @@ function registerIpc(): void {
 
   registerHandle('subtitles:import-srt', async (_event, path: string) => {
     const raw = await readFile(path, 'utf8');
-    const response = await nativeBackend.parseSrt({ srt: raw, inputMediaPath: path });
-    if (!response.ok || !response.payload?.document) {
-      throw new Error(response.error?.message ?? 'The subtitle file could not be read.');
-    }
-    return response.payload.document as SubtitleDocument;
+    const response = await nativeSubtitleService.parseSrt(raw, { inputMediaPath: path });
+    return assertNativeSubtitlePayload(response, 'The subtitle file could not be read.').document;
   });
 
   registerHandle(
