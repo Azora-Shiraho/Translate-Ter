@@ -247,6 +247,60 @@ describe('provider registries and adapters', () => {
     expect(document.metadata.warnings.some((warning) => warning.code === 'CudaTranscriptionCrashFallback')).toBe(true);
   });
 
+  it('local whisper adapter skips the cpu retry when the job has been cancelled', async () => {
+    const nativeBackend = {
+      transcribe: vi.fn().mockResolvedValue({
+        ok: false,
+        error: {
+          code: 'InternalError',
+          message: 'process exited with 0xC0000409',
+          retryable: true
+        }
+      })
+    };
+    const adapter = createLocalWhisperCppAsrProvider({
+      settingsStore: {
+        get: vi.fn().mockResolvedValue(createSettingsValue())
+      } as any,
+      whisperAssets: {
+        ensureRuntime: vi.fn().mockResolvedValue(
+          createRuntimeStatus({
+            platformKey: 'win32-x64-cuda',
+            binary: {
+              expectedPath: 'D:/runtime/whisper_cpp/cuda/Release/whisper-cli.exe',
+              installed: true,
+              verified: true
+            },
+            acceleration: {
+              requested: 'gpu',
+              selected: 'gpu',
+              cudaSupported: true,
+              hardwareDetected: true,
+              runtimeDetected: true,
+              versionMismatch: false,
+              runtimeVariant: 'cuda'
+            }
+          })
+        )
+      } as any,
+      nativeBackend: nativeBackend as any
+    });
+
+    await expect(
+      adapter.transcribe({
+        job: createJob(),
+        settings: createSettingsValue(),
+        audioPath: 'D:/media/demo.wav',
+        isCancelled: () => true,
+        reportProgress: vi.fn()
+      })
+    ).rejects.toMatchObject({
+      name: 'AbortError'
+    });
+
+    expect(nativeBackend.transcribe).toHaveBeenCalledTimes(1);
+  });
+
   it('faster-whisper adapter preserves runtime option merge inputs', async () => {
     const transcribe = vi.fn().mockResolvedValue({
       id: 'doc-1',

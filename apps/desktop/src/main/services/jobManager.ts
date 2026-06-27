@@ -136,6 +136,7 @@ export class JobManager extends EventEmitter {
         job,
         settings: currentSettings,
         audioPath: extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path,
+        isCancelled: () => this.isCancelled(job.id),
         reportProgress: async (progress, message) => this.setProgress(job, 'transcribing', progress, message)
       });
       if (this.isCancelled(job.id)) return;

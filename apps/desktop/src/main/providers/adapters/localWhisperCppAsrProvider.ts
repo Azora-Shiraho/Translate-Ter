@@ -107,6 +107,7 @@ export function createLocalWhisperCppAsrProvider(options: {
           response.error
         );
         if (shouldRetryOnCpu) {
+          throwIfCancelled(request);
           request.job.warnings.push({
             code: 'CudaTranscriptionCrashFallback',
             message: 'GPU recognition stopped unexpectedly. Trying CPU once instead.',
@@ -114,6 +115,7 @@ export function createLocalWhisperCppAsrProvider(options: {
             createdAt: new Date().toISOString()
           });
           await request.reportProgress?.(78, 'GPU recognition stopped. Retrying with CPU.');
+          throwIfCancelled(request);
           const cpuRetry = await options.nativeBackend.transcribe({
             jobId: request.job.id,
             mediaPath: request.job.mediaPath,
@@ -252,4 +254,10 @@ function localWhisperRuntimeMessage(runtime: WhisperRuntimeStatus): string {
     return runtime.message ?? 'Selected whisper model is missing.';
   }
   return runtime.message ?? 'Local whisper check failed.';
+}
+
+function throwIfCancelled(request: AsrTranscribeRequest): void {
+  if (request.isCancelled?.()) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
 }

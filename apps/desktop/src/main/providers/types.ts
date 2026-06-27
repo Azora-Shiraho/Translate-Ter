@@ -10,6 +10,7 @@ export type AsrTranscribeRequest = {
   job: JobSnapshot;
   settings: AppSettingsPublic;
   audioPath?: string;
+  isCancelled?: () => boolean;
   reportProgress?: (progress: number, message: string) => Promise<void>;
 };
 
