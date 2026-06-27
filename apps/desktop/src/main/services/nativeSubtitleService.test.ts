@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SubtitleDocument } from '@shared/models';
+
+vi.mock('electron', () => ({
+  app: {
+    isPackaged: false,
+    getPath: vi.fn(() => '/tmp/translate-ter')
+  }
+}));
+
 import { NativeProtocolServiceError } from './nativeBackendClient';
 import {
   assertNativeSubtitlePayload,
