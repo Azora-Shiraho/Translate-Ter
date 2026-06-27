@@ -17,8 +17,7 @@ import type {
   SubtitleDocument,
   SubtitleSegment,
   WhisperModelRequest,
-  WhisperRuntimeRequest,
-  WhisperRuntimeStatus
+  WhisperRuntimeRequest
 } from '@shared/models';
 import { serializeAss } from '@shared/ass';
 import { serializeSrt } from '@shared/srt';
@@ -28,11 +27,12 @@ import { NativeBackendClient } from './services/nativeBackendClient';
 import { SettingsStore } from './services/settingsStore';
 import { FfmpegAssetManager } from './services/ffmpegAssets';
 import { AppLogger, type RendererLogWriteInput } from './services/logger';
-import { testOpenAICompatibleProvider } from './services/providerHealth';
 import { WhisperAssetManager } from './services/whisperAssets';
 import { mergeFasterWhisperRuntimeRequestWithSettings } from './services/fasterWhisperRuntimeOptions';
 import { mergeWhisperRuntimeRequestWithSettings } from './services/whisperRuntimeRequestMerge';
 import { asrProviders } from './services/asrProviders';
+import { createMainAsrProviderRegistry } from './providers/asrProviderRegistry';
+import { createMainTranslationProviderRegistry } from './providers/translationProviderRegistry';
 
 let mainWindow: BrowserWindow | undefined;
 const logger = new AppLogger();
@@ -45,7 +45,25 @@ const whisperAssets = new WhisperAssetManager();
 const ffmpegAssets = new FfmpegAssetManager();
 const nativeBackend = new NativeBackendClient(logger.createScope('native-backend'));
 const fasterWhisper = new FasterWhisperService(logger.createScope('faster-whisper'));
-const jobManager = new JobManager(settingsStore, whisperAssets, nativeBackend, fasterWhisper);
+const providerHealthLogger = logger.createScope('provider-health');
+const asrProviderRegistry = createMainAsrProviderRegistry({
+  settingsStore,
+  whisperAssets,
+  nativeBackend,
+  fasterWhisper,
+  logger: providerHealthLogger
+});
+const translationProviderRegistry = createMainTranslationProviderRegistry({
+  settingsStore,
+  logger: providerHealthLogger
+});
+const jobManager = new JobManager(
+  settingsStore,
+  nativeBackend,
+  fasterWhisper,
+  asrProviderRegistry,
+  translationProviderRegistry
+);
 
 function createWindow(): void {
   appLogger.info('window.create', 'Creating main window.', {
@@ -261,43 +279,6 @@ function registerIpc(): void {
     return jobManager.get(job.id);
   }
 
-  async function testLocalWhisperProvider(): Promise<{
-    providerId: string;
-    ok: boolean;
-    status: 'healthy' | 'degraded';
-    message: string;
-  }> {
-    const settings = await settingsStore.get();
-    const runtime = await whisperAssets.ensureRuntime({
-      modelId: settings.whisperModelId,
-      allowDownload: false,
-      preferCuda: settings.localWhisperUseCuda,
-      localAsrAcceleration: settings.localAsrAcceleration,
-      preferredRuntimeVariant: settings.preferredRuntimeVariant,
-      ignoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
-      useMultiThreadDownload: settings.enableMultiThreadDownload,
-      downloadScope: 'none'
-    });
-
-    const runnable = runtime.binary.verified && runtime.model.verified;
-    return {
-      providerId: 'local.whisper.cpp',
-      ok: runnable,
-      status: runnable ? 'healthy' : 'degraded',
-      message: localWhisperRuntimeMessage(runtime)
-    };
-  }
-
-  async function testLocalFasterWhisperProvider(): Promise<import('@shared/models').ProviderHealth> {
-    const settings = await settingsStore.get();
-    return fasterWhisper.health({
-      modelId: settings.whisperModelId,
-      preferCuda: settings.localWhisperUseCuda,
-      localAsrAcceleration: settings.localAsrAcceleration,
-      preferredRuntimeVariant: settings.preferredRuntimeVariant
-    });
-  }
-
   async function exportSrt(payload: {
     document: SubtitleDocument;
     path: string;
@@ -473,30 +454,10 @@ function registerIpc(): void {
     settingsStore.setSecret(providerId, secret)
   );
   registerHandle('settings:test-provider', async (_event, providerId: string) => {
-    if (providerId === 'local.whisper.cpp') {
-      return testLocalWhisperProvider();
-    }
-    if (providerId === 'local.faster-whisper') {
-      return testLocalFasterWhisperProvider();
-    }
-    if (providerId === 'cloud.openai') {
-      return testOpenAICompatibleProvider({
-        providerId,
-        secret: settingsStore.getSecret(providerId),
-        defaultBaseUrl: 'https://api.openai.com/v1',
-        defaultModel: 'whisper-1',
-        logger: logger.createScope('provider-health')
-      });
-    }
-    if (providerId === 'openai.compatible') {
-      return testOpenAICompatibleProvider({
-        providerId,
-        secret: settingsStore.getSecret(providerId),
-        defaultBaseUrl: 'https://api.openai.com/v1',
-        defaultModel: 'gpt-4o-mini',
-        logger: logger.createScope('provider-health')
-      });
-    }
+    const asrHealth = await asrProviderRegistry.health(providerId);
+    if (asrHealth) return asrHealth;
+    const translationHealth = await translationProviderRegistry.health(providerId);
+    if (translationHealth) return translationHealth;
 
     const asrProvider = asrProviders.find((provider) => provider.id === providerId);
     if (asrProvider) return asrProvider.health();
@@ -701,17 +662,4 @@ async function maybeRunFasterWhisperSmokeTest(): Promise<boolean> {
   }
 
   return true;
-}
-
-function localWhisperRuntimeMessage(runtime: WhisperRuntimeStatus): string {
-  if (runtime.binary.verified && runtime.model.verified) {
-    return runtime.message ?? 'whisper.cpp is ready.';
-  }
-  if (!runtime.binary.verified) {
-    return runtime.message ?? 'whisper.cpp runtime binary is missing or cannot run.';
-  }
-  if (!runtime.model.verified) {
-    return runtime.message ?? 'Selected whisper model is missing.';
-  }
-  return runtime.message ?? 'Local whisper check failed.';
 }

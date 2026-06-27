@@ -116,6 +116,19 @@ export async function testOpenAICompatibleProvider(
   }
 }
 
+export function createBasicProviderHealth(
+  providerId: string,
+  result: { ok: boolean; message?: string },
+  unhealthyStatus: Exclude<ProviderHealth['status'], 'healthy'> = 'unavailable'
+): ProviderHealth {
+  return {
+    providerId,
+    ok: result.ok,
+    status: result.ok ? 'healthy' : unhealthyStatus,
+    message: result.message
+  };
+}
+
 function normalizeBaseUrl(value: string | undefined, fallback: string): string {
   const candidate = normalizeOptionalText(value) ?? fallback;
   return candidate.replace(/\/+$/, '');
@@ -135,11 +148,11 @@ function providerHealthStatusForHttp(status: number): ProviderHealth['status'] {
 
 function providerHttpErrorMessage(status: number, responseText: string): string {
   const detail = parseProviderErrorDetail(responseText);
-    if (status === 401 || status === 403) {
-      return detail
+  if (status === 401 || status === 403) {
+    return detail
       ? `服务拒绝了这组凭据：${detail}`
       : '服务拒绝了这组凭据。请检查 API Key。';
-    }
+  }
   if (status === 404) {
     return detail
       ? `服务地址可访问，但没有找到对应接口：${detail}`

@@ -1,5 +1,4 @@
 import { EventEmitter } from 'node:events';
-import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type {
   CreateJobRequest,
@@ -7,22 +6,21 @@ import type {
   JobSnapshot,
   JobStage,
   SubtitleDocument,
-  SubtitleWarning,
   SubtitleSegment,
+  SubtitleWarning,
   WorkflowStep
 } from '@shared/models';
-import { canonicalSourceLanguageCode, canonicalTargetLanguageCode, normalizeAsrLanguageCode } from '@shared/languages';
+import { canonicalSourceLanguageCode, canonicalTargetLanguageCode } from '@shared/languages';
 import { normalizeSubtitleDocumentLayout } from '@shared/subtitleLayout';
 import { TranslationScheduler } from '@shared/translation/scheduler';
-import { MockTranslationProvider, OpenAICompatibleTranslationProvider } from '@shared/translation/providers';
-import { validateAsrRequest } from './asrProviders';
-import { resolveLocalInferenceThreadCount } from './localInferenceProfile';
 import type { FasterWhisperService } from './fasterWhisperService';
 import type { NativeBackendClient } from './nativeBackendClient';
-import { createNativeRuntimePayload } from './nativeTranscribePayload';
 import type { SettingsStore } from './settingsStore';
 import { resolveFasterWhisperRequestOptions } from './fasterWhisperRuntimeOptions';
-import type { WhisperAssetManager } from './whisperAssets';
+import type {
+  AsrProviderRegistry,
+  TranslationProviderRegistry
+} from '../providers/types';
 
 export class JobManager extends EventEmitter {
   private jobs = new Map<string, JobSnapshot>();
@@ -31,15 +29,18 @@ export class JobManager extends EventEmitter {
 
   constructor(
     private readonly settings: SettingsStore,
-    private readonly whisperAssets: WhisperAssetManager,
     private readonly nativeBackend: NativeBackendClient,
-    private readonly fasterWhisper: FasterWhisperService
+    private readonly fasterWhisper: FasterWhisperService,
+    private readonly asrProviders: AsrProviderRegistry,
+    private readonly translationProviders: TranslationProviderRegistry
   ) {
     super();
   }
 
   create(request: CreateJobRequest): JobSnapshot {
-    validateAsrRequest(request);
+    if (!this.asrProviders.has(request.asrProviderId)) {
+      throw new Error('The selected recognition method is not available.');
+    }
     const jobId = `job-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const resolvedFasterWhisper = resolveFasterWhisperRequestOptions({
@@ -102,34 +103,6 @@ export class JobManager extends EventEmitter {
         });
       }
 
-      const isLocalWhisper = job.asrProviderId === 'local.whisper.cpp';
-      const runtime = isLocalWhisper
-        ? await this.whisperAssets.ensureRuntime({
-            modelId: job.whisperModelId,
-            allowDownload: false,
-            preferCuda: job.localWhisperUseCuda,
-            localAsrAcceleration: job.localAsrAcceleration,
-            preferredRuntimeVariant: job.preferredRuntimeVariant,
-            ignoreCudaMismatch: job.localWhisperIgnoreCudaMismatch,
-            downloadScope: 'none'
-          })
-        : undefined;
-      if (this.isCancelled(job.id)) return;
-
-      if (runtime?.actionRequired && runtime.actionRequired !== 'none') {
-        job.warnings.push({
-          code: runtime.actionRequired,
-          message: runtime.message ?? 'Local recognition needs to be set up before starting.'
-        });
-        this.fail(
-          job,
-          runtimeActionToErrorCode(runtime.actionRequired),
-          runtime.message ?? 'Local recognition needs to be set up before starting.',
-          runtime.actionRequired !== 'manifest-not-configured' && runtime.actionRequired !== 'unsupported-platform'
-        );
-        return;
-      }
-
       await this.setProgress(job, 'probing', 18, 'Checking the media file.');
       const probe = await this.nativeBackend.probeMedia({ mediaPath: job.mediaPath });
       if (this.isCancelled(job.id)) return;
@@ -159,148 +132,19 @@ export class JobManager extends EventEmitter {
       }
 
       await this.setProgress(job, 'transcribing', 72, 'Starting speech recognition.');
-
-      if (job.asrProviderId === 'cloud.openai') {
-        const cloudDocument = await this.transcribeWithCloudAsr(
-          job,
-          extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path
-        );
-        if (this.isCancelled(job.id)) return;
-        if (!cloudDocument) return;
-        job.subtitleDocument = normalizeDocumentForSubtitleDisplay(cloudDocument);
-        job.step = 'subtitles';
-        await this.setProgress(job, 'completed', 100, 'Cloud recognition is complete.');
-        return;
-      }
-
-      if (job.asrProviderId === 'local.faster-whisper') {
-        const cpuThreadCount = resolveLocalInferenceThreadCount(job.localAsrCpuMode);
-        const localDocument = await this.fasterWhisper.transcribe({
-          jobId: job.id,
-          audioPath: extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path ?? job.mediaPath,
-          sourceLanguage: job.sourceLanguage,
-          targetLanguage: job.targetLanguage,
-          modelId: job.whisperModelId,
-          preferCuda: job.localWhisperUseCuda,
-          localAsrAcceleration: job.localAsrAcceleration,
-          preferredRuntimeVariant: job.preferredRuntimeVariant,
-          cpuThreadCount,
-          allowDownload: job.allowWhisperAssetDownload,
-          useMultiThreadDownload: currentSettings.enableMultiThreadDownload
-        });
-        if (this.isCancelled(job.id)) return;
-        job.subtitleDocument = normalizeDocumentForSubtitleDisplay(localDocument);
-        job.step = 'subtitles';
-        this.cancelledJobs.delete(job.id);
-        await this.setProgress(job, 'completed', 100, 'Local recognition is complete.');
-        return;
-      }
-
-      const cpuThreadCount = resolveLocalInferenceThreadCount(job.localAsrCpuMode);
-      const useCudaForNativeWhisper = runtime?.acceleration.selected === 'gpu';
-      const nativeRuntimePayload =
-        runtime && job.asrProviderId === 'local.whisper.cpp'
-          ? createNativeRuntimePayload({
-              provider: 'whisper.cpp',
-              variant: runtime.acceleration.runtimeVariant,
-              binaryPath: runtime.binary.expectedPath,
-              modelPath: runtime.model.expectedPath
-            })
-          : undefined;
-      const cpuRetryRuntimePayload =
-        runtime && job.asrProviderId === 'local.whisper.cpp'
-          ? createNativeRuntimePayload({
-              provider: 'whisper.cpp',
-              variant: 'cpu',
-              binaryPath: runtime.binary.expectedPath,
-              modelPath: runtime.model.expectedPath
-            })
-          : undefined;
-      const response = await this.nativeBackend.transcribe({
-        jobId: job.id,
-        mediaPath: job.mediaPath,
+      const document = await this.asrProviders.resolve(job.asrProviderId).transcribe({
+        job,
+        settings: currentSettings,
         audioPath: extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path,
-        modelId: job.whisperModelId,
-        sourceLanguage: job.sourceLanguage,
-        targetLanguage: job.targetLanguage,
-        asrProviderId: job.asrProviderId,
-        preferCuda: useCudaForNativeWhisper ?? job.localWhisperUseCuda,
-        cpuThreadCount,
-        binaryPath: nativeRuntimePayload?.binaryPath,
-        modelPath: nativeRuntimePayload?.modelPath,
-        runtime: nativeRuntimePayload?.runtime
+        isCancelled: () => this.isCancelled(job.id),
+        reportProgress: async (progress, message) => this.setProgress(job, 'transcribing', progress, message)
       });
       if (this.isCancelled(job.id)) return;
-
-      if (!response.ok) {
-        const shouldRetryOnCpu = shouldRetryLocalWhisperOnCpu(
-          job,
-          useCudaForNativeWhisper ?? job.localWhisperUseCuda,
-          response.error
-        );
-        if (shouldRetryOnCpu) {
-          job.warnings.push({
-            code: 'CudaTranscriptionCrashFallback',
-            message: 'GPU recognition stopped unexpectedly. Trying CPU once instead.',
-            stage: 'asr',
-            createdAt: new Date().toISOString()
-          });
-          await this.setProgress(job, 'transcribing', 78, 'GPU recognition stopped. Retrying with CPU.');
-          const cpuRetry = await this.nativeBackend.transcribe({
-            jobId: job.id,
-            mediaPath: job.mediaPath,
-            audioPath: extraction.payload?.audioPath ?? extraction.payload?.files?.[0]?.path,
-            modelId: job.whisperModelId,
-            sourceLanguage: job.sourceLanguage,
-            targetLanguage: job.targetLanguage,
-            asrProviderId: job.asrProviderId,
-            preferCuda: false,
-            cpuThreadCount,
-            binaryPath: cpuRetryRuntimePayload?.binaryPath,
-            modelPath: cpuRetryRuntimePayload?.modelPath,
-            runtime: cpuRetryRuntimePayload?.runtime
-          });
-          if (this.isCancelled(job.id)) return;
-          if (cpuRetry.ok) {
-            const cpuRetryDocument = nativePayloadToDocument(cpuRetry.payload, job);
-            if (!cpuRetryDocument) {
-              this.fail(job, 'MalformedNativeResponse', 'Recognition finished, but no subtitle content was returned after the CPU retry.', true);
-              return;
-            }
-
-            job.subtitleDocument = normalizeDocumentForSubtitleDisplay({
-              ...cpuRetryDocument,
-              metadata: {
-                ...cpuRetryDocument.metadata,
-                warnings: dedupeWarnings([...(cpuRetryDocument.metadata.warnings ?? []), ...job.warnings])
-              }
-            });
-            job.step = 'subtitles';
-            this.cancelledJobs.delete(job.id);
-            await this.setProgress(job, 'completed', 100, 'Recognition is complete after retrying with CPU.');
-            return;
-          }
-        }
-        this.fail(
-          job,
-          response.error?.code ?? 'NativeBackendError',
-          response.error?.message ?? 'Local recognition failed.',
-          Boolean(response.error?.retryable)
-        );
-        return;
-      }
-
-      const document = nativePayloadToDocument(response.payload, job);
-      if (this.isCancelled(job.id)) return;
-      if (!document) {
-        this.fail(job, 'MalformedNativeResponse', 'Recognition finished, but no subtitle content was returned.', true);
-        return;
-      }
 
       job.subtitleDocument = normalizeDocumentForSubtitleDisplay(document);
       job.step = 'subtitles';
       this.cancelledJobs.delete(job.id);
-      await this.setProgress(job, 'completed', 100, 'Recognition is complete.');
+      await this.setProgress(job, 'completed', 100, completionMessageForAsr(job));
     } catch (error) {
       if (this.isCancelled(job.id)) return;
       const code =
@@ -325,18 +169,8 @@ export class JobManager extends EventEmitter {
     try {
       if (!job.subtitleDocument) throw new Error('No subtitle document is available to translate.');
       await this.setProgress(job, 'translating', 35, 'Translating subtitle batches.');
-      const secret = this.settings.getSecret('openai.compatible');
       const scheduler = new TranslationScheduler(
-        [
-          new MockTranslationProvider(),
-          new OpenAICompatibleTranslationProvider({
-            id: 'openai.compatible',
-            baseUrl: secret?.baseUrl ?? 'https://api.openai.com/v1',
-            apiKey: secret?.apiKey,
-            model: secret?.model ?? 'gpt-4o-mini',
-            priority: 10
-          })
-        ],
+        this.translationProviders.createProviders(),
         {
           concurrency: job.translationConcurrency,
           rpm: job.translationRequestsPerMinute,
@@ -353,7 +187,12 @@ export class JobManager extends EventEmitter {
         onProgress: ({ completedBatches, totalBatches }) => {
           if (controller.signal.aborted || this.isCancelled(job.id)) return;
           const progress = 35 + Math.round((completedBatches / Math.max(1, totalBatches)) * 60);
-          void this.setProgress(job, 'translating', Math.min(95, progress), `Translating ${completedBatches}/${totalBatches} batches.`);
+          void this.setProgress(
+            job,
+            'translating',
+            Math.min(95, progress),
+            `Translating ${completedBatches}/${totalBatches} batches.`
+          );
         }
       });
       if (controller.signal.aborted || this.isCancelled(job.id)) {
@@ -378,9 +217,14 @@ export class JobManager extends EventEmitter {
       if (controller.signal.aborted || this.isCancelled(job.id) || isAbortError(error)) {
         return this.get(job.id);
       }
-      const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code ?? 'TranslationFailed') : 'TranslationFailed';
+      const code =
+        typeof error === 'object' && error && 'code' in error
+          ? String((error as { code?: unknown }).code ?? 'TranslationFailed')
+          : 'TranslationFailed';
       const retryable =
-        typeof error === 'object' && error && 'retryable' in error ? Boolean((error as { retryable?: unknown }).retryable) : true;
+        typeof error === 'object' && error && 'retryable' in error
+          ? Boolean((error as { retryable?: unknown }).retryable)
+          : true;
       const message = error instanceof Error ? error.message : String(error);
       this.fail(job, code, message, retryable);
       return this.get(job.id);
@@ -410,7 +254,10 @@ export class JobManager extends EventEmitter {
     if (!job.subtitleDocument) throw new Error('No subtitle document is available.');
     const index = job.subtitleDocument.segments.findIndex((item) => item.id === segment.id);
     if (index === -1) throw new Error(`Segment ${segment.id} not found.`);
-    job.subtitleDocument.segments[index] = { ...segment, status: segment.status === 'translated' ? 'translated' : 'edited' };
+    job.subtitleDocument.segments[index] = {
+      ...segment,
+      status: segment.status === 'translated' ? 'translated' : 'edited'
+    };
     job.updatedAt = new Date().toISOString();
     this.save(job);
     return job;
@@ -450,114 +297,6 @@ export class JobManager extends EventEmitter {
   private isCancelled(jobId: string): boolean {
     return this.cancelledJobs.has(jobId);
   }
-
-  private async transcribeWithCloudAsr(job: JobSnapshot, audioPath?: string): Promise<SubtitleDocument | undefined> {
-    const secret = this.settings.getSecret('cloud.openai');
-    if (!secret?.apiKey) {
-      this.fail(job, 'ProviderUnconfigured', 'The cloud recognition API key has not been filled in yet.', false);
-      return undefined;
-    }
-
-    const uploadPath = audioPath ?? job.mediaPath;
-    const fileBuffer = await readFile(uploadPath);
-    const fileName = basename(uploadPath);
-    const form = new FormData();
-    form.append('file', new Blob([fileBuffer]), fileName);
-    form.append('model', secret.model ?? 'whisper-1');
-    form.append('response_format', 'verbose_json');
-    if (job.sourceLanguage !== 'auto') {
-      form.append('language', normalizeAsrLanguageCode(job.sourceLanguage));
-    }
-
-    const response = await fetch(`${(secret.baseUrl ?? 'https://api.openai.com/v1').replace(/\/$/, '')}/audio/transcriptions`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${secret.apiKey}`
-      },
-      body: form
-    });
-
-    if (!response.ok) {
-      this.fail(job, 'ProviderUnavailable', `The cloud recognition request failed (HTTP ${response.status}).`, response.status >= 500 || response.status === 429);
-      return undefined;
-    }
-
-    const payload = (await response.json()) as {
-      text?: string;
-      language?: string;
-      segments?: Array<{ id?: number | string; start?: number; end?: number; text?: string }>;
-    };
-    const segments = Array.isArray(payload.segments) && payload.segments.length > 0
-      ? payload.segments.map((segment, index) => ({
-          id: `${job.id}-seg-${index + 1}`,
-          index: index + 1,
-          startMs: Math.round((segment.start ?? index * 3) * 1000),
-          endMs: Math.round((segment.end ?? (index + 1) * 3) * 1000),
-          sourceText: segment.text?.trim() || '...',
-          status: 'transcribed' as const,
-          confidence: 0.9
-        }))
-      : [
-          {
-            id: `${job.id}-seg-1`,
-            index: 1,
-            startMs: 0,
-            endMs: 5000,
-            sourceText: payload.text?.trim() || '...',
-            status: 'transcribed' as const,
-            confidence: 0.9
-          }
-        ];
-
-    return {
-      id: `doc-${job.id}`,
-      format: 'srt',
-      sourceLanguage: payload.language || job.sourceLanguage,
-      targetLanguage: job.targetLanguage,
-      segments,
-      metadata: {
-        inputMediaPath: job.mediaPath,
-        createdAt: new Date().toISOString(),
-        asrProvider: job.asrProviderId,
-        warnings: [...job.warnings]
-      }
-    };
-  }
-}
-
-function runtimeActionToErrorCode(
-  action: NonNullable<JobSnapshot['error']>['code'] | string
-): 'ManifestNotConfigured' | 'DownloadRequired' | 'UnsupportedPlatform' {
-  if (action === 'manifest-not-configured') {
-    return 'ManifestNotConfigured';
-  }
-  if (action === 'unsupported-platform') {
-    return 'UnsupportedPlatform';
-  }
-  return 'DownloadRequired';
-}
-
-function nativePayloadToDocument(payload: unknown, job: JobSnapshot): SubtitleDocument | undefined {
-  const candidate = payload as { document?: SubtitleDocument; segments?: SubtitleSegment[] } | undefined;
-  if (candidate?.document?.format === 'srt' && Array.isArray(candidate.document.segments)) {
-    return candidate.document;
-  }
-  if (Array.isArray(candidate?.segments)) {
-    return {
-      id: `doc-${job.id}`,
-      format: 'srt',
-      sourceLanguage: job.sourceLanguage,
-      targetLanguage: job.targetLanguage,
-      segments: candidate.segments,
-      metadata: {
-        inputMediaPath: job.mediaPath,
-        createdAt: new Date().toISOString(),
-        asrProvider: job.asrProviderId,
-        warnings: [...job.warnings]
-      }
-    };
-  }
-  return undefined;
 }
 
 function delay(ms: number): Promise<void> {
@@ -634,18 +373,6 @@ function translationProviderIdFromPriority(priority: string[]): string {
   return priority[0] ?? 'openai.compatible';
 }
 
-function shouldRetryLocalWhisperOnCpu(
-  job: JobSnapshot,
-  attemptedGpu: boolean,
-  error?: { code?: string; message?: string; retryable?: boolean }
-): boolean {
-  if (job.asrProviderId !== 'local.whisper.cpp' || !attemptedGpu) {
-    return false;
-  }
-  const message = error?.message?.toLowerCase() ?? '';
-  return message.includes('0xc0000409') || message.includes('3221226505') || message.includes('stack buffer overrun');
-}
-
 function cancelledStep(job: JobSnapshot): WorkflowStep {
   if (job.stage === 'translating') return 'translate';
   if (job.subtitleDocument?.segments.length) return 'subtitles';
@@ -676,4 +403,17 @@ function isAbortError(error: unknown): boolean {
 
 function normalizeDocumentForSubtitleDisplay(document: SubtitleDocument): SubtitleDocument {
   return normalizeSubtitleDocumentLayout(document);
+}
+
+function completionMessageForAsr(job: JobSnapshot): string {
+  if (job.asrProviderId === 'cloud.openai') {
+    return 'Cloud recognition is complete.';
+  }
+  if (job.asrProviderId === 'local.faster-whisper') {
+    return 'Local recognition is complete.';
+  }
+  if (job.warnings.some((warning) => warning.code === 'CudaTranscriptionCrashFallback')) {
+    return 'Recognition is complete after retrying with CPU.';
+  }
+  return 'Recognition is complete.';
 }
