@@ -1,11 +1,14 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from 'electron';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
 import type {
   AssetEvent,
   AppSettingsPatch,
+  AppSettingsPublic,
+  BatchQueueEvent,
   BilingualOrder,
+  CreateBatchJobsRequest,
   CreateJobRequest,
   ExportVariant,
   FasterWhisperCudaRequest,
@@ -14,6 +17,7 @@ import type {
   JobEvent,
   JobSnapshot,
   ProviderSecretInput,
+  SettingsEvent,
   SubtitleDocument,
   SubtitleSegment,
   WhisperModelRequest,
@@ -21,6 +25,7 @@ import type {
 } from '@shared/models';
 import { serializeAss } from '@shared/ass';
 import { JobManager } from './services/jobManager';
+import { BatchJobQueue } from './services/batchJobQueue';
 import { FasterWhisperService } from './services/fasterWhisperService';
 import { NativeBackendClient } from './services/nativeBackendClient';
 import { NativeMediaService } from './services/nativeMediaService';
@@ -43,10 +48,12 @@ import { createMainAsrProviderRegistry } from './providers/asrProviderRegistry';
 import { createMainTranslationProviderRegistry } from './providers/translationProviderRegistry';
 
 let mainWindow: BrowserWindow | undefined;
+let settingsWindow: BrowserWindow | undefined;
 const logger = new AppLogger();
 const appLogger = logger.createScope('app');
 const ipcLogger = logger.createScope('ipc');
 const jobLogger = logger.createScope('jobs');
+const batchLogger = logger.createScope('batch');
 const assetLogger = logger.createScope('assets');
 const settingsStore = new SettingsStore();
 const whisperAssets = new WhisperAssetManager();
@@ -75,6 +82,7 @@ const jobManager = new JobManager(
   asrProviderRegistry,
   translationProviderRegistry
 );
+const batchJobQueue = new BatchJobQueue(jobManager);
 
 function createWindow(): void {
   appLogger.info('window.create', 'Creating main window.', {
@@ -118,6 +126,96 @@ function createWindow(): void {
   });
 }
 
+function createSettingsWindow(): void {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.focus();
+    return;
+  }
+
+  appLogger.info('settings-window.create', 'Creating settings window.', {
+    width: 900,
+    height: 760
+  });
+  settingsWindow = new BrowserWindow({
+    width: 900,
+    height: 760,
+    minWidth: 760,
+    minHeight: 620,
+    title: 'Translate-Ter Settings',
+    backgroundColor: '#f5f5f7',
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+
+  if (process.env.ELECTRON_RENDERER_URL) {
+    const url = new URL(process.env.ELECTRON_RENDERER_URL);
+    url.searchParams.set('window', 'settings');
+    appLogger.info('settings-window.load-url', 'Loading settings renderer development URL.', {
+      url: url.toString()
+    });
+    void settingsWindow.loadURL(url.toString());
+  } else {
+    appLogger.info('settings-window.load-file', 'Loading packaged settings renderer file.');
+    void settingsWindow.loadFile(join(__dirname, '../renderer/index.html'), {
+      query: {
+        window: 'settings'
+      }
+    });
+  }
+
+  settingsWindow.on('closed', () => {
+    appLogger.info('settings-window.closed', 'The settings window was closed.');
+    settingsWindow = undefined;
+  });
+}
+
+function installApplicationMenu(): void {
+  if (process.platform !== 'darwin') {
+    Menu.setApplicationMenu(null);
+    return;
+  }
+
+  const template: MenuItemConstructorOptions[] = [
+    {
+      label: app.name,
+      submenu: [
+        {
+          label: 'Preferences...',
+          accelerator: 'CmdOrCtrl+,',
+          click: () => createSettingsWindow()
+        },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    }
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function sendToAllWindows(channel: string, payload: unknown): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send(channel, payload);
+    }
+  }
+}
+
+function broadcastSettingsChanged(settings: AppSettingsPublic): void {
+  const event: SettingsEvent = {
+    type: 'changed',
+    settings
+  };
+  sendToAllWindows('settings:event', event);
+}
+
 app.whenReady().then(() => {
   void (async () => {
     const initialSettings = await settingsStore.get();
@@ -126,7 +224,7 @@ app.whenReady().then(() => {
       logFilePath,
       packaged: app.isPackaged
     });
-    Menu.setApplicationMenu(null);
+    installApplicationMenu();
     registerIpc();
     const smokeHandled = await maybeRunFasterWhisperSmokeTest();
     if (smokeHandled) {
@@ -172,11 +270,16 @@ function registerIpc(): void {
     'jobs:translate',
     'jobs:cancel',
     'jobs:get',
+    'batch:add-jobs',
+    'batch:start',
+    'batch:cancel',
+    'batch:get',
     'subtitles:import-srt',
     'subtitles:export-srt',
     'subtitles:update-segment',
     'settings:get',
     'settings:update',
+    'settings:open-window',
     'settings:get-secret',
     'settings:set-secret',
     'settings:test-provider',
@@ -257,6 +360,29 @@ function registerIpc(): void {
       });
     }
     mainWindow?.webContents.send('jobs:event', event);
+  });
+  batchJobQueue.on('batch-event', (event: BatchQueueEvent) => {
+    if (event.type === 'error') {
+      batchLogger.error('event', event.message, event);
+    } else if (event.type === 'item') {
+      batchLogger.info('event', event.item.message ?? 'Batch item updated.', {
+        queueId: event.queueId,
+        itemId: event.item.id,
+        status: event.item.status,
+        stage: event.item.stage,
+        progress: event.item.progress
+      });
+    } else {
+      batchLogger.debug('event', 'Batch queue snapshot updated.', {
+        queueId: event.queue.id,
+        status: event.queue.status,
+        totalCount: event.queue.totalCount,
+        completedCount: event.queue.completedCount,
+        failedCount: event.queue.failedCount,
+        cancelledCount: event.queue.cancelledCount
+      });
+    }
+    sendToAllWindows('batch:event', event);
   });
   whisperAssets.on('asset-event', (event: AssetEvent) => {
     logAssetEvent('whisper.cpp', event);
@@ -421,6 +547,7 @@ function registerIpc(): void {
   registerHandle('saveSettings', async (_event, patch: AppSettingsPatch) => {
     const next = await settingsStore.update(patch);
     logger.setLevel(next.logLevel);
+    broadcastSettingsChanged(next);
     return next;
   });
 
@@ -433,6 +560,11 @@ function registerIpc(): void {
   registerHandle('jobs:translate', async (_event, jobId: string) => jobManager.translate(jobId));
   registerHandle('jobs:cancel', async (_event, jobId: string) => jobManager.cancel(jobId));
   registerHandle('jobs:get', async (_event, jobId: string) => jobManager.get(jobId));
+
+  registerHandle('batch:add-jobs', async (_event, request: CreateBatchJobsRequest) => batchJobQueue.addJobs(request));
+  registerHandle('batch:start', async () => batchJobQueue.start());
+  registerHandle('batch:cancel', async () => batchJobQueue.cancel());
+  registerHandle('batch:get', async () => batchJobQueue.get());
 
   registerHandle('subtitles:import-srt', async (_event, path: string) => {
     const raw = await readFile(path, 'utf8');
@@ -463,7 +595,12 @@ function registerIpc(): void {
   registerHandle('settings:update', async (_event, patch: AppSettingsPatch) => {
     const next = await settingsStore.update(patch);
     logger.setLevel(next.logLevel);
+    broadcastSettingsChanged(next);
     return next;
+  });
+  registerHandle('settings:open-window', async () => {
+    createSettingsWindow();
+    return { opened: true };
   });
   registerHandle('settings:get-secret', async (_event, providerId: string) => settingsStore.getSecret(providerId));
   registerHandle('settings:set-secret', async (_event, providerId: string, secret: ProviderSecretInput) =>

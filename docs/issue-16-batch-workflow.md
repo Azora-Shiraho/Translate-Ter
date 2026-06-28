@@ -24,6 +24,14 @@ PR2 只处理 Electron Main 到 C++ native backend 相关内容：
 - 设置更新后的 Main 侧多窗口广播基础设施。
 - 相关架构文档更新和 Main/service 层测试。
 
+## PR2 后端设计记录
+
+- `BatchJobQueue` 是 Electron Main 服务，不下沉到 C++ native backend。
+- 队列 item 保存单文件请求快照，执行时复用现有 `JobManager.create/start/translate`。
+- 队列事件使用 `BatchQueueSnapshot` 和 `BatchQueueEvent`，Main 侧通过 `batch:event` 广播给所有存活窗口。
+- 当前采用串行队列，避免 `job.cancel` / `cancelRunningWork` 的全局 native 取消语义误伤并发任务。
+- 设置保存后由 Main 侧广播 `settings:event`，为后续独立设置窗口同步主题、语言和配置状态提供基础。
+
 ## 非 PR2 范围
 
 - Renderer 批量处理页面。
