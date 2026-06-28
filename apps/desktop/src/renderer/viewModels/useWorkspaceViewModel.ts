@@ -80,23 +80,32 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
   useJobEvents(handleJobEvent);
 
   async function pickMedia(): Promise<void> {
+    if (job && !['idle', 'completed', 'failed', 'cancelled'].includes(job.stage)) {
+      feedback.writeUiLog('debug', 'media.pick.blocked-active-job', { jobId: job.id, stage: job.stage }, 'renderer.workspace');
+      return;
+    }
     feedback.writeUiLog('info', 'media.pick.request', undefined, 'renderer.workspace');
     const selected = await translateTerGateway.selectVideo();
     if (selected) {
       feedback.writeUiLog('info', 'media.pick.success', { mediaPath: selected }, 'renderer.workspace');
       setMediaPath(selected);
+      setJob(undefined);
+      setSelectedSegmentId(undefined);
+      setWarningPanelOpen(false);
+      setSelectedWarningId(undefined);
       return;
     }
     feedback.writeUiLog('debug', 'media.pick.cancelled', undefined, 'renderer.workspace');
   }
 
   async function createAndStart(): Promise<void> {
-    if (!settings || !mediaPath.trim()) return;
+    const selectedMediaPath = mediaPath.trim() || job?.mediaPath.trim() || '';
+    if (!settings || !selectedMediaPath) return;
     feedback.writeUiLog(
       'info',
       'job.start-transcription',
       {
-        mediaPath: mediaPath.trim(),
+        mediaPath: selectedMediaPath,
         asrProviderId: settings.asrProviderId,
         whisperModelId: settings.whisperModelId,
         useCuda: effectiveLocalWhisperUseCuda
@@ -106,7 +115,7 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
     const token = beginAction('transcribe');
     try {
       const nextJob = await translateTerGateway.startTranscription({
-        mediaPath: mediaPath.trim(),
+        mediaPath: selectedMediaPath,
         sourceLanguage: settings.sourceLanguage,
         targetLanguage: settings.targetLanguage,
         asrProviderId: settings.asrProviderId,
@@ -130,7 +139,7 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
     } catch (error) {
       if (isCurrentAction(token)) {
         feedback.pushStatus(
-          feedback.reportUiError('job.start-transcription-failed', error, { mediaPath: mediaPath.trim() }, 'renderer.workspace'),
+          feedback.reportUiError('job.start-transcription-failed', error, { mediaPath: selectedMediaPath }, 'renderer.workspace'),
           'error'
         );
       }

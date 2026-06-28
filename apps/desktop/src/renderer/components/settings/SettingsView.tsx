@@ -534,7 +534,15 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
                       <InspectorSection icon={<Gauge size={16} />} title={t('acceleration')}>
                         <div className="modelCard accentCard">
                           <div>
-                            <span className={statusVm.fasterWhisperCudaShort === t('ok') ? 'signal good' : 'signal accent'} />
+                            <span
+                              className={
+                                statusVm.fasterWhisperCudaShort === t('ok')
+                                  ? 'signal good'
+                                  : statusVm.fasterWhisperCudaShort === t('notChecked')
+                                    ? 'signal muted'
+                                    : 'signal warn'
+                              }
+                            />
                             <strong>{t('acceleration')}</strong>
                             <small>{statusVm.fasterWhisperCudaDetail}</small>
                           </div>

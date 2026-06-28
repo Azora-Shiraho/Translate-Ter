@@ -1265,6 +1265,10 @@ h3 {
   color: var(--tt-status-error);
 }
 
+.settingsBadge.tone-muted {
+  color: var(--tt-text-muted);
+}
+
 .settingsSummaryGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1341,7 +1345,8 @@ h3 {
   box-shadow: 0 22px 42px rgba(3, 8, 20, 0.28);
 }
 
-.settingsSummaryCard.interactive:hover .settingsOverviewIcon {
+.settingsSummaryCard.interactive:hover .settingsOverviewIcon,
+.settingsSummaryCard.interactive:hover .settingsFactIcon {
   background: rgba(77, 163, 255, 0.16);
   color: #8bc6ff;
 }
@@ -1357,6 +1362,26 @@ h3 {
 .settingsOverviewCard,
 .settingsFactCard {
   width: 100%;
+  align-content: start;
+}
+
+.settingsOverviewCard > div:last-child,
+.settingsFactCard > div:last-child {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settingsOverviewCard span,
+.settingsFactCard span {
+  overflow: hidden;
+  color: var(--tt-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .settingsOverviewTop {
@@ -1375,6 +1400,16 @@ h3 {
   background: rgba(255, 255, 255, 0.08);
   color: var(--tt-accent);
   transition: background 180ms ease, color 180ms ease;
+}
+
+.settingsFactIcon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--tt-text-muted);
 }
 
 .settingsOverviewCard strong {
@@ -1404,6 +1439,13 @@ h3 {
   white-space: normal;
   font-size: 18px;
   line-height: 1.45;
+}
+
+.settingsFactCard small {
+  overflow-wrap: anywhere;
+  color: var(--tt-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .settingsFactCard p {
@@ -1687,7 +1729,7 @@ select {
 
 .textFieldActionButton:hover {
   background: rgba(77, 163, 255, 0.08);
-  color: var(--tt-text-primary);
+  color: var(--tt-text-strong);
 }
 
 input[type='checkbox'] {
@@ -1930,6 +1972,10 @@ input[type='checkbox'] {
   background: var(--tt-status-error);
 }
 
+.signal.muted {
+  background: var(--tt-border-strong);
+}
+
 .segmented {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2024,6 +2070,7 @@ input[type='checkbox'] {
 
 .systemStrip {
   justify-content: space-between;
+  min-width: 0;
   border-top: 1px solid var(--tt-border-soft);
   border-bottom: 0;
   color: var(--tt-text-muted);
@@ -2075,6 +2122,7 @@ input[type='checkbox'] {
   grid-template-columns: auto minmax(160px, 1fr) minmax(120px, 220px);
   align-items: center;
   gap: 10px;
+  flex: 1 1 420px;
   min-width: 0;
   max-width: min(760px, 100%);
   min-height: 34px;
@@ -2108,6 +2156,13 @@ input[type='checkbox'] {
   display: grid;
   min-width: 0;
   gap: 1px;
+}
+
+.systemActions {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .systemProgressCopy strong,
@@ -2498,6 +2553,26 @@ input[type='checkbox'] {
     gap: 8px;
   }
 
+  .rowStart {
+    grid-area: start;
+  }
+
+  .rowEnd {
+    grid-area: end;
+  }
+
+  .rowOriginal {
+    grid-area: original;
+  }
+
+  .rowTranslated {
+    grid-area: translated;
+  }
+
+  .rowStatus {
+    grid-area: status;
+  }
+
   .previewText {
     display: -webkit-box;
     overflow: hidden;
@@ -2608,6 +2683,11 @@ input[type='checkbox'] {
 
   .panelHeader p {
     white-space: normal;
+  }
+
+  .panelHeaderMeta {
+    width: 100%;
+    justify-content: flex-start;
   }
 }
 

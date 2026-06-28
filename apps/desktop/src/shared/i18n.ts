@@ -350,7 +350,9 @@ export const i18nResources = {
         'manifest-not-configured': 'Automatic download is unavailable',
         'download-required': 'Download required',
         none: 'Ready'
-      }
+      },
+      chars: 'chars',
+      selectSegmentToEdit: 'Select a segment on the left to edit.'
     }
   },
   'zh-CN': {
@@ -703,7 +705,9 @@ export const i18nResources = {
         'manifest-not-configured': '暂不支持自动下载',
         'download-required': '需要下载',
         none: '就绪'
-      }
+      },
+      chars: '字符',
+      selectSegmentToEdit: '请在左侧选择要编辑的片段。'
     }
   }
 } as const;

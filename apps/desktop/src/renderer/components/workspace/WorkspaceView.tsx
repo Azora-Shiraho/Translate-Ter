@@ -2,19 +2,19 @@ import React from 'react';
 import {
   AlertCircle,
   FileVideo,
-  Gauge,
   Languages,
-  PanelLeftClose,
-  PanelLeftOpen,
   Play,
-  ShieldCheck
+  ShieldCheck,
+  CheckCircle2,
+  Clock
 } from 'lucide-react';
-import type { JobSnapshot, SubtitleSegment, SubtitleWarning } from '@shared/types';
+import type { JobSnapshot, SubtitleSegment, SubtitleWarning, ExportVariant } from '@shared/types';
 import type { JobStage } from '@shared/models';
 import { WarningPanel } from '../status/WarningPanel';
 import { SubtitleWorkbench } from '../subtitles/SubtitleWorkbench';
 import { providerLabel, stageLabel } from '../../app/displayHelpers';
 import type { DerivedHealthState, RunningAction } from '../../app/types';
+import { ExportActionGroup } from '../export/ExportActionGroup';
 
 type WorkspaceViewProps = {
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -55,260 +55,175 @@ type WorkspaceViewProps = {
   onTranslateJob: () => void;
   onSelectSegment: (segmentId: string) => void;
   onUpdateSegment: (segment: SubtitleSegment, patch: Partial<SubtitleSegment>) => void;
+  canExportTranslated?: boolean;
+  canExportSource?: boolean;
+  canExportBilingual?: boolean;
+  exportingVariant?: ExportVariant;
+  onExportSrt?: (variant: ExportVariant) => void;
 };
 
 export function WorkspaceView(props: WorkspaceViewProps): JSX.Element {
   const showWarningList = props.workflowWarnings.length > 1;
+  const segmentsCount = props.job?.subtitleDocument?.segments.length ?? 0;
 
   return (
-    <section className="viewFrame workspaceFrame">
-      <nav className="workflowRail">
-        <div className="workflowRailLead">
-          <div className="workflowRailCopy">
-            <strong>{props.t('workspace')}</strong>
-            <small title={props.footerMessage}>{props.workspaceRailMessage}</small>
+    <div className="workspaceModernLayout">
+      <header className="workspaceHeader">
+        <h1>{props.t('workspace')}</h1>
+        <div className="headerActions">
+          {props.onExportSrt && (
+            <ExportActionGroup
+              title={props.t('export')}
+              labels={{ translated: props.t('translated'), source: props.t('original'), bilingual: props.t('bilingual') }}
+              exportingVariant={props.exportingVariant}
+              disabled={{
+                translated: !props.canExportTranslated,
+                source: !props.canExportSource,
+                bilingual: !props.canExportBilingual
+              }}
+              onExport={props.onExportSrt}
+            />
+          )}
+        </div>
+      </header>
+
+      <div className="workspaceContent" style={{ display: 'flex', flexDirection: 'column', gap: '32px', flexGrow: 1, minHeight: 0, overflowY: 'auto' }}>
+        <div className="workspaceWizard">
+          <div className="wizardStep">
+            <div className="stepIcon"><FileVideo size={24} /></div>
+            <div className="stepContent">
+              <h3>1. {props.t('chooseMedia')}</h3>
+              <p>{props.selectedMediaPath || props.t('placeholderPath')}</p>
+              <button 
+                className="modernBtn secondaryBtn"
+                disabled={Boolean(props.runningAction) || props.jobIsRunning}
+                onClick={props.onPickMedia}
+                type="button"
+              >
+                <FileVideo size={16} />
+                {props.t('chooseMedia')}
+              </button>
+            </div>
+          </div>
+
+          <div className={`wizardStep ${!props.mediaPath.trim() ? 'disabled' : ''}`}>
+            <div className="stepIcon"><Play size={24} /></div>
+            <div className="stepContent">
+              <h3>2. {props.t('startTranscription')}</h3>
+              <p>{providerLabel(props.asrProviderId, props.t)} - {props.workspaceRuntimeDetail}</p>
+              <button 
+                className={`modernBtn ${props.hasRecognizedSubtitles ? 'secondaryBtn' : ''}`}
+                disabled={Boolean(props.runningAction) || !props.mediaPath.trim()}
+                onClick={props.onCreateAndStart}
+                type="button"
+              >
+                <Play size={16} />
+                {props.t('startTranscription')}
+              </button>
+            </div>
+          </div>
+
+          <div className={`wizardStep ${!props.job?.subtitleDocument ? 'disabled' : ''}`}>
+            <div className="stepIcon"><Languages size={24} /></div>
+            <div className="stepContent">
+              <h3>3. {props.t('translateSubtitles')}</h3>
+              <p>{`${props.sourceLabel} -> ${props.targetLabel}`}</p>
+              <button 
+                className={`modernBtn ${props.hasRecognizedSubtitles && !props.translationComplete ? '' : 'secondaryBtn'}`}
+                disabled={Boolean(props.runningAction) || !props.job?.subtitleDocument}
+                onClick={props.onTranslateJob}
+                type="button"
+              >
+                <Languages size={16} />
+                {props.t('translateSubtitles')}
+              </button>
+            </div>
           </div>
         </div>
-        <div className="workflowRailTrack">
-          {props.steps.map((step, index) => (
-            <span
-              className={
-                [
-                  'workflowStep',
-                  index < props.currentStepIndex ? 'done' : '',
-                  index === props.currentStepIndex ? 'active' : '',
-                  props.runningStep === step ? 'running' : '',
-                  props.failedStep === step ? 'failed' : ''
-                ]
-                  .filter(Boolean)
-                  .join(' ')
-              }
-              key={step}
-            >
-              <span className="workflowStepDot" />
-              <strong>{index + 1}</strong>
-              <span>{props.t(step)}</span>
-            </span>
-          ))}
-        </div>
-        <div className="workflowRailMeta">
-          <span className="metaPill">{`${props.t('progress')} ${props.completion}%`}</span>
-          <span className={`status ${props.runtimeState.tone}`}>{props.runtimeState.label}</span>
-          <button
-            className="summaryToggle"
-            title={props.statsCollapsed ? props.t('expandSummary') : props.t('collapseSummary')}
-            onClick={props.onToggleStatsCollapsed}
-            type="button"
-          >
-            {props.statsCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          </button>
-        </div>
-      </nav>
 
-      <main className={`workspaceLayout${props.statsCollapsed ? ' statsCollapsed' : ''}`}>
-        {!props.statsCollapsed && (
-          <aside className="statsRail workspaceInspector">
-            <div className="railContent">
-              <div className="railHeader inspectorHeader">
-                <span>{props.t('workflowSummary')}</span>
-                <strong title={props.jobTitle}>{props.jobTitle}</strong>
-                <small>{props.t(stageLabel(props.job?.stage ?? 'idle'))}</small>
-              </div>
-              <div className="railMetrics inspectorMetrics">
-                <MetricCard icon={<ShieldCheck size={16} />} label={props.t('translatedRows')} value={`${props.translatedCount}/${props.job?.subtitleDocument?.segments.length ?? 0}`} />
-                <MetricCard
-                  icon={<AlertCircle size={16} />}
-                  label={props.t('warnings')}
-                  value={String(props.warningCount)}
-                  active={props.warningCount > 0 && props.warningPanelOpen}
-                  onClick={props.warningCount > 0 ? props.onToggleWarnings : undefined}
-                />
-              </div>
-              {!props.warningPanelOpen &&
-                (props.warningCount > 0 ? (
-                  <button className="workspaceInspectorNotice actionable" onClick={props.onToggleWarnings} type="button">
-                    <span className="signal warn" />
-                    <div>
-                      <strong>{props.t('warningDetails')}</strong>
-                      <small>{props.t('warningReviewHint')}</small>
-                    </div>
-                  </button>
-                ) : (
-                  <div className="workspaceInspectorNotice">
-                    <span className={`signal ${props.translationComplete ? 'good' : 'muted'}`} />
-                    <div>
-                      <strong>{props.t('workflowSummary')}</strong>
-                      <small>{props.t('subtitlePanelHint')}</small>
-                    </div>
-                  </div>
-                ))}
-              {props.warningPanelOpen && props.workflowWarnings.length > 0 && props.selectedWarning && (
-                <WarningPanel
-                  t={props.t}
-                  warnings={props.workflowWarnings}
-                  selectedWarning={props.selectedWarning}
-                  asrProviderId={props.asrProviderId}
-                  translationProviderId={props.translationProviderId}
-                  onToggle={props.onToggleWarnings}
-                  onSelectWarning={props.onSelectWarning}
-                />
-              )}
-              <div className="railStatusStack">
-                <div className="railNote">
-                  <span className={`signal ${props.translationState.tone}`} />
-                  <div>
-                    <strong>{providerLabel(props.translationProviderId, props.t)}</strong>
-                    <small>{props.translationState.detail}</small>
-                  </div>
-                </div>
-                <div className="railNote">
-                  <span className={`signal ${props.runtimeState.tone}`} />
-                  <div>
-                    <strong>{props.t('runtime')}</strong>
-                    <small title={props.runtimeState.detail}>{props.workspaceRuntimeDetail}</small>
-                  </div>
-                </div>
+        {(props.jobIsRunning || props.hasRecognizedSubtitles || props.warningCount > 0 || props.job?.stage === 'failed') && (
+          <div className="workspaceDashboard">
+            <div className="dashMetric">
+              <div className="dashMetricIcon"><Clock size={20} /></div>
+              <div className="dashMetricInfo">
+                <span>{props.t('progress')}</span>
+                <strong>{props.completion}% - {props.t(stageLabel(props.job?.stage ?? 'idle'))}</strong>
               </div>
             </div>
-          </aside>
+            
+            <div className="dashMetric">
+              <div className="dashMetricIcon"><ShieldCheck size={20} /></div>
+              <div className="dashMetricInfo">
+                <span>{props.t('translatedRows')}</span>
+                <strong>{props.translatedCount} / {segmentsCount}</strong>
+              </div>
+            </div>
+            
+            <div 
+              className={`dashMetric ${props.warningCount > 0 ? 'interactive' : ''}`} 
+              style={{ cursor: props.warningCount > 0 ? 'pointer' : 'default' }} 
+              onClick={props.warningCount > 0 ? props.onToggleWarnings : undefined}
+              role={props.warningCount > 0 ? 'button' : undefined}
+              tabIndex={props.warningCount > 0 ? 0 : undefined}
+              onKeyDown={props.warningCount > 0 ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  props.onToggleWarnings();
+                }
+              } : undefined}
+            >
+              <div className="dashMetricIcon" style={{ color: props.warningCount > 0 ? 'var(--tt-status-warning)' : 'inherit' }}>
+                {props.warningCount > 0 ? <AlertCircle size={20} /> : <CheckCircle2 size={20} />}
+              </div>
+              <div className="dashMetricInfo">
+                <span>{props.t('warnings')}</span>
+                <strong>{props.warningCount}</strong>
+              </div>
+            </div>
+            
+            <div className="dashMetric">
+              <div className="dashMetricIcon"><Languages size={20} /></div>
+              <div className="dashMetricInfo">
+                <span>{providerLabel(props.translationProviderId, props.t)}</span>
+                <strong style={{ color: props.translationState.tone === 'good' ? 'var(--tt-status-success)' : 'var(--tt-status-warning)' }}>
+                   {props.translationState.label}
+                </strong>
+              </div>
+            </div>
+          </div>
         )}
 
-        <section className="workspaceMain">
-          <section className={`workspaceHero${props.asrProviderId === 'local.faster-whisper' ? ' fasterWhisperHero' : ''}`} aria-label={props.t('currentJob')}>
-            <div className="jobMediaCard">
-              <div className="workspaceCardTop">
-                <span className="fieldLabel">{props.t('currentJob')}</span>
-                <span className="stageBadge">{props.t(stageLabel(props.job?.stage ?? 'idle'))}</span>
-              </div>
-              <strong title={props.jobTitle}>{props.jobTitle}</strong>
-              <p className="workspacePath" title={props.selectedMediaPath || props.t('placeholderPath')}>
-                {props.selectedMediaPath || props.t('placeholderPath')}
-              </p>
-              <div className="jobMediaMeta">
-                <span className="metaPill">{`${props.sourceLabel} -> ${props.targetLabel}`}</span>
-                <span className="metaPill">{providerLabel(props.asrProviderId, props.t)}</span>
-                <span className="metaPill">{providerLabel(props.translationProviderId, props.t)}</span>
-              </div>
-              <div className="workspaceProgressPanel">
-                <div className="workspaceProgressCopy">
-                  <span>{props.t('progress')}</span>
-                  <strong>{props.completion}%</strong>
-                </div>
-                <div className={`workspaceProgressTrack${props.jobIsRunning ? ' active' : ''}`} aria-hidden="true">
-                  <span style={{ width: `${Math.max(0, Math.min(100, props.completion))}%` }} />
-                </div>
-              </div>
-            </div>
-
-            <div className="jobActionCard">
-              <div className="workspaceCardTop">
-                <span className="fieldLabel">{props.t('workflowSummary')}</span>
-                <span className="metaPill">{props.t('languagePair')}</span>
-              </div>
-              <strong className="workspaceRoute">{`${props.sourceLabel} -> ${props.targetLabel}`}</strong>
-              <div className="workspaceActionStack">
-                <button className="secondary wideButton" onClick={props.onPickMedia} type="button">
-                  <FileVideo size={16} />
-                  {props.t('chooseMedia')}
-                </button>
-                <div className="workspaceActionRow">
-                  <button
-                    className={props.hasRecognizedSubtitles ? 'secondary' : 'primary'}
-                    disabled={Boolean(props.runningAction) || !props.mediaPath.trim()}
-                    onClick={props.onCreateAndStart}
-                    type="button"
-                  >
-                    <Play size={16} />
-                    {props.t('startTranscription')}
-                  </button>
-                  <button
-                    className={props.hasRecognizedSubtitles && !props.translationComplete ? 'primary' : 'secondary'}
-                    disabled={Boolean(props.runningAction) || !props.job?.subtitleDocument}
-                    onClick={props.onTranslateJob}
-                    type="button"
-                  >
-                    <Languages size={16} />
-                    {props.t('translateSubtitles')}
-                  </button>
-                </div>
-              </div>
-              <p className="workspaceActionHint">{props.t('reviewHint')}</p>
-            </div>
-
-            <div className="workspaceSignalDeck">
-              <div className="workspaceSignalGrid">
-                <MetricCard icon={<ShieldCheck size={16} />} label={props.t('translatedRows')} value={`${props.translatedCount}/${props.job?.subtitleDocument?.segments.length ?? 0}`} />
-                <MetricCard
-                  icon={<AlertCircle size={16} />}
-                  label={props.t('warnings')}
-                  value={String(props.warningCount)}
-                  active={props.warningCount > 0 && props.warningPanelOpen}
-                  onClick={props.warningCount > 0 ? props.onToggleWarnings : undefined}
-                />
-              </div>
-              <div className="workspaceHealthGrid">
-                <div className="railNote workspaceCompactNote">
-                  <span className={`signal ${props.translationState.tone}`} />
-                  <div>
-                    <strong>{providerLabel(props.translationProviderId, props.t)}</strong>
-                    <small>{props.translationState.detail}</small>
-                  </div>
-                </div>
-                <div className="railNote workspaceCompactNote">
-                  <span className={`signal ${props.runtimeState.tone}`} />
-                  <div>
-                    <strong>{props.t('runtime')}</strong>
-                    <small title={props.runtimeState.detail}>{props.workspaceRuntimeDetail}</small>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <SubtitleWorkbench
+        {props.warningPanelOpen && props.workflowWarnings.length > 0 && props.selectedWarning && (
+          <WarningPanel
             t={props.t}
-            job={props.job}
-            jobTitle={props.jobTitle}
-            sourceLabel={props.sourceLabel}
-            targetLabel={props.targetLabel}
+            warnings={props.workflowWarnings}
+            selectedWarning={props.selectedWarning}
             asrProviderId={props.asrProviderId}
-            selectedSegment={props.selectedSegment}
-            warningCount={props.warningCount}
-            translatedCount={props.translatedCount}
-            onToggleWarnings={props.onToggleWarnings}
-            onSelectSegment={props.onSelectSegment}
-            onUpdateSegment={props.onUpdateSegment}
+            translationProviderId={props.translationProviderId}
+            onToggle={props.onToggleWarnings}
+            onSelectWarning={props.onSelectWarning}
           />
-        </section>
-      </main>
-    </section>
-  );
-}
+        )}
 
-function MetricCard(props: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  active?: boolean;
-  onClick?: () => void;
-}): JSX.Element {
-  const content = (
-    <>
-      <div className="metricIcon">{props.icon}</div>
-      <div>
-        <span>{props.label}</span>
-        <strong>{props.value}</strong>
+        {(props.hasRecognizedSubtitles || props.job?.subtitleDocument) && (
+          <div className="workspaceWorkbenchArea" style={{ flexGrow: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <SubtitleWorkbench
+              t={props.t}
+              job={props.job}
+              jobTitle={props.jobTitle}
+              sourceLabel={props.sourceLabel}
+              targetLabel={props.targetLabel}
+              asrProviderId={props.asrProviderId}
+              selectedSegment={props.selectedSegment}
+              warningCount={props.warningCount}
+              translatedCount={props.translatedCount}
+              onToggleWarnings={props.onToggleWarnings}
+              onSelectSegment={props.onSelectSegment}
+              onUpdateSegment={props.onUpdateSegment}
+            />
+          </div>
+        )}
       </div>
-    </>
+    </div>
   );
-
-  if (props.onClick) {
-    return (
-      <button className={props.active ? 'metricCard active' : 'metricCard'} onClick={props.onClick} type="button">
-        {content}
-      </button>
-    );
-  }
-
-  return <div className={props.active ? 'metricCard active' : 'metricCard'}>{content}</div>;
 }
