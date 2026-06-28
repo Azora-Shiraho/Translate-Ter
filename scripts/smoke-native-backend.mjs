@@ -67,15 +67,15 @@ async function main() {
           index: 2,
           startMs: 1000,
           endMs: 2000,
-          sourceText: 'Second line',
-          translatedText: '第二行'
+          sourceText: 'Second line {speaker}',
+          translatedText: '第二行 {speaker}'
         },
         {
           index: 1,
           startMs: 0,
           endMs: 800,
-          sourceText: 'Hello smoke',
-          translatedText: '你好 smoke'
+          sourceText: 'Hello {smoke}',
+          translatedText: '你好 {smoke}'
         }
       ],
       variant: 'bilingual',
@@ -84,16 +84,38 @@ async function main() {
     assertResponseOk(serializeResponse, 'srt.serialize');
     const expectedSerialized = `1
 00:00:00,000 --> 00:00:00,800
-Hello smoke
-你好 smoke
+Hello {smoke}
+你好 {smoke}
 
 2
 00:00:01,000 --> 00:00:02,000
-Second line
-第二行
+Second line {speaker}
+第二行 {speaker}
 
 `;
-    assertOk(serializeResponse.payload.srt === expectedSerialized, 'srt.serialize returns stable bilingual SRT output');
+    assertOk(
+      serializeResponse.payload.srt === expectedSerialized,
+      'srt.serialize preserves brace-containing bilingual SRT output'
+    );
+
+    const emptyTranslatedResponse = await session.request('srt.serialize', {
+      segments: [
+        {
+          id: 'seg-empty',
+          index: 1,
+          startMs: 0,
+          endMs: 800,
+          sourceText: 'Hello source',
+          translatedText: ''
+        }
+      ],
+      variant: 'translated'
+    });
+    assertOk(emptyTranslatedResponse.ok === false, 'srt.serialize rejects empty translated subtitle segments');
+    assertOk(
+      emptyTranslatedResponse.error?.message === 'Cannot export empty subtitle segment seg-empty.',
+      'srt.serialize reports a clear empty translated segment error'
+    );
 
     const cancelResponse = await session.request('job.cancel', { jobId: 'smoke-job' });
     assertResponseOk(cancelResponse, 'job.cancel');

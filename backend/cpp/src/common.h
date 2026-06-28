@@ -18,11 +18,13 @@ struct SubtitleWarning {
 };
 
 struct Segment {
+  std::string id;
   int index = 0;
   int start_ms = 0;
   int end_ms = 0;
   std::string source_text;
   std::string translated_text;
+  bool has_translated_text = false;
   std::string status = "new";
   std::vector<std::string> notes;
   double confidence = 0.0;
