@@ -131,6 +131,7 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
       'renderer.workspace'
     );
     const token = beginAction('transcribe');
+    workspaceJobIdRef.current = undefined;
     workspaceInitiatedRef.current = true;
     try {
       const nextJob = await translateTerGateway.startTranscription({
