@@ -67,14 +67,30 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
 
   const translateStage = useCallback((stage: JobStage) => t(stageLabel(stage)), [t]);
 
+  const workspaceJobIdRef = useRef<string>();
+
+  useEffect(() => {
+    workspaceJobIdRef.current = job?.id;
+  }, [job?.id]);
+
   const handleJobEvent = useCallback(
     (event: JobEvent) => {
       feedback.writeUiLog('debug', 'jobs.event-received', summarizeJobEventForLog(event), 'renderer.jobs');
-      if (event.type === 'snapshot') setJob(event.job);
-      if (event.type === 'progress') feedback.setMessage(event.message ?? translateStage(event.stage));
-      if (event.type === 'error') feedback.pushStatus(event.message, 'error');
+      if (event.type === 'snapshot') {
+        const matchesJobId = workspaceJobIdRef.current && event.job.id === workspaceJobIdRef.current;
+        const matchesMediaPath = !workspaceJobIdRef.current && mediaPath && event.job.mediaPath === mediaPath;
+        if (matchesJobId || matchesMediaPath) {
+          workspaceJobIdRef.current = event.job.id;
+          setJob(event.job);
+        }
+      } else {
+        if (workspaceJobIdRef.current && event.jobId === workspaceJobIdRef.current) {
+          if (event.type === 'progress') feedback.setMessage(event.message ?? translateStage(event.stage));
+          if (event.type === 'error') feedback.pushStatus(event.message, 'error');
+        }
+      }
     },
-    [feedback, translateStage]
+    [feedback, translateStage, mediaPath]
   );
 
   useJobEvents(handleJobEvent);
@@ -135,6 +151,7 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
         translationLinesPerRequest: settings.translationLinesPerRequest,
         translationBatchStride: settings.translationBatchStride
       });
+      workspaceJobIdRef.current = nextJob.id;
       if (isCurrentAction(token)) setJob(nextJob);
     } catch (error) {
       if (isCurrentAction(token)) {
@@ -154,6 +171,7 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
     const token = beginAction('translate');
     try {
       const nextJob = await translateTerGateway.startTranslation(job.id);
+      workspaceJobIdRef.current = nextJob.id;
       if (isCurrentAction(token)) setJob(nextJob);
     } catch (error) {
       if (isCurrentAction(token)) {
@@ -199,7 +217,9 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
     invalidateActiveAction();
     clearActiveDownload();
     await translateTerGateway.jobs.cancel(job.id);
-    setJob(await translateTerGateway.jobs.get(job.id));
+    const nextJob = await translateTerGateway.jobs.get(job.id);
+    workspaceJobIdRef.current = nextJob.id;
+    setJob(nextJob);
     feedback.pushStatus(t('stopped'), 'warning');
   }
 

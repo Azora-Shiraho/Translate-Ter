@@ -73,7 +73,7 @@ export function BatchQueueView({ batchVm, workspaceRunning }: BatchQueueViewProp
                   </div>
                   {item.status === 'running' && (
                     <div style={{ width: '100%', height: '4px', backgroundColor: 'var(--tt-color-surface-hover)', borderRadius: '2px', marginTop: '8px' }}>
-                      <div style={{ width: `${item.progress}%`, height: '100%', backgroundColor: 'var(--tt-color-accent)', borderRadius: '2px' }} />
+                      <div style={{ width: `${item.progress}%`, height: '100%', backgroundColor: 'var(--tt-accent)', borderRadius: '2px' }} />
                     </div>
                   )}
                   {item.message && <div style={{ fontSize: '12px', opacity: 0.7, marginTop: '4px' }}>{item.message}</div>}

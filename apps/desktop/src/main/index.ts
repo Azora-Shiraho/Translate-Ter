@@ -383,7 +383,6 @@ function registerIpc(): void {
       properties: ['openFile', 'multiSelections'],
       filters: [
         { name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'mp3', 'wav', 'm4a', 'aac'] },
-        { name: 'SRT', extensions: ['srt'] },
         { name: 'All files', extensions: ['*'] }
       ]
     });
