@@ -155,8 +155,9 @@ export function App(): JSX.Element {
     workspaceVm.runningAction === 'translate' || workspaceVm.job?.stage === 'translating';
   const runningStep = isTranscribing ? 'asr' : isTranslating ? 'translate' : undefined;
   const failedStep = workspaceVm.job?.stage === 'failed' ? workspaceVm.job.step : undefined;
+  const batchRunning = batchVm.queue.status === 'running';
   const appWorking =
-    workspaceVm.busy || Boolean(settingsVm.runtimeOperation) || Boolean(settingsVm.checkingProvider) || jobIsRunning;
+    workspaceVm.busy || Boolean(settingsVm.runtimeOperation) || Boolean(settingsVm.checkingProvider) || jobIsRunning || batchRunning;
   const hasRecognizedSubtitles = Boolean(workspaceVm.job?.subtitleDocument?.segments.length);
   const translationComplete = hasRecognizedSubtitles && translatedCount === segments.length && segments.length > 0;
   const canExportTranslated = translationComplete && !workspaceVm.busy;
@@ -212,28 +213,34 @@ export function App(): JSX.Element {
         </div>
         
         <nav className="sidebarNav">
-          <ul className="navLinks">
-            <li
-              className={activeView === 'workspace' ? 'active' : ''}
-              onClick={() => setActiveView('workspace')}
-              title={t('navWorkspace')}
-            >
-              <FileVideo size={20} />
-            </li>
-            <li
-              className={activeView === 'batch' ? 'active' : ''}
-              onClick={() => setActiveView('batch')}
-              title={t('batchProcessing')}
-            >
-              <Layers size={20} />
-            </li>
-          </ul>
-
-          <ul className="navLinks">
-            <li title={t('navSettings')} onClick={() => translateTerGateway.window.openSettings()}>
-              <Settings size={20} />
-            </li>
-          </ul>
+          <button
+            className={`navItem${activeView === 'workspace' ? ' active' : ''}`}
+            onClick={() => setActiveView('workspace')}
+            title={t('navWorkspace')}
+            type="button"
+          >
+            <FileVideo size={18} />
+            <span>{t('navWorkspace')}</span>
+          </button>
+          <button
+            className={`navItem${activeView === 'batch' ? ' active' : ''}`}
+            onClick={() => setActiveView('batch')}
+            title={t('batchProcessing')}
+            type="button"
+          >
+            <Layers size={18} />
+            <span>{t('batchProcessing')}</span>
+          </button>
+          <button
+            className="navItem"
+            onClick={() => translateTerGateway.window.openSettings()}
+            title={t('navSettings')}
+            type="button"
+            style={{ marginTop: 'auto' }}
+          >
+            <Settings size={18} />
+            <span>{t('navSettings')}</span>
+          </button>
         </nav>
 
         <div className="sidebarFooter">
@@ -247,13 +254,13 @@ export function App(): JSX.Element {
           {(canForceStop || workspaceVm.job?.error) && (
             <div className="sidebarActions">
               {canForceStop && (
-                <button onClick={() => void workspaceVm.forceStop()} type="button">
+                <button onClick={() => void workspaceVm.forceStop()} type="button" disabled={batchRunning}>
                   <AlertCircle size={14} />
                   {t('forceStop')}
                 </button>
               )}
               {workspaceVm.job?.error && (
-                <button onClick={() => void workspaceVm.createAndStart()} type="button">
+                <button onClick={() => void workspaceVm.createAndStart()} type="button" disabled={batchRunning}>
                   <RotateCcw size={14} />
                   {t('retry')}
                 </button>
@@ -309,6 +316,7 @@ export function App(): JSX.Element {
             canExportBilingual={canExportBilingual}
             exportingVariant={workspaceVm.exportingVariant}
             onExportSrt={(variant) => void workspaceVm.exportSrt(variant)}
+            batchRunning={batchRunning}
           />
         )}
         {activeView === 'batch' && (

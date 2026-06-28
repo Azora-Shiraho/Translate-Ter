@@ -68,6 +68,7 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
   const translateStage = useCallback((stage: JobStage) => t(stageLabel(stage)), [t]);
 
   const workspaceJobIdRef = useRef<string>();
+  const workspaceInitiatedRef = useRef<boolean>(false);
 
   useEffect(() => {
     workspaceJobIdRef.current = job?.id;
@@ -78,9 +79,10 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
       feedback.writeUiLog('debug', 'jobs.event-received', summarizeJobEventForLog(event), 'renderer.jobs');
       if (event.type === 'snapshot') {
         const matchesJobId = workspaceJobIdRef.current && event.job.id === workspaceJobIdRef.current;
-        const matchesMediaPath = !workspaceJobIdRef.current && mediaPath && event.job.mediaPath === mediaPath;
+        const matchesMediaPath = !workspaceJobIdRef.current && workspaceInitiatedRef.current && mediaPath && event.job.mediaPath === mediaPath;
         if (matchesJobId || matchesMediaPath) {
           workspaceJobIdRef.current = event.job.id;
+          workspaceInitiatedRef.current = false;
           setJob(event.job);
         }
       } else {
@@ -129,6 +131,7 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
       'renderer.workspace'
     );
     const token = beginAction('transcribe');
+    workspaceInitiatedRef.current = true;
     try {
       const nextJob = await translateTerGateway.startTranscription({
         mediaPath: selectedMediaPath,
@@ -154,6 +157,7 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
       workspaceJobIdRef.current = nextJob.id;
       if (isCurrentAction(token)) setJob(nextJob);
     } catch (error) {
+      workspaceInitiatedRef.current = false;
       if (isCurrentAction(token)) {
         feedback.pushStatus(
           feedback.reportUiError('job.start-transcription-failed', error, { mediaPath: selectedMediaPath }, 'renderer.workspace'),

@@ -115,6 +115,9 @@ body {
   background: transparent;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   text-align: left;
+  border: none;
+  cursor: pointer;
+  outline: none;
 }
 .navItem:hover {
   background: var(--tt-border-soft);
