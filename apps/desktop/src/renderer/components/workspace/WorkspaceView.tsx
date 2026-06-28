@@ -87,7 +87,7 @@ export function WorkspaceView(props: WorkspaceViewProps): JSX.Element {
         </div>
       </header>
 
-      <div className="workspaceContent" style={{ display: 'flex', flexDirection: 'column', gap: '32px', flexGrow: 1, minHeight: 0 }}>
+      <div className="workspaceContent" style={{ display: 'flex', flexDirection: 'column', gap: '32px', flexGrow: 1, minHeight: 0, overflowY: 'auto' }}>
         <div className="workspaceWizard">
           <div className="wizardStep">
             <div className="stepIcon"><FileVideo size={24} /></div>
@@ -141,7 +141,7 @@ export function WorkspaceView(props: WorkspaceViewProps): JSX.Element {
           </div>
         </div>
 
-        {(props.jobIsRunning || props.hasRecognizedSubtitles) && (
+        {(props.jobIsRunning || props.hasRecognizedSubtitles || props.warningCount > 0 || props.job?.stage === 'failed') && (
           <div className="workspaceDashboard">
             <div className="dashMetric">
               <div className="dashMetricIcon"><Clock size={20} /></div>
@@ -205,7 +205,7 @@ export function WorkspaceView(props: WorkspaceViewProps): JSX.Element {
           />
         )}
 
-        {props.hasRecognizedSubtitles && (
+        {(props.hasRecognizedSubtitles || props.job?.subtitleDocument) && (
           <div className="workspaceWorkbenchArea" style={{ flexGrow: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <SubtitleWorkbench
               t={props.t}

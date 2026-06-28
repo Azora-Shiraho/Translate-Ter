@@ -58,6 +58,14 @@ export function SubtitleWorkbench(props: SubtitleWorkbenchProps): JSX.Element {
               key={segment.id} 
               className={`segmentCard ${isActive ? 'active' : ''}`}
               onClick={() => props.onSelectSegment(segment.id)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  props.onSelectSegment(segment.id);
+                }
+              }}
             >
               <div className="segmentCardHeader">
                 <span className="segmentTime">{formatTimestamp(segment.startMs)} - {formatTimestamp(segment.endMs)}</span>
