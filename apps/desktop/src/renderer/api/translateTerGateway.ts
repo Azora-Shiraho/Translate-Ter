@@ -25,7 +25,8 @@ export const translateTerGateway: TranslateTerApi = {
   getSettings: passThrough((api) => api.getSettings),
   saveSettings: passThrough((api) => api.saveSettings),
   desktop: {
-    selectMedia: passThrough((api) => api.desktop.selectMedia)
+    selectMedia: passThrough((api) => api.desktop.selectMedia),
+    selectMultipleMedia: passThrough((api) => api.desktop.selectMultipleMedia)
   },
   jobs: {
     create: passThrough((api) => api.jobs.create),

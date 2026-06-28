@@ -185,7 +185,8 @@ const api = {
   getSettings: () => invokeLogged<AppSettingsPublic>('getSettings'),
   saveSettings: (patch: AppSettingsPatch) => invokeLogged<AppSettingsPublic>('saveSettings', [patch]),
   desktop: {
-    selectMedia: () => invokeLogged<string | undefined>('desktop:select-media')
+    selectMedia: () => invokeLogged<string | undefined>('desktop:select-media'),
+    selectMultipleMedia: () => invokeLogged<string[] | undefined>('desktop:select-multiple-media')
   },
   jobs: {
     create: (input: CreateJobRequest) => invokeLogged<JobSnapshot>('jobs:create', [input]),

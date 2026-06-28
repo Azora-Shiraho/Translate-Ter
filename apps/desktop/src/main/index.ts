@@ -353,15 +353,15 @@ function registerIpc(): void {
   });
   whisperAssets.on('asset-event', (event: AssetEvent) => {
     logAssetEvent('whisper.cpp', event);
-    mainWindow?.webContents.send('assets:event', event);
+    sendToAllWindows('assets:event', event);
   });
   ffmpegAssets.on('asset-event', (event: AssetEvent) => {
     logAssetEvent('ffmpeg', event);
-    mainWindow?.webContents.send('assets:event', event);
+    sendToAllWindows('assets:event', event);
   });
   fasterWhisper.on('asset-event', (event: AssetEvent) => {
     logAssetEvent('faster-whisper', event);
-    mainWindow?.webContents.send('assets:event', event);
+    sendToAllWindows('assets:event', event);
   });
 
   async function selectMedia(): Promise<string | undefined> {
@@ -375,6 +375,19 @@ function registerIpc(): void {
       ]
     });
     return result.canceled ? undefined : result.filePaths[0];
+  }
+
+  async function selectMultipleMedia(): Promise<string[] | undefined> {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Import video or audio files',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'mp3', 'wav', 'm4a', 'aac'] },
+        { name: 'SRT', extensions: ['srt'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    });
+    return result.canceled ? undefined : result.filePaths;
   }
 
   async function startTranscription(request: CreateJobRequest): Promise<JobSnapshot> {
@@ -522,6 +535,10 @@ function registerIpc(): void {
     return selectMedia();
   });
 
+  registerHandle('desktop:select-multiple-media', async () => {
+    return selectMultipleMedia();
+  });
+
   registerHandle('jobs:create', async (_event, request: CreateJobRequest) => jobManager.create(request));
   registerHandle('jobs:start', async (_event, jobId: string) => jobManager.start(jobId));
   registerHandle('jobs:translate', async (_event, jobId: string) => jobManager.translate(jobId));
@@ -626,7 +643,9 @@ function registerIpc(): void {
       ...request,
       useMultiThreadDownload: request.useMultiThreadDownload ?? settings.enableMultiThreadDownload
     });
-    await nativeBackend.cancelRunningWork();
+    if (request.allowDownload) {
+      await nativeBackend.cancelRunningWork();
+    }
     return status;
   });
   registerHandle('assets:delete-model', async (_event, modelId: string) => whisperAssets.deleteModel(modelId));

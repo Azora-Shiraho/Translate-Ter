@@ -927,6 +927,7 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
   async function refreshSettings(): Promise<void> {
     const nextSettings = await translateTerGateway.getSettings();
     setSettings(nextSettings);
+    await i18n.changeLanguage(nextSettings.uiLanguage);
   }
 
   return {

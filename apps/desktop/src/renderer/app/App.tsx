@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import { FileVideo, Gauge, Settings, AlertCircle, RotateCcw, Layers } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { languageLabel } from '@shared/languages';
@@ -114,6 +114,15 @@ export function App(): JSX.Element {
     feedback,
     settings: settingsVm.settings
   });
+
+  useEffect(() => {
+    const unsubscribe = translateTerGateway.settings.onEvent((event) => {
+      if (event.type === 'changed') {
+        settingsVm.refreshSettings();
+      }
+    });
+    return () => unsubscribe();
+  }, [settingsVm]);
 
   if (!settingsVm.settings) {
     return <div className="boot">Translate-Ter</div>;
@@ -302,7 +311,9 @@ export function App(): JSX.Element {
             onExportSrt={(variant) => void workspaceVm.exportSrt(variant)}
           />
         )}
-        {activeView === 'batch' && <BatchQueueView batchVm={batchVm} />}
+        {activeView === 'batch' && (
+          <BatchQueueView batchVm={batchVm} workspaceRunning={workspaceVm.busy || jobIsRunning} />
+        )}
       </main>
 
       <ToastStack toasts={toasts} copyTitle={t('copyErrorToast')} onCopyError={(toast) => void copyToastMessage(toast)} />

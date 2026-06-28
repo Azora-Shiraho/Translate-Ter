@@ -45,9 +45,9 @@ export function useBatchViewModel({ feedback, settings }: UseBatchViewModelProps
 
   const addJobs = useCallback(async () => {
     try {
-      const mediaPaths = await translateTerGateway.desktop.selectMedia();
+      const mediaPaths = await translateTerGateway.desktop.selectMultipleMedia();
       if (!mediaPaths || !settings) return;
-      const paths = Array.isArray(mediaPaths) ? mediaPaths : [mediaPaths];
+      const paths = mediaPaths;
       
       const request: CreateBatchJobsRequest = {
         mediaPaths: paths,
@@ -56,14 +56,26 @@ export function useBatchViewModel({ feedback, settings }: UseBatchViewModelProps
         targetLanguage: settings.targetLanguage,
         asrProviderId: settings.asrProviderId,
         whisperModelId: settings.whisperModelId,
-        translationProviderPriority: settings.translationProviderPriority
+        localWhisperUseCuda: settings.localWhisperUseCuda,
+        localAsrAcceleration: settings.localAsrAcceleration,
+        preferredRuntimeVariant: settings.preferredRuntimeVariant,
+        localAsrCpuMode: settings.localAsrCpuMode,
+        localWhisperIgnoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
+        allowWhisperAssetDownload: settings.allowWhisperAssetDownload,
+        allowCloudAsrUpload: settings.allowCloudAsrUpload,
+        translationProviderPriority: settings.translationProviderPriority,
+        translationConcurrency: settings.translationConcurrency,
+        translationRequestsPerMinute: settings.translationRequestsPerMinute,
+        translationTokenBudgetPerMinute: settings.translationTokenBudgetPerMinute,
+        translationLinesPerRequest: settings.translationLinesPerRequest,
+        translationBatchStride: settings.translationBatchStride
       };
       const result = await translateTerGateway.batch.addJobs(request);
       setQueue(result);
     } catch (error) {
       feedback.reportUiError('batch.addJobs', error, undefined, 'renderer.batch');
     }
-  }, [feedback]);
+  }, [feedback, settings]);
 
   const start = useCallback(async () => {
     try {

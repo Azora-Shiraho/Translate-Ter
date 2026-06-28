@@ -5,9 +5,10 @@ import type { useBatchViewModel } from '../../viewModels/useBatchViewModel';
 
 type BatchQueueViewProps = {
   batchVm: ReturnType<typeof useBatchViewModel>;
+  workspaceRunning: boolean;
 };
 
-export function BatchQueueView({ batchVm }: BatchQueueViewProps): JSX.Element {
+export function BatchQueueView({ batchVm, workspaceRunning }: BatchQueueViewProps): JSX.Element {
   const { t } = useTranslation();
   const queue = batchVm.queue;
 
@@ -18,6 +19,21 @@ export function BatchQueueView({ batchVm }: BatchQueueViewProps): JSX.Element {
           <h2><Layers size={24} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> {t('batchProcessing')}</h2>
           <p style={{ opacity: 0.7 }}>{t('batchProcessingHint')}</p>
         </header>
+
+        {workspaceRunning && (
+          <div style={{
+            marginBottom: '16px',
+            padding: '12px 16px',
+            borderRadius: '6px',
+            backgroundColor: 'var(--tt-color-surface-hover)',
+            border: '1px solid var(--tt-color-border)',
+            color: 'var(--tt-color-text-primary)',
+            fontSize: '14px',
+            lineHeight: '1.5'
+          }}>
+            ⚠️ {t('backendBusyWorkspaceRunning')}
+          </div>
+        )}
 
         {queue.items.length === 0 ? (
           <div className="emptyState">
@@ -33,12 +49,12 @@ export function BatchQueueView({ batchVm }: BatchQueueViewProps): JSX.Element {
                 {t('addBatchJobs')}
               </button>
               {queue.status !== 'running' && queue.items.some(i => i.status === 'queued') && (
-                <button className="primaryButton" onClick={() => batchVm.start()}>
+                <button className="primaryButton" onClick={() => batchVm.start()} disabled={workspaceRunning}>
                   {t('startBatch')}
                 </button>
               )}
               {(queue.status === 'running' || queue.items.some(i => i.status === 'queued')) && (
-                <button className="dangerButton" onClick={() => batchVm.cancel()}>
+                <button className="dangerButton" onClick={() => batchVm.cancel()} disabled={workspaceRunning}>
                   {t('cancelBatch')}
                 </button>
               )}
