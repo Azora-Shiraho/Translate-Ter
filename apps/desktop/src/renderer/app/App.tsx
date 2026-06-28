@@ -106,7 +106,8 @@ export function App(): JSX.Element {
     configuredAcceleration: settingsVm.configuredAcceleration,
     effectiveRuntimeVariantSelection: settingsVm.effectiveRuntimeVariantSelection,
     runtimeVariantSelections: settingsVm.runtimeVariantSelections,
-    ignoreCudaMismatch: settingsVm.ignoreCudaMismatch
+    ignoreCudaMismatch: settingsVm.ignoreCudaMismatch,
+    cudaFlowRelevant: settingsVm.cudaFlowRelevant
   });
 
   const batchVm = useBatchViewModel({
@@ -300,9 +301,8 @@ export function App(): JSX.Element {
             exportingVariant={workspaceVm.exportingVariant}
             onExportSrt={(variant) => void workspaceVm.exportSrt(variant)}
           />
-        ) : (
-          <SettingsView t={t} settingsVm={settingsVm} statusVm={statusVm} />
         )}
+        {activeView === 'batch' && <BatchQueueView batchVm={batchVm} />}
       </main>
 
       <ToastStack toasts={toasts} copyTitle={t('copyErrorToast')} onCopyError={(toast) => void copyToastMessage(toast)} />

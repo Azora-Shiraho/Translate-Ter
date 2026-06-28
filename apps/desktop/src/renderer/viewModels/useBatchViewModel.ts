@@ -55,7 +55,8 @@ export function useBatchViewModel({ feedback, settings }: UseBatchViewModelProps
         sourceLanguage: settings.sourceLanguage,
         targetLanguage: settings.targetLanguage,
         asrProviderId: settings.asrProviderId,
-        translationProviderId: settings.translationProviderId
+        whisperModelId: settings.whisperModelId,
+        translationProviderPriority: settings.translationProviderPriority
       };
       const result = await translateTerGateway.batch.addJobs(request);
       setQueue(result);

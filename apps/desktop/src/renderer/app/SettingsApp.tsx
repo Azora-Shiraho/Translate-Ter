@@ -79,14 +79,15 @@ export function SettingsApp(): JSX.Element {
     configuredAcceleration: settingsVm.configuredAcceleration,
     effectiveRuntimeVariantSelection: settingsVm.effectiveRuntimeVariantSelection,
     runtimeVariantSelections: settingsVm.runtimeVariantSelections,
-    ignoreCudaMismatch: settingsVm.ignoreCudaMismatch
+    ignoreCudaMismatch: settingsVm.ignoreCudaMismatch,
+    cudaFlowRelevant: settingsVm.cudaFlowRelevant
   });
 
   // Cross-window sync: refresh settings when another window updates them
   useEffect(() => {
     const unsubscribe = translateTerGateway.settings.onEvent((event) => {
       if (event.type === 'changed') {
-        settingsVm.refresh();
+        settingsVm.refreshSettings();
       }
     });
     return () => unsubscribe();
@@ -142,7 +143,7 @@ export function SettingsApp(): JSX.Element {
           statusVm={statusVm} 
           activeTab={activeTab} 
         />
-        <ToastStack toasts={toasts} />
+        <ToastStack toasts={toasts} copyTitle={t('copyErrorToast')} onCopyError={(toast) => void navigator.clipboard.writeText(toast.message)} />
       </main>
     </div>
   );
