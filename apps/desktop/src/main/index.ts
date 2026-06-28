@@ -424,8 +424,9 @@ function registerIpc(): void {
     await writeFile(payload.path, serialized, 'utf8');
   }
 
-  async function selectExportDirectory(): Promise<string | undefined> {
-    const result = await dialog.showOpenDialog(mainWindow!, {
+  async function selectExportDirectory(event: Electron.IpcMainInvokeEvent): Promise<string | undefined> {
+    const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow!;
+    const result = await dialog.showOpenDialog(parentWindow, {
       title: 'Select subtitle export folder',
       properties: ['openDirectory', 'createDirectory']
     });
@@ -507,7 +508,7 @@ function registerIpc(): void {
   }
 
   registerHandle('selectVideo', async () => selectMedia());
-  registerHandle('selectDirectory', async () => selectExportDirectory());
+  registerHandle('selectDirectory', async (event) => selectExportDirectory(event));
   registerHandle('startTranscription', async (_event, request: CreateJobRequest) => startTranscription(request));
   registerHandle('startTranslation', async (_event, jobId: string) => jobManager.translate(jobId));
   registerHandle(

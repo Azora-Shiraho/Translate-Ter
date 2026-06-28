@@ -14,7 +14,7 @@ export function BatchQueueView({ batchVm, workspaceRunning }: BatchQueueViewProp
 
   return (
     <section className="viewFrame">
-      <main className="batchPage" style={{ padding: '40px' }}>
+      <main className="batchPage" style={{ padding: '40px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
         <header style={{ marginBottom: '24px' }}>
           <h2><Layers size={24} style={{ verticalAlign: 'middle', marginRight: '8px' }} /> {t('batchProcessing')}</h2>
           <p style={{ opacity: 0.7 }}>{t('batchProcessingHint')}</p>

@@ -234,9 +234,10 @@ export function App(): JSX.Element {
           <button
             className="navItem"
             onClick={() => translateTerGateway.window.openSettings()}
-            title={t('navSettings')}
+            title={batchRunning ? t('backendBusyBatchRunning') : t('navSettings')}
             type="button"
             style={{ marginTop: 'auto' }}
+            disabled={batchRunning}
           >
             <Settings size={18} />
             <span>{t('navSettings')}</span>
