@@ -27,3 +27,4 @@ resources/binaries/
 Thumbs.db
 .idea/
 .vscode/
+*.bak
