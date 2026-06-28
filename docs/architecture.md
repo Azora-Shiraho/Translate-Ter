@@ -141,7 +141,7 @@ Electron Main 是桌面能力聚合层，主要职责包括：
 - 管理文件选择、导出路径和覆盖确认。
 - 管理批量任务队列、队列快照、队列事件和单项错误隔离。
 - 管理设置和密钥存储。
-- 广播设置变更给所有存活窗口，供主窗口和设置窗口保持状态同步。
+- 广播设置变更给所有存活窗口，为后续多窗口设置同步保留 Main 侧基础设施。
 - 初始化日志系统。
 - 转发 `jobs:event`、`assets:event`、`batch:event` 和 `settings:event` 给相关 Renderer 窗口。
 - 组合 `JobManager`、`NativeBackendClient`、`NativeMediaService`、`NativeSubtitleService`、`WhisperAssetManager`、`FfmpegAssetManager`、`FasterWhisperService` 等服务实例。

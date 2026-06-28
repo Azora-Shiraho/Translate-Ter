@@ -32,7 +32,7 @@ export class BatchJobQueue extends EventEmitter {
   }
 
   addJobs(request: CreateBatchJobsRequest): BatchQueueSnapshot {
-    const mediaPaths = request.mediaPaths.map((path) => path.trim()).filter(Boolean);
+    const mediaPaths = request.mediaPaths.filter((path) => path.trim().length > 0);
     if (mediaPaths.length === 0) {
       throw new Error('At least one media file is required for batch processing.');
     }
@@ -97,6 +97,11 @@ export class BatchJobQueue extends EventEmitter {
   }
 
   async cancel(): Promise<BatchQueueSnapshot> {
+    const hasCancellableWork = this.queue.items.some((item) => item.status === 'queued' || item.status === 'running');
+    if (!hasCancellableWork) {
+      return this.get();
+    }
+
     this.cancelRequested = true;
     const activeItem = this.queue.items.find((item) => item.id === this.queue.currentItemId);
     this.queue = withCounts({

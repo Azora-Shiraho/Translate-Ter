@@ -5,7 +5,7 @@
 ## 目标范围
 
 - 引入真正的多文件批量处理能力，让多个媒体文件可以入队后由后台按队列自动完成转写、翻译和导出前准备。
-- 为独立设置窗口准备 Main 侧窗口管理和设置变更广播能力，后续 Renderer 可以订阅设置变化并同步主题、语言和配置状态。
+- 为后续独立设置窗口预留 Main 侧设置变更广播能力，等 renderer 具备独立入口后再接上窗口生命周期和页面同步。
 - 保持现有架构分层：Renderer 通过 gateway/view-model 访问桌面 API，Electron Main 负责权限、IPC、任务编排和 native 进程边界，C++ native backend 只执行既有本地能力命令。
 
 ## PR 拆分
@@ -30,7 +30,7 @@ PR2 只处理 Electron Main 到 C++ native backend 相关内容：
 - 队列 item 保存单文件请求快照，执行时复用现有 `JobManager.create/start/translate`。
 - 队列事件使用 `BatchQueueSnapshot` 和 `BatchQueueEvent`，Main 侧通过 `batch:event` 广播给所有存活窗口。
 - 当前采用串行队列，避免 `job.cancel` / `cancelRunningWork` 的全局 native 取消语义误伤并发任务。
-- 设置保存后由 Main 侧广播 `settings:event`，为后续独立设置窗口同步主题、语言和配置状态提供基础。
+- 设置保存后由 Main 侧广播 `settings:event`，为后续独立设置窗口同步主题、语言和配置状态提供基础；窗口入口本身不在当前后端子 PR 中提前暴露。
 
 ## 非 PR2 范围
 

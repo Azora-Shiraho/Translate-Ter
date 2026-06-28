@@ -276,4 +276,40 @@ describe('BatchJobQueue', () => {
     expect(manager.cancelOrder).toHaveLength(1);
     expect(manager.createOrder).toEqual(['D:/media/long.mp4']);
   });
+
+  it('does not rewrite non-empty media paths before enqueueing', async () => {
+    const manager = new FakeJobManager();
+    const queue = new BatchJobQueue(manager as any);
+    queue.addJobs(
+      createBatchRequest({
+        mediaPaths: ['  ', 'D:/media/final-space .mp4']
+      })
+    );
+
+    await queue.start();
+    await waitForQueue(queue);
+
+    expect(manager.createOrder).toEqual(['D:/media/final-space .mp4']);
+    expect(queue.get().items[0]?.mediaPath).toBe('D:/media/final-space .mp4');
+  });
+
+  it('keeps a completed queue completed when cancel is requested late', async () => {
+    const manager = new FakeJobManager();
+    const queue = new BatchJobQueue(manager as any);
+    queue.addJobs(
+      createBatchRequest({
+        mediaPaths: ['D:/media/a.mp4']
+      })
+    );
+
+    await queue.start();
+    await waitForQueue(queue);
+    const beforeCancel = queue.get();
+    const afterCancel = await queue.cancel();
+
+    expect(beforeCancel.status).toBe('completed');
+    expect(afterCancel.status).toBe('completed');
+    expect(afterCancel.completedCount).toBe(1);
+    expect(manager.cancelOrder).toHaveLength(0);
+  });
 });

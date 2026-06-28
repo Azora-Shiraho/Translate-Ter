@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
@@ -48,7 +48,6 @@ import { createMainAsrProviderRegistry } from './providers/asrProviderRegistry';
 import { createMainTranslationProviderRegistry } from './providers/translationProviderRegistry';
 
 let mainWindow: BrowserWindow | undefined;
-let settingsWindow: BrowserWindow | undefined;
 const logger = new AppLogger();
 const appLogger = logger.createScope('app');
 const ipcLogger = logger.createScope('ipc');
@@ -126,78 +125,8 @@ function createWindow(): void {
   });
 }
 
-function createSettingsWindow(): void {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.focus();
-    return;
-  }
-
-  appLogger.info('settings-window.create', 'Creating settings window.', {
-    width: 900,
-    height: 760
-  });
-  settingsWindow = new BrowserWindow({
-    width: 900,
-    height: 760,
-    minWidth: 760,
-    minHeight: 620,
-    title: 'Translate-Ter Settings',
-    backgroundColor: '#f5f5f7',
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
-  });
-
-  if (process.env.ELECTRON_RENDERER_URL) {
-    const url = new URL(process.env.ELECTRON_RENDERER_URL);
-    url.searchParams.set('window', 'settings');
-    appLogger.info('settings-window.load-url', 'Loading settings renderer development URL.', {
-      url: url.toString()
-    });
-    void settingsWindow.loadURL(url.toString());
-  } else {
-    appLogger.info('settings-window.load-file', 'Loading packaged settings renderer file.');
-    void settingsWindow.loadFile(join(__dirname, '../renderer/index.html'), {
-      query: {
-        window: 'settings'
-      }
-    });
-  }
-
-  settingsWindow.on('closed', () => {
-    appLogger.info('settings-window.closed', 'The settings window was closed.');
-    settingsWindow = undefined;
-  });
-}
-
 function installApplicationMenu(): void {
-  if (process.platform !== 'darwin') {
-    Menu.setApplicationMenu(null);
-    return;
-  }
-
-  const template: MenuItemConstructorOptions[] = [
-    {
-      label: app.name,
-      submenu: [
-        {
-          label: 'Preferences...',
-          accelerator: 'CmdOrCtrl+,',
-          click: () => createSettingsWindow()
-        },
-        { type: 'separator' },
-        { role: 'hide' },
-        { role: 'hideOthers' },
-        { role: 'unhide' },
-        { type: 'separator' },
-        { role: 'quit' }
-      ]
-    }
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  Menu.setApplicationMenu(null);
 }
 
 function sendToAllWindows(channel: string, payload: unknown): void {
@@ -279,7 +208,6 @@ function registerIpc(): void {
     'subtitles:update-segment',
     'settings:get',
     'settings:update',
-    'settings:open-window',
     'settings:get-secret',
     'settings:set-secret',
     'settings:test-provider',
@@ -597,10 +525,6 @@ function registerIpc(): void {
     logger.setLevel(next.logLevel);
     broadcastSettingsChanged(next);
     return next;
-  });
-  registerHandle('settings:open-window', async () => {
-    createSettingsWindow();
-    return { opened: true };
   });
   registerHandle('settings:get-secret', async (_event, providerId: string) => settingsStore.getSecret(providerId));
   registerHandle('settings:set-secret', async (_event, providerId: string, secret: ProviderSecretInput) =>
