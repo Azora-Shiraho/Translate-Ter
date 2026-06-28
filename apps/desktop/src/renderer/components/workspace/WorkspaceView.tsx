@@ -159,7 +159,19 @@ export function WorkspaceView(props: WorkspaceViewProps): JSX.Element {
               </div>
             </div>
             
-            <div className="dashMetric" style={{ cursor: props.warningCount > 0 ? 'pointer' : 'default' }} onClick={props.warningCount > 0 ? props.onToggleWarnings : undefined}>
+            <div 
+              className={`dashMetric ${props.warningCount > 0 ? 'interactive' : ''}`} 
+              style={{ cursor: props.warningCount > 0 ? 'pointer' : 'default' }} 
+              onClick={props.warningCount > 0 ? props.onToggleWarnings : undefined}
+              role={props.warningCount > 0 ? 'button' : undefined}
+              tabIndex={props.warningCount > 0 ? 0 : undefined}
+              onKeyDown={props.warningCount > 0 ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  props.onToggleWarnings();
+                }
+              } : undefined}
+            >
               <div className="dashMetricIcon" style={{ color: props.warningCount > 0 ? 'var(--tt-status-warning)' : 'inherit' }}>
                 {props.warningCount > 0 ? <AlertCircle size={20} /> : <CheckCircle2 size={20} />}
               </div>
