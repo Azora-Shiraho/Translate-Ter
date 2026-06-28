@@ -48,6 +48,7 @@ import { createMainAsrProviderRegistry } from './providers/asrProviderRegistry';
 import { createMainTranslationProviderRegistry } from './providers/translationProviderRegistry';
 
 let mainWindow: BrowserWindow | undefined;
+let settingsWindow: BrowserWindow | undefined;
 const logger = new AppLogger();
 const appLogger = logger.createScope('app');
 const ipcLogger = logger.createScope('ipc');
@@ -127,6 +128,44 @@ function createWindow(): void {
 
 function installApplicationMenu(): void {
   Menu.setApplicationMenu(null);
+}
+
+function createSettingsWindow(): void {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.focus();
+    return;
+  }
+
+  appLogger.info('window.create-settings', 'Creating settings window.');
+  settingsWindow = new BrowserWindow({
+    width: 900,
+    height: 680,
+    minWidth: 720,
+    minHeight: 480,
+    title: 'Translate-Ter — Settings',
+    backgroundColor: '#f5f5f7',
+    parent: mainWindow,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+
+  if (process.env.ELECTRON_RENDERER_URL) {
+    const settingsUrl = process.env.ELECTRON_RENDERER_URL.replace(/\/$/, '') + '/settings.html';
+    appLogger.info('window.settings-load-url', 'Loading settings development URL.', { url: settingsUrl });
+    void settingsWindow.loadURL(settingsUrl);
+  } else {
+    appLogger.info('window.settings-load-file', 'Loading packaged settings file.');
+    void settingsWindow.loadFile(join(__dirname, '../renderer/settings.html'));
+  }
+
+  settingsWindow.on('closed', () => {
+    appLogger.info('window.settings-closed', 'The settings window was closed.');
+    settingsWindow = undefined;
+  });
 }
 
 function sendToAllWindows(channel: string, payload: unknown): void {
@@ -493,6 +532,10 @@ function registerIpc(): void {
   registerHandle('batch:start', async () => batchJobQueue.start());
   registerHandle('batch:cancel', async () => batchJobQueue.cancel());
   registerHandle('batch:get', async () => batchJobQueue.get());
+
+  registerHandle('window:open-settings', async () => {
+    createSettingsWindow();
+  });
 
   registerHandle('subtitles:import-srt', async (_event, path: string) => {
     const raw = await readFile(path, 'utf8');

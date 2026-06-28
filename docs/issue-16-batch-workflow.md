@@ -39,3 +39,23 @@ PR2 只处理 Electron Main 到 C++ native backend 相关内容：
 - 设置独立窗口的 React 页面实现。
 - UI 样式、导航和交互细节。
 - C++ native protocol 新命令。批量队列应复用现有 `runtime.health`、`media.probe`、`audio.extract`、`asr.transcribe`、`srt.parse`、`srt.serialize` 和 `job.cancel` 边界。
+
+## PR3 前端子范围
+
+PR3 从 `codex/frontend-batch-workflow` 合并到 PR1 分支，负责所有 Renderer 和 Preload 层面的接入工作。
+
+### 第一阶段：API 桥接 & 多窗口入口
+
+- **Preload 桥接**：在 `preload/index.ts` 中新增 `batch` 命名空间（`addJobs`、`start`、`cancel`、`get`、`onEvent`）和 `settings.onEvent`、`window.openSettings` 通道。
+- **Gateway 同步**：在 `api/translateTerGateway.ts` 中镜像同步上述所有新通道。
+- **Main 多窗口**：在 `main/index.ts` 中新增 `createSettingsWindow()` 函数和 `window:open-settings` IPC handler，支持从主窗口打开独立的原生设置窗口。
+- **构建配置**：在 `electron.vite.config.ts` 中将 renderer 入口从单文件改为字典模式（`index.html` + `settings.html`），并新增 `settings.html` 和 `settingsEntry.tsx` 作为设置窗口的渲染入口。
+
+- **主侧边栏简化**：移除原有的 "设置" 路由视图，改为通过 IPC 打开独立窗口。
+
+### 第二阶段：UI 页面实现（已完成）
+
+- **原生设置窗口**：在 `settingsEntry.tsx` 挂载完整的 `SettingsApp` React 组件，采用侧边栏分页布局（常规、任务、识别、翻译），并通过 `settings:event` 实现跨窗口主题/语言同步。
+- **重构 SettingsView**：将长达 700 行的庞大 `SettingsView.tsx` 重构为基于 `activeTab` 状态的现代化 (Sidebar + Content) 布局结构，摒弃了原有的单页超长滚动模式。
+- **批量任务中心**：在主界面 `App.tsx` 侧边栏新增 "批量处理" 导航项，挂载新建的 `BatchQueueView` 页面，支持文件入队、队列控制和实时进度展示，相关数据由 `useBatchViewModel` 驱动。
+- **国际化 (i18n)**：为新增的批量任务界面和导航项增加了中英双语的翻译键值，确保 UI 文案完整支持多语言。

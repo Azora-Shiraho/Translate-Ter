@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { FileVideo, Gauge, Settings, AlertCircle, RotateCcw } from 'lucide-react';
+import { FileVideo, Gauge, Settings, AlertCircle, RotateCcw, Layers } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { languageLabel } from '@shared/languages';
 import { translateTerGateway } from '../api/translateTerGateway';
@@ -10,7 +10,8 @@ import { useSettingsViewModel } from '../viewModels/useSettingsViewModel';
 import { useWorkspaceViewModel } from '../viewModels/useWorkspaceViewModel';
 import { useProviderStatusViewModel } from '../viewModels/useProviderStatusViewModel';
 import { WorkspaceView } from '../components/workspace/WorkspaceView';
-import { SettingsView } from '../components/settings/SettingsView';
+import { BatchQueueView } from '../components/batch/BatchQueueView';
+import { useBatchViewModel } from '../viewModels/useBatchViewModel';
 import { ToastStack } from '../components/status/ToastStack';
 import { BottomBubble } from '../components/status/BottomBubble';
 
@@ -105,8 +106,12 @@ export function App(): JSX.Element {
     configuredAcceleration: settingsVm.configuredAcceleration,
     effectiveRuntimeVariantSelection: settingsVm.effectiveRuntimeVariantSelection,
     runtimeVariantSelections: settingsVm.runtimeVariantSelections,
-    cudaFlowRelevant: settingsVm.cudaFlowRelevant,
     ignoreCudaMismatch: settingsVm.ignoreCudaMismatch
+  });
+
+  const batchVm = useBatchViewModel({
+    feedback,
+    settings: settingsVm.settings
   });
 
   if (!settingsVm.settings) {
@@ -197,14 +202,28 @@ export function App(): JSX.Element {
         </div>
         
         <nav className="sidebarNav">
-          <button className={`navItem ${activeView === 'workspace' ? 'active' : ''}`} onClick={() => setActiveView('workspace')} type="button">
-            <Gauge size={18} />
-            {t('workspace')}
-          </button>
-          <button className={`navItem ${activeView === 'settings' ? 'active' : ''}`} onClick={() => setActiveView('settings')} type="button">
-            <Settings size={18} />
-            {t('settings')}
-          </button>
+          <ul className="navLinks">
+            <li
+              className={activeView === 'workspace' ? 'active' : ''}
+              onClick={() => setActiveView('workspace')}
+              title={t('navWorkspace')}
+            >
+              <FileVideo size={20} />
+            </li>
+            <li
+              className={activeView === 'batch' ? 'active' : ''}
+              onClick={() => setActiveView('batch')}
+              title={t('batchProcessing')}
+            >
+              <Layers size={20} />
+            </li>
+          </ul>
+
+          <ul className="navLinks">
+            <li title={t('navSettings')} onClick={() => translateTerGateway.window.openSettings()}>
+              <Settings size={20} />
+            </li>
+          </ul>
         </nav>
 
         <div className="sidebarFooter">
@@ -235,7 +254,7 @@ export function App(): JSX.Element {
       </aside>
 
       <main className="appMain">
-        {activeView === 'workspace' ? (
+        {activeView === 'workspace' && (
           <WorkspaceView
             t={t}
             steps={steps}

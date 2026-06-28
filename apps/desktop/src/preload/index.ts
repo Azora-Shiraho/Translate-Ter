@@ -3,6 +3,9 @@ import type {
   AppLogLevel,
   AppSettingsPatch,
   AppSettingsPublic,
+  BatchQueueEvent,
+  BatchQueueSnapshot,
+  CreateBatchJobsRequest,
   ExportVariant,
   CreateJobRequest,
   FasterWhisperCudaRequest,
@@ -17,6 +20,7 @@ import type {
   AssetEvent,
   ProviderHealth,
   ProviderSecretInput,
+  SettingsEvent,
   SubtitleDocument,
   SubtitleSegment,
   WhisperModelInfo,
@@ -48,6 +52,11 @@ const INFO_CHANNELS = new Set([
   'jobs:translate',
   'jobs:cancel',
   'jobs:get',
+  'batch:add-jobs',
+  'batch:start',
+  'batch:cancel',
+  'batch:get',
+  'window:open-settings',
   'subtitles:import-srt',
   'subtitles:export-srt',
   'subtitles:update-segment',
@@ -192,6 +201,20 @@ const api = {
       };
     }
   },
+  batch: {
+    addJobs: (request: CreateBatchJobsRequest) =>
+      invokeLogged<BatchQueueSnapshot>('batch:add-jobs', [request]),
+    start: () => invokeLogged<BatchQueueSnapshot>('batch:start'),
+    cancel: () => invokeLogged<BatchQueueSnapshot>('batch:cancel'),
+    get: () => invokeLogged<BatchQueueSnapshot>('batch:get'),
+    onEvent: (listener: (event: BatchQueueEvent) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: BatchQueueEvent) => listener(payload);
+      ipcRenderer.on('batch:event', handler);
+      return () => {
+        ipcRenderer.off('batch:event', handler);
+      };
+    }
+  },
   subtitles: {
     importSrt: (path: string) => invokeLogged<SubtitleDocument>('subtitles:import-srt', [path]),
     exportSrt: (
@@ -209,7 +232,17 @@ const api = {
     getSecret: (providerId: string) => invokeLogged<ProviderSecretInput | undefined>('settings:get-secret', [providerId]),
     setSecret: (providerId: string, secret: ProviderSecretInput) =>
       invokeLogged<void>('settings:set-secret', [providerId, secret]),
-    testProvider: (providerId: string) => invokeLogged<ProviderHealth>('settings:test-provider', [providerId])
+    testProvider: (providerId: string) => invokeLogged<ProviderHealth>('settings:test-provider', [providerId]),
+    onEvent: (listener: (event: SettingsEvent) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, payload: SettingsEvent) => listener(payload);
+      ipcRenderer.on('settings:event', handler);
+      return () => {
+        ipcRenderer.off('settings:event', handler);
+      };
+    }
+  },
+  window: {
+    openSettings: () => invokeLogged<void>('window:open-settings')
   },
   assets: {
     listWhisperModels: (providerId?: string) =>

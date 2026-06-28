@@ -73,6 +73,13 @@ describe('translateTerGateway', () => {
       get: vi.fn().mockResolvedValue({ id: 'job-get' }),
       onEvent: jobsOnEventMock
     },
+    batch: {
+      addJobs: vi.fn().mockResolvedValue({ id: 'batch-queue', status: 'idle', items: [] }),
+      start: vi.fn().mockResolvedValue({ id: 'batch-queue', status: 'running', items: [] }),
+      cancel: vi.fn().mockResolvedValue({ id: 'batch-queue', status: 'cancelled', items: [] }),
+      get: vi.fn().mockResolvedValue({ id: 'batch-queue', status: 'idle', items: [] }),
+      onEvent: vi.fn().mockReturnValue(vi.fn())
+    },
     subtitles: {
       importSrt: vi.fn().mockResolvedValue({ segments: [] }),
       exportSrt: vi.fn().mockResolvedValue(undefined),
@@ -83,7 +90,11 @@ describe('translateTerGateway', () => {
       update: vi.fn().mockResolvedValue(settingsResult),
       getSecret: getSecretMock,
       setSecret: vi.fn().mockResolvedValue(undefined),
-      testProvider: vi.fn().mockResolvedValue({ ok: true })
+      testProvider: vi.fn().mockResolvedValue({ ok: true }),
+      onEvent: vi.fn().mockReturnValue(vi.fn())
+    },
+    window: {
+      openSettings: vi.fn().mockResolvedValue(undefined)
     },
     assets: {
       listWhisperModels: listWhisperModelsMock,
