@@ -19,6 +19,7 @@ describe('translateTerGateway', () => {
   const saveSettingsMock = vi.fn();
   const selectVideoMock = vi.fn();
   const selectMediaMock = vi.fn();
+  const selectMultipleMediaMock = vi.fn();
   const getSecretMock = vi.fn();
   const listWhisperModelsMock = vi.fn();
   const ensureFfmpegMock = vi.fn();
@@ -63,7 +64,8 @@ describe('translateTerGateway', () => {
     getSettings: getSettingsMock,
     saveSettings: saveSettingsMock,
     desktop: {
-      selectMedia: selectMediaMock
+      selectMedia: selectMediaMock,
+      selectMultipleMedia: selectMultipleMediaMock
     },
     jobs: {
       create: vi.fn().mockResolvedValue({ id: 'job-create' }),
@@ -72,6 +74,13 @@ describe('translateTerGateway', () => {
       cancel: vi.fn().mockResolvedValue(undefined),
       get: vi.fn().mockResolvedValue({ id: 'job-get' }),
       onEvent: jobsOnEventMock
+    },
+    batch: {
+      addJobs: vi.fn().mockResolvedValue({ id: 'batch-queue', status: 'idle', items: [] }),
+      start: vi.fn().mockResolvedValue({ id: 'batch-queue', status: 'running', items: [] }),
+      cancel: vi.fn().mockResolvedValue({ id: 'batch-queue', status: 'cancelled', items: [] }),
+      get: vi.fn().mockResolvedValue({ id: 'batch-queue', status: 'idle', items: [] }),
+      onEvent: vi.fn().mockReturnValue(vi.fn())
     },
     subtitles: {
       importSrt: vi.fn().mockResolvedValue({ segments: [] }),
@@ -83,7 +92,11 @@ describe('translateTerGateway', () => {
       update: vi.fn().mockResolvedValue(settingsResult),
       getSecret: getSecretMock,
       setSecret: vi.fn().mockResolvedValue(undefined),
-      testProvider: vi.fn().mockResolvedValue({ ok: true })
+      testProvider: vi.fn().mockResolvedValue({ ok: true }),
+      onEvent: vi.fn().mockReturnValue(vi.fn())
+    },
+    window: {
+      openSettings: vi.fn().mockResolvedValue(undefined)
     },
     assets: {
       listWhisperModels: listWhisperModelsMock,
@@ -113,6 +126,7 @@ describe('translateTerGateway', () => {
     saveSettingsMock.mockResolvedValue(settingsResult);
     selectVideoMock.mockResolvedValue('video.mp4');
     selectMediaMock.mockResolvedValue('media.mp4');
+    selectMultipleMediaMock.mockResolvedValue(['media.mp4']);
     getSecretMock.mockResolvedValue(secretResult);
     listWhisperModelsMock.mockResolvedValue(modelList);
     ensureFfmpegMock.mockResolvedValue(ffmpegResult);
@@ -143,6 +157,7 @@ describe('translateTerGateway', () => {
     await expect(translateTerGateway.assets.ensureFfmpeg(ffmpegRequest)).resolves.toBe(ffmpegResult);
     await expect(translateTerGateway.subtitles.updateSegment('job-1', subtitleSegment)).resolves.toBe(subtitleJob);
     await expect(translateTerGateway.desktop.selectMedia()).resolves.toBe('media.mp4');
+    await expect(translateTerGateway.desktop.selectMultipleMedia()).resolves.toEqual(['media.mp4']);
     await expect(translateTerGateway.native.health()).resolves.toBe(nativeHealth);
 
     translateTerGateway.logs.warning('renderer.test', { ok: true }, 'renderer.gateway', 'warning message');
@@ -152,6 +167,7 @@ describe('translateTerGateway', () => {
     expect(ensureFfmpegMock).toHaveBeenCalledWith(ffmpegRequest);
     expect(updateSegmentMock).toHaveBeenCalledWith('job-1', subtitleSegment);
     expect(selectMediaMock).toHaveBeenCalledOnce();
+    expect(selectMultipleMediaMock).toHaveBeenCalledOnce();
     expect(nativeHealthMock).toHaveBeenCalledOnce();
     expect(logWarningMock).toHaveBeenCalledWith(
       'renderer.test',

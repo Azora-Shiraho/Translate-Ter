@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { FileVideo, Gauge, Settings, AlertCircle, RotateCcw } from 'lucide-react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
+import { FileVideo, Gauge, Settings, AlertCircle, RotateCcw, Layers } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { languageLabel } from '@shared/languages';
 import { translateTerGateway } from '../api/translateTerGateway';
@@ -10,7 +10,8 @@ import { useSettingsViewModel } from '../viewModels/useSettingsViewModel';
 import { useWorkspaceViewModel } from '../viewModels/useWorkspaceViewModel';
 import { useProviderStatusViewModel } from '../viewModels/useProviderStatusViewModel';
 import { WorkspaceView } from '../components/workspace/WorkspaceView';
-import { SettingsView } from '../components/settings/SettingsView';
+import { BatchQueueView } from '../components/batch/BatchQueueView';
+import { useBatchViewModel } from '../viewModels/useBatchViewModel';
 import { ToastStack } from '../components/status/ToastStack';
 import { BottomBubble } from '../components/status/BottomBubble';
 
@@ -105,9 +106,23 @@ export function App(): JSX.Element {
     configuredAcceleration: settingsVm.configuredAcceleration,
     effectiveRuntimeVariantSelection: settingsVm.effectiveRuntimeVariantSelection,
     runtimeVariantSelections: settingsVm.runtimeVariantSelections,
-    cudaFlowRelevant: settingsVm.cudaFlowRelevant,
-    ignoreCudaMismatch: settingsVm.ignoreCudaMismatch
+    ignoreCudaMismatch: settingsVm.ignoreCudaMismatch,
+    cudaFlowRelevant: settingsVm.cudaFlowRelevant
   });
+
+  const batchVm = useBatchViewModel({
+    feedback,
+    settings: settingsVm.settings
+  });
+
+  useEffect(() => {
+    const unsubscribe = translateTerGateway.settings.onEvent((event) => {
+      if (event.type === 'changed') {
+        settingsVm.refreshSettings();
+      }
+    });
+    return () => unsubscribe();
+  }, [settingsVm]);
 
   if (!settingsVm.settings) {
     return <div className="boot">Translate-Ter</div>;
@@ -140,8 +155,9 @@ export function App(): JSX.Element {
     workspaceVm.runningAction === 'translate' || workspaceVm.job?.stage === 'translating';
   const runningStep = isTranscribing ? 'asr' : isTranslating ? 'translate' : undefined;
   const failedStep = workspaceVm.job?.stage === 'failed' ? workspaceVm.job.step : undefined;
+  const batchRunning = batchVm.queue.status === 'running';
   const appWorking =
-    workspaceVm.busy || Boolean(settingsVm.runtimeOperation) || Boolean(settingsVm.checkingProvider) || jobIsRunning;
+    workspaceVm.busy || Boolean(settingsVm.runtimeOperation) || Boolean(settingsVm.checkingProvider) || jobIsRunning || batchRunning;
   const hasRecognizedSubtitles = Boolean(workspaceVm.job?.subtitleDocument?.segments.length);
   const translationComplete = hasRecognizedSubtitles && translatedCount === segments.length && segments.length > 0;
   const canExportTranslated = translationComplete && !workspaceVm.busy;
@@ -197,13 +213,34 @@ export function App(): JSX.Element {
         </div>
         
         <nav className="sidebarNav">
-          <button className={`navItem ${activeView === 'workspace' ? 'active' : ''}`} onClick={() => setActiveView('workspace')} type="button">
-            <Gauge size={18} />
-            {t('workspace')}
+          <button
+            className={`navItem${activeView === 'workspace' ? ' active' : ''}`}
+            onClick={() => setActiveView('workspace')}
+            title={t('navWorkspace')}
+            type="button"
+          >
+            <FileVideo size={18} />
+            <span>{t('navWorkspace')}</span>
           </button>
-          <button className={`navItem ${activeView === 'settings' ? 'active' : ''}`} onClick={() => setActiveView('settings')} type="button">
+          <button
+            className={`navItem${activeView === 'batch' ? ' active' : ''}`}
+            onClick={() => setActiveView('batch')}
+            title={t('batchProcessing')}
+            type="button"
+          >
+            <Layers size={18} />
+            <span>{t('batchProcessing')}</span>
+          </button>
+          <button
+            className="navItem"
+            onClick={() => translateTerGateway.window.openSettings()}
+            title={batchRunning ? t('backendBusyBatchRunning') : t('navSettings')}
+            type="button"
+            style={{ marginTop: 'auto' }}
+            disabled={batchRunning}
+          >
             <Settings size={18} />
-            {t('settings')}
+            <span>{t('navSettings')}</span>
           </button>
         </nav>
 
@@ -218,13 +255,13 @@ export function App(): JSX.Element {
           {(canForceStop || workspaceVm.job?.error) && (
             <div className="sidebarActions">
               {canForceStop && (
-                <button onClick={() => void workspaceVm.forceStop()} type="button">
+                <button onClick={() => void workspaceVm.forceStop()} type="button" disabled={batchRunning}>
                   <AlertCircle size={14} />
                   {t('forceStop')}
                 </button>
               )}
               {workspaceVm.job?.error && (
-                <button onClick={() => void workspaceVm.createAndStart()} type="button">
+                <button onClick={() => void workspaceVm.createAndStart()} type="button" disabled={batchRunning}>
                   <RotateCcw size={14} />
                   {t('retry')}
                 </button>
@@ -235,7 +272,7 @@ export function App(): JSX.Element {
       </aside>
 
       <main className="appMain">
-        {activeView === 'workspace' ? (
+        {activeView === 'workspace' && (
           <WorkspaceView
             t={t}
             steps={steps}
@@ -280,9 +317,11 @@ export function App(): JSX.Element {
             canExportBilingual={canExportBilingual}
             exportingVariant={workspaceVm.exportingVariant}
             onExportSrt={(variant) => void workspaceVm.exportSrt(variant)}
+            batchRunning={batchRunning}
           />
-        ) : (
-          <SettingsView t={t} settingsVm={settingsVm} statusVm={statusVm} />
+        )}
+        {activeView === 'batch' && (
+          <BatchQueueView batchVm={batchVm} workspaceRunning={workspaceVm.busy || jobIsRunning} />
         )}
       </main>
 
