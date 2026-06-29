@@ -2,6 +2,7 @@
   "name": "translate-ter",
   "version": "2.2.0-beta.3",
   "description": "Local-first desktop workflow for transcription, subtitle editing, and translation.",
+  "license": "MIT",
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
