@@ -99,7 +99,6 @@ scripts/                 Build, package, smoke test, and platform verification h
 | `npm run native:deps` | Ensure WebView2 dependencies (Windows) |
 | `npm run native:configure` | CMake configure only |
 | `npm run native:build` | Build native backend (+ WebView2 host on Windows) |
-| `npm run native:package` | Windows-only native unzip-and-run package |
 | `npm run smoke:native` | Native backend smoke test |
 | `npm run verify:platform` | Platform verification helper |
 
@@ -109,14 +108,7 @@ scripts/                 Build, package, smoke test, and platform verification h
 npm run native:build
 ```
 
-On Windows, this builds both the `translate-ter-backend` binary and the WebView2 native host. On macOS/Linux, only the backend binary is built.
-
-Windows-only native package (unzip-and-run):
-
-```powershell
-npm run native:package
-dist\native\TranslateTer.exe
-```
+On Windows, this builds both the `translate-ter-backend` binary and the WebView2 native host for local validation. Release downloads use the Electron package on every desktop platform; Windows native unzip-and-run packages are not published.
 
 Backend health check:
 
@@ -126,6 +118,19 @@ build\native\bin\translate-ter-backend.exe --health
 # macOS / Linux
 ./build/native/bin/translate-ter-backend --health
 ```
+
+### macOS Gatekeeper
+
+Beta macOS packages are currently unsigned and not notarized, so Gatekeeper may block the app with an "unidentified developer" warning. This is expected for community beta artifacts that are built by CI without an Apple Developer ID certificate and Apple notarization ticket.
+
+To open the app once, use Apple's documented override path:
+
+1. Open `System Settings`.
+2. Go to `Privacy & Security`.
+3. Find the blocked Translate-Ter message and choose `Open Anyway`.
+4. Confirm `Open` in the dialog.
+
+You can also Control-click the app in Finder, choose `Open`, then confirm `Open`. Only use these overrides for release artifacts you downloaded from this project's GitHub Releases page. Reference: [Apple Support: Open a Mac app from an unidentified developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac).
 
 ### Testing
 
@@ -248,7 +253,6 @@ scripts/                 构建、打包、冒烟测试和平台验证辅助脚�
 | `npm run native:deps` | 确保 WebView2 依赖就绪（Windows） |
 | `npm run native:configure` | 仅执行 CMake 配置 |
 | `npm run native:build` | 构建原生后端（Windows 上同时构建 WebView2 宿主） |
-| `npm run native:package` | Windows 专属的原生免安装绿色包 |
 | `npm run smoke:native` | 原生后端冒烟测试 |
 | `npm run verify:platform` | 平台验证辅助脚本 |
 
@@ -258,14 +262,7 @@ scripts/                 构建、打包、冒烟测试和平台验证辅助脚�
 npm run native:build
 ```
 
-在 Windows 上，会同时构建 `translate-ter-backend` 二进制文件和 WebView2 原生宿主。在 macOS/Linux 上仅构建后端二进制文件。
-
-Windows 专属原生包（解压即用）：
-
-```powershell
-npm run native:package
-dist\native\TranslateTer.exe
-```
+在 Windows 上，会同时构建 `translate-ter-backend` 二进制文件和 WebView2 原生宿主，用于本地验证。在所有桌面平台上，Release 下载均使用 Electron 包；不再发布 Windows 原生免安装包。
 
 后端健康检查：
 
@@ -275,6 +272,19 @@ build\native\bin\translate-ter-backend.exe --health
 # macOS / Linux
 ./build/native/bin/translate-ter-backend --health
 ```
+
+### macOS Gatekeeper
+
+当前 beta macOS 包尚未签名和公证，因此 Gatekeeper 可能会提示“无法验证开发者”并阻止直接打开。这是 CI 构建的社区 beta 产物缺少 Apple Developer ID 证书和 Apple notarization 票据时的预期现象。
+
+单次允许打开可使用 Apple 官方说明的绕过路径：
+
+1. 打开 `系统设置`。
+2. 进入 `隐私与安全性`。
+3. 找到被拦截的 Translate-Ter 提示并选择 `仍要打开`。
+4. 在确认弹窗中选择 `打开`。
+
+也可以在 Finder 中按住 Control 点击应用，选择 `打开`，再在弹窗中确认 `打开`。请只对从本项目 GitHub Releases 页面下载的产物使用这些绕过方式。参考：[Apple 支持：打开来自身份不明开发者的 Mac App](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)。
 
 ### 测试
 

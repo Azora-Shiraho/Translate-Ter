@@ -25,6 +25,24 @@ jobs:
           - name: Linux x64 release asset
             os: ubuntu-24.04
             platform: linux
+            target: linux
+            format: tar.gz
+            arch: x64
+            asset: linux-x64-electron.tar.gz
+          - name: macOS x64 release asset
+            os: macos-13
+            platform: macos
+            target: mac
+            format: zip
+            arch: x64
+            asset: macos-x64-electron.zip
+          - name: macOS arm64 release asset
+            os: macos-14
+            platform: macos
+            target: mac
+            format: zip
+            arch: arm64
+            asset: macos-arm64-electron.zip
 
     steps:
       - name: Resolve release tag
@@ -64,8 +82,8 @@ jobs:
           npm run native:build
 
           node ./node_modules/electron-builder/cli.js \
-            --linux tar.gz \
-            --x64 \
+            --${{ matrix.target }} ${{ matrix.format }} \
+            --${{ matrix.arch }} \
             --publish never
 
       - name: Run native smoke
@@ -77,7 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          asset_path="dist/Translate-Ter-v${version}-linux-x64-electron.tar.gz"
+          asset_path="dist/Translate-Ter-v${version}-${{ matrix.asset }}"
 
           if [[ ! -f "$asset_path" ]]; then
             echo "Packaged output file was not found: $asset_path" >&2

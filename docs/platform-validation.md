@@ -43,7 +43,7 @@ npm run package:electron
 | WebView2 native host | Supported | Not built | Not built |
 | `native:build` | Builds backend + WebView2 host | Builds backend only | Builds backend only |
 | `package:electron` | Supported | Supported | Supported |
-| `native:package` | Supported | Expected skip | Expected skip |
+| Native unzip-and-run package | Not published | Not published | Not published |
 | Local whisper.cpp baseline | CPU | Documented around system/runtime boundary | CPU |
 | Optional accelerator | CUDA | Metal system `whisper-cli` | None in current validated scope |
 
@@ -127,7 +127,7 @@ Expected outcome:
 - [ ] Treat `package:electron` as the cross-platform packaging path.
 - [ ] On Windows, expect the script to create a zipped Electron artifact under `dist/`.
 - [ ] On macOS/Linux, expect the script to create an unpacked Electron directory package under `dist/`.
-- [ ] Do not confuse `package:electron` with the Windows-only `native:package` path.
+- [ ] Do not publish Windows native unzip-and-run packages; release artifacts should use the Electron package path.
 
 ## Known Limitations To Record
 

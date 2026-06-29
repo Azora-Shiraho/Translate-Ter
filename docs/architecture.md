@@ -17,7 +17,7 @@ Translate-Ter 是一个本地优先的桌面字幕工作流应用，核心流程
 - Electron Main：负责 IPC、文件系统、设置、密钥、任务编排、provider registry/adapter 和 native 进程边界。
 - Native Backend：C++ 可执行程序，通过换行 JSON stdio 协议提供本地媒体、字幕和 `whisper.cpp` 能力。
 
-Windows 还保留一个 WebView2 native host 打包形态。它是 Windows-only 的入口程序，用于 unzip-and-run 包，不是跨平台主线。
+Windows 仍会构建 WebView2 native host 作为本地验证目标，但发布主线统一为 Electron 桌面包，不再提供 Windows native unzip-and-run 包。
 
 ## 2. 顶层目录
 
@@ -394,7 +394,6 @@ npm run build              TypeScript 检查并构建 out/
 npm run test               Vitest
 npm run native:configure   CMake 配置 native backend
 npm run native:build       构建 native backend，Windows 同时构建 WebView2 host
-npm run native:package     Windows-only native unzip-and-run 包
 npm run package:electron   跨平台 Electron 打包
 npm run smoke:native       native backend 本地 smoke check
 npm run verify:platform    平台验证辅助脚本
