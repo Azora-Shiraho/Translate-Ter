@@ -184,6 +184,12 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
                   </button>
                 ))}
               </div>
+              <ToggleField
+                label={t('exportBatchWithLanguageSuffix')}
+                detail={t('exportBatchWithLanguageSuffixDetail')}
+                checked={settings.exportBatchWithLanguageSuffix ?? false}
+                onChange={(checked) => void settingsVm.updateSettings({ exportBatchWithLanguageSuffix: checked })}
+              />
             </div>
           </InspectorSection>
         </div>
