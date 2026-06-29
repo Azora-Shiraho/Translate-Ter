@@ -30,7 +30,15 @@ export default defineConfig({
   renderer: {
     root: __dirname,
     resolve: { alias },
-    plugins: [react()],
+    plugins: [
+      react(),
+      {
+        name: 'remove-crossorigin',
+        transformIndexHtml(html: string) {
+          return html.replace(/ crossorigin/g, '');
+        }
+      }
+    ],
     build: {
       rollupOptions: {
         input: {
