@@ -68,7 +68,10 @@ export function SubtitleWorkbench(props: SubtitleWorkbenchProps): JSX.Element {
               }}
             >
               <div className="segmentCardHeader">
-                <span className="segmentTime">{formatTimestamp(segment.startMs)} - {formatTimestamp(segment.endMs)}</span>
+                <span className="segmentTime">
+                  <Clock3 size={11} />
+                  {formatTimestamp(segment.startMs)} - {formatTimestamp(segment.endMs)}
+                </span>
                 <span className={`status ${segment.status}`} style={{ fontSize: '11px' }}>
                   {props.t(statusLabel(segment.status))}
                 </span>
@@ -90,7 +93,8 @@ export function SubtitleWorkbench(props: SubtitleWorkbenchProps): JSX.Element {
                 <h3 style={{ margin: '0 0 4px', fontSize: '18px', color: 'var(--tt-text-strong)' }}>
                   {props.t('segmentDetails')} <span style={{ color: 'var(--tt-accent)', marginLeft: '8px' }}>#{props.selectedSegment.index}</span>
                 </h3>
-                <span className="segmentTime" style={{ fontSize: '13px' }}>
+                <span className="segmentTime" style={{ fontSize: '12px' }}>
+                  <Clock3 size={12} />
                   {formatTimestamp(props.selectedSegment.startMs)} ➔ {formatTimestamp(props.selectedSegment.endMs)}
                 </span>
               </div>
