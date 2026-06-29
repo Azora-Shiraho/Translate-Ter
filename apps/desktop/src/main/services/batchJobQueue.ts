@@ -104,9 +104,10 @@ export class BatchJobQueue extends EventEmitter {
 
     this.cancelRequested = true;
     const activeItem = this.queue.items.find((item) => item.id === this.queue.currentItemId);
+    const nextStatus = activeItem?.jobId ? this.queue.status : 'cancelled';
     this.queue = withCounts({
       ...this.queue,
-      status: 'cancelled',
+      status: nextStatus,
       items: this.queue.items.map((item) =>
         item.status === 'queued'
           ? {

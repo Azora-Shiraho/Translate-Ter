@@ -148,6 +148,9 @@ class FakeJobManager extends EventEmitter {
   });
   readonly cancel = vi.fn(async (jobId: string) => {
     this.cancelOrder.push(jobId);
+    if (this.cancelBlock) {
+      await this.cancelBlock.promise;
+    }
     const job = this.requireJob(jobId);
     job.stage = 'cancelled';
     job.step = 'asr';
@@ -164,6 +167,7 @@ class FakeJobManager extends EventEmitter {
   readonly cancelOrder: string[] = [];
   readonly failMediaPaths = new Set<string>();
   startBlock?: Deferred<void>;
+  cancelBlock?: Deferred<void>;
   onStart?: () => void;
 
   private readonly jobs = new Map<string, JobSnapshot>();
@@ -275,6 +279,38 @@ describe('BatchJobQueue', () => {
     expect(snapshot.items.map((item) => item.status)).toEqual(['cancelled', 'cancelled']);
     expect(manager.cancelOrder).toHaveLength(1);
     expect(manager.createOrder).toEqual(['D:/media/long.mp4']);
+  });
+
+  it('keeps the queue running while active cancellation is still in flight', async () => {
+    const manager = new FakeJobManager();
+    const started = createDeferred();
+    manager.startBlock = createDeferred();
+    manager.cancelBlock = createDeferred();
+    manager.onStart = () => started.resolve();
+    const queue = new BatchJobQueue(manager as any);
+    queue.addJobs(
+      createBatchRequest({
+        mediaPaths: ['D:/media/long.mp4', 'D:/media/next.mp4']
+      })
+    );
+
+    await queue.start();
+    await started.promise;
+    const cancelPromise = queue.cancel();
+    await vi.waitFor(() => expect(manager.cancelOrder).toHaveLength(1));
+
+    expect(queue.get().status).toBe('running');
+    expect(queue.get().items.map((item) => item.status)).toEqual(['running', 'cancelled']);
+
+    manager.cancelBlock.resolve();
+    await cancelPromise;
+    expect(queue.get().status).toBe('running');
+
+    manager.startBlock.resolve();
+    await waitForQueue(queue);
+
+    expect(queue.get().status).toBe('cancelled');
+    expect(queue.get().items.map((item) => item.status)).toEqual(['cancelled', 'cancelled']);
   });
 
   it('does not rewrite non-empty media paths before enqueueing', async () => {
