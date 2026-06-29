@@ -1,11 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
-import { basename, dirname, extname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type {
   AssetEvent,
   AppSettingsPatch,
   AppSettingsPublic,
+  BatchJobItemSnapshot,
   BatchQueueEvent,
   BilingualOrder,
   CreateBatchJobsRequest,
@@ -43,6 +44,11 @@ import { AppLogger, type RendererLogWriteInput } from './services/logger';
 import { WhisperAssetManager } from './services/whisperAssets';
 import { mergeFasterWhisperRuntimeRequestWithSettings } from './services/fasterWhisperRuntimeOptions';
 import { mergeWhisperRuntimeRequestWithSettings } from './services/whisperRuntimeRequestMerge';
+import {
+  exportFileFormatMeta,
+  planSubtitleExportPath,
+  resolveSubtitleFileFormat
+} from './services/subtitleExport';
 import { asrProviders } from './services/asrProviders';
 import { createMainAsrProviderRegistry } from './providers/asrProviderRegistry';
 import { createMainTranslationProviderRegistry } from './providers/translationProviderRegistry';
@@ -82,7 +88,9 @@ const jobManager = new JobManager(
   asrProviderRegistry,
   translationProviderRegistry
 );
-const batchJobQueue = new BatchJobQueue(jobManager);
+const batchJobQueue = new BatchJobQueue(jobManager, {
+  onJobCompleted: exportCompletedBatchJob
+});
 
 function createWindow(): void {
   appLogger.info('window.create', 'Creating main window.', {
@@ -182,6 +190,56 @@ function broadcastSettingsChanged(settings: AppSettingsPublic): void {
     settings
   };
   sendToAllWindows('settings:event', event);
+}
+
+async function exportSubtitleFile(payload: {
+  document: SubtitleDocument;
+  path: string;
+  variant: ExportVariant;
+  bilingualOrder: BilingualOrder;
+}): Promise<void> {
+  const settings = await settingsStore.get();
+  const format = resolveSubtitleFileFormat(payload.path, settings.exportFileFormat);
+  let serialized: string;
+  if (shouldUseTypeScriptAssSerialization(format)) {
+    serialized = serializeAss(payload.document, {
+      variant: payload.variant,
+      bilingualOrder: payload.bilingualOrder
+    });
+  } else if (shouldUseNativeSrtSerialization(format)) {
+    const response = await nativeSubtitleService.serializeSrt(payload.document, {
+      variant: payload.variant,
+      bilingualOrder: payload.bilingualOrder
+    });
+    serialized = assertNativeSubtitlePayload(
+      response,
+      'The subtitle file could not be exported through the native backend.'
+    ).srt;
+  } else {
+    throw new Error(`Unsupported subtitle export format: ${format}`);
+  }
+  await writeFile(payload.path, serialized, 'utf8');
+}
+
+async function exportCompletedBatchJob(job: JobSnapshot, item: BatchJobItemSnapshot): Promise<void> {
+  if (!job.subtitleDocument) {
+    throw new Error('No subtitle document is available to export.');
+  }
+
+  const settings = await settingsStore.get();
+  const variant: ExportVariant = item.autoTranslate ? 'translated' : 'source';
+  const plan = planSubtitleExportPath(job.mediaPath, variant, settings, {
+    batchExport: true,
+    interactive: false,
+    targetLanguage: item.autoTranslate ? job.targetLanguage : undefined
+  });
+
+  await exportSubtitleFile({
+    document: job.subtitleDocument,
+    path: plan.defaultPath,
+    variant,
+    bilingualOrder: settings.exportBilingualOrder
+  });
 }
 
 app.whenReady().then(() => {
@@ -401,27 +459,7 @@ function registerIpc(): void {
     variant: ExportVariant;
     bilingualOrder: BilingualOrder;
   }): Promise<void> {
-    const settings = await settingsStore.get();
-    const format = resolveSubtitleFileFormat(payload.path, settings.exportFileFormat);
-    let serialized: string;
-    if (shouldUseTypeScriptAssSerialization(format)) {
-      serialized = serializeAss(payload.document, {
-        variant: payload.variant,
-        bilingualOrder: payload.bilingualOrder
-      });
-    } else if (shouldUseNativeSrtSerialization(format)) {
-      const response = await nativeSubtitleService.serializeSrt(payload.document, {
-        variant: payload.variant,
-        bilingualOrder: payload.bilingualOrder
-      });
-      serialized = assertNativeSubtitlePayload(
-        response,
-        'The subtitle file could not be exported through the native backend.'
-      ).srt;
-    } else {
-      throw new Error(`Unsupported subtitle export format: ${format}`);
-    }
-    await writeFile(payload.path, serialized, 'utf8');
+    await exportSubtitleFile(payload);
   }
 
   async function selectExportDirectory(event: Electron.IpcMainInvokeEvent): Promise<string | undefined> {
@@ -467,44 +505,25 @@ function registerIpc(): void {
   async function resolveExportPath(
     mediaPath: string,
     variant: ExportVariant,
-    settings: Awaited<ReturnType<SettingsStore['get']>>
+    settings: Awaited<ReturnType<SettingsStore['get']>>,
+    options: {
+      batchExport?: boolean;
+      interactive?: boolean;
+      targetLanguage?: string;
+    } = {}
   ): Promise<string | undefined> {
-    const defaultName = defaultSubtitleFileName(mediaPath, variant, settings.exportFileFormat);
-    if (settings.exportDestinationMode === 'ask-each-time') {
+    const plan = planSubtitleExportPath(mediaPath, variant, settings, options);
+    if (plan.requiresSaveDialog) {
       const { extension, filterName } = exportFileFormatMeta(settings.exportFileFormat);
       const result = await dialog.showSaveDialog(mainWindow!, {
         title: 'Export subtitle',
-        defaultPath: join(dirname(mediaPath), defaultName),
+        defaultPath: plan.defaultPath,
         filters: [{ name: filterName, extensions: [extension] }]
       });
       return result.canceled ? undefined : result.filePath;
     }
 
-    const targetDir =
-      settings.exportDestinationMode === 'selected-directory' && settings.exportDirectory
-        ? settings.exportDirectory
-        : dirname(mediaPath);
-    return join(targetDir, defaultName);
-  }
-
-  function defaultSubtitleFileName(mediaPath: string, variant: ExportVariant, format: 'srt' | 'ass'): string {
-    const extension = extname(mediaPath);
-    const name = basename(mediaPath, extension);
-    const suffix = variant === 'source' ? 'source' : variant === 'bilingual' ? 'bilingual' : 'translated';
-    return `${name}.${suffix}.${format}`;
-  }
-
-  function resolveSubtitleFileFormat(path: string, fallback: 'srt' | 'ass'): 'srt' | 'ass' {
-    const extension = extname(path).toLowerCase();
-    if (extension === '.ass') return 'ass';
-    if (extension === '.srt') return 'srt';
-    return fallback;
-  }
-
-  function exportFileFormatMeta(format: 'srt' | 'ass'): { extension: 'srt' | 'ass'; filterName: string } {
-    return format === 'ass'
-      ? { extension: 'ass', filterName: 'Advanced SubStation Alpha' }
-      : { extension: 'srt', filterName: 'SubRip Subtitle' };
+    return plan.defaultPath;
   }
 
   registerHandle('selectVideo', async () => selectMedia());

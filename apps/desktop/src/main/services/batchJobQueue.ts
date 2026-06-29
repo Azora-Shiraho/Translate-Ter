@@ -18,6 +18,10 @@ type JobManagerLike = EventEmitter & {
   get(jobId: string): JobSnapshot;
 };
 
+type BatchJobQueueOptions = {
+  onJobCompleted?: (job: JobSnapshot, item: BatchJobItemSnapshot) => Promise<void>;
+};
+
 export class BatchJobQueue extends EventEmitter {
   private queue = createEmptyQueue();
   private readonly jobIdToItemId = new Map<string, string>();
@@ -25,7 +29,10 @@ export class BatchJobQueue extends EventEmitter {
   private runningPromise?: Promise<void>;
   private cancelRequested = false;
 
-  constructor(private readonly jobManager: JobManagerLike) {
+  constructor(
+    private readonly jobManager: JobManagerLike,
+    private readonly options: BatchJobQueueOptions = {}
+  ) {
     super();
     this.handleJobEvent = this.handleJobEvent.bind(this);
     this.jobManager.on('job-event', this.handleJobEvent);
@@ -210,12 +217,28 @@ export class BatchJobQueue extends EventEmitter {
         return;
       }
 
+      if (this.options.onJobCompleted) {
+        this.updateItem(itemId, {
+          step: 'export',
+          stage: 'exporting',
+          progress: 98,
+          message: 'Exporting subtitle file.'
+        });
+        await this.options.onJobCompleted(nextJob, this.requireItem(itemId));
+      }
+
       this.updateItem(itemId, {
         status: 'completed',
-        step: nextJob.step,
-        stage: nextJob.stage,
+        step: this.options.onJobCompleted ? 'export' : nextJob.step,
+        stage: 'completed',
         progress: 100,
-        message: item.autoTranslate ? 'Transcription and translation complete.' : 'Transcription complete.'
+        message: this.options.onJobCompleted
+          ? item.autoTranslate
+            ? 'Transcription, translation, and export complete.'
+            : 'Transcription and export complete.'
+          : item.autoTranslate
+            ? 'Transcription and translation complete.'
+            : 'Transcription complete.'
       });
     } catch (error) {
       if (this.cancelRequested) {

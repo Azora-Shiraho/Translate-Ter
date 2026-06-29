@@ -233,6 +233,57 @@ describe('BatchJobQueue', () => {
     expect(manager.translateOrder).toHaveLength(2);
   });
 
+  it('exports each completed item before marking it as completed', async () => {
+    const manager = new FakeJobManager();
+    const onJobCompleted = vi.fn().mockResolvedValue(undefined);
+    const queue = new BatchJobQueue(manager as any, {
+      onJobCompleted
+    });
+    queue.addJobs(
+      createBatchRequest({
+        mediaPaths: ['D:/media/a.mp4']
+      })
+    );
+
+    await queue.start();
+    await waitForQueue(queue);
+
+    expect(onJobCompleted).toHaveBeenCalledTimes(1);
+    expect(onJobCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaPath: 'D:/media/a.mp4',
+        step: 'export',
+        targetLanguage: 'zh-CN'
+      }),
+      expect.objectContaining({
+        id: expect.any(String),
+        mediaPath: 'D:/media/a.mp4',
+        autoTranslate: true,
+        stage: 'exporting'
+      })
+    );
+    expect(queue.get().items[0]?.message).toBe('Transcription, translation, and export complete.');
+  });
+
+  it('marks the item as failed when the export hook throws', async () => {
+    const manager = new FakeJobManager();
+    const queue = new BatchJobQueue(manager as any, {
+      onJobCompleted: vi.fn().mockRejectedValue(new Error('Disk is full.'))
+    });
+    queue.addJobs(
+      createBatchRequest({
+        mediaPaths: ['D:/media/a.mp4']
+      })
+    );
+
+    await queue.start();
+    await waitForQueue(queue);
+
+    const item = queue.get().items[0];
+    expect(item?.status).toBe('failed');
+    expect(item?.error?.message).toBe('Disk is full.');
+  });
+
   it('marks one failed item and continues with the next queued file', async () => {
     const manager = new FakeJobManager();
     manager.failMediaPaths.add('D:/media/bad.mp4');
