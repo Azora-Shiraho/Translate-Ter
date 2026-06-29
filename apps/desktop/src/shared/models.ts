@@ -89,6 +89,7 @@ export type AppSettingsPublic = {
   exportDirectory: string;
   exportBilingualOrder: BilingualOrder;
   exportFileFormat: SubtitleFileFormat;
+  exportBatchWithLanguageSuffix: boolean;
 };
 
 export type AppSettingsPatch = Partial<AppSettingsPublic>;

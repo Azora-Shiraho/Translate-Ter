@@ -206,128 +206,129 @@ export function App(): JSX.Element {
   }
 
   return (
-    <div className={`appContainer${appWorking ? ' isWorking' : ''}`}>
-      <aside className="appSidebar">
-        <div className="sidebarBrand">
-          <FileVideo size={24} className="brandIcon" />
-          <h2>{t('appName')}</h2>
-        </div>
-        
-        <nav className="sidebarNav">
-          <button
-            className={`navItem${activeView === 'workspace' ? ' active' : ''}`}
-            onClick={() => setActiveView('workspace')}
-            title={t('navWorkspace')}
-            type="button"
-          >
-            <FileVideo size={18} />
-            <span>{t('navWorkspace')}</span>
-          </button>
-          <button
-            className={`navItem${activeView === 'batch' ? ' active' : ''}`}
-            onClick={() => setActiveView('batch')}
-            title={t('batchProcessing')}
-            type="button"
-          >
-            <Layers size={18} />
-            <span>{t('batchProcessing')}</span>
-          </button>
-          <button
-            className="navItem"
-            onClick={() => translateTerGateway.window.openSettings()}
-            title={batchRunning ? t('backendBusyBatchRunning') : t('navSettings')}
-            type="button"
-            style={{ marginTop: 'auto' }}
-            disabled={batchRunning}
-          >
-            <Settings size={18} />
-            <span>{t('navSettings')}</span>
-          </button>
-        </nav>
-
-        <div className="sidebarFooter">
-          <div className="systemStatusBlock">
-            <span className={appWorking ? 'statusPulse active' : 'statusPulse'} />
-            <div className="statusText">
-              <strong>{footerTitle}</strong>
-              <span title={footerMessage}>{footerMessage}</span>
-            </div>
+    <>
+      <div className={`appContainer${appWorking ? ' isWorking' : ''}`}>
+        <aside className="appSidebar">
+          <div className="sidebarBrand">
+            <FileVideo size={24} className="brandIcon" />
+            <h2>{t('appName')}</h2>
           </div>
-          {(canForceStop || workspaceVm.job?.error) && (
-            <div className="sidebarActions">
-              {canForceStop && (
-                <button onClick={() => void workspaceVm.forceStop()} type="button" disabled={batchRunning}>
-                  <AlertCircle size={14} />
-                  {t('forceStop')}
-                </button>
-              )}
-              {workspaceVm.job?.error && (
-                <button onClick={() => void workspaceVm.createAndStart()} type="button" disabled={batchRunning}>
-                  <RotateCcw size={14} />
-                  {t('retry')}
-                </button>
-              )}
+          
+          <nav className="sidebarNav">
+            <button
+              className={`navItem${activeView === 'workspace' ? ' active' : ''}`}
+              onClick={() => setActiveView('workspace')}
+              title={t('navWorkspace')}
+              type="button"
+            >
+              <FileVideo size={18} />
+              <span>{t('navWorkspace')}</span>
+            </button>
+            <button
+              className={`navItem${activeView === 'batch' ? ' active' : ''}`}
+              onClick={() => setActiveView('batch')}
+              title={t('batchProcessing')}
+              type="button"
+            >
+              <Layers size={18} />
+              <span>{t('batchProcessing')}</span>
+            </button>
+            <button
+              className="navItem"
+              onClick={() => translateTerGateway.window.openSettings()}
+              title={batchRunning ? t('backendBusyBatchRunning') : t('navSettings')}
+              type="button"
+              style={{ marginTop: 'auto' }}
+              disabled={batchRunning}
+            >
+              <Settings size={18} />
+              <span>{t('navSettings')}</span>
+            </button>
+          </nav>
+
+          <div className="sidebarFooter">
+            <div className="systemStatusBlock">
+              <span className={appWorking ? 'statusPulse active' : 'statusPulse'} />
+              <div className="statusText">
+                <strong>{footerTitle}</strong>
+                <span title={footerMessage}>{footerMessage}</span>
+              </div>
             </div>
+            {(canForceStop || workspaceVm.job?.error) && (
+              <div className="sidebarActions">
+                {canForceStop && (
+                  <button onClick={() => void workspaceVm.forceStop()} type="button" disabled={batchRunning}>
+                    <AlertCircle size={14} />
+                    {t('forceStop')}
+                  </button>
+                )}
+                {workspaceVm.job?.error && (
+                  <button onClick={() => void workspaceVm.createAndStart()} type="button" disabled={batchRunning}>
+                    <RotateCcw size={14} />
+                    {t('retry')}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </aside>
+
+        <main className="appMain">
+          {activeView === 'workspace' && (
+            <WorkspaceView
+              t={t}
+              steps={steps}
+              statsCollapsed={statsCollapsed}
+              onToggleStatsCollapsed={() => setStatsCollapsed((current) => !current)}
+              workspaceRailMessage={workspaceRailMessage}
+              footerMessage={footerMessage}
+              runtimeState={statusVm.runtimeState}
+              currentStepIndex={currentStepIndex}
+              runningStep={runningStep}
+              failedStep={failedStep}
+              completion={completion}
+              job={workspaceVm.job}
+              jobTitle={jobTitle}
+              translatedCount={translatedCount}
+              warningCount={warningCount}
+              warningPanelOpen={workspaceVm.warningPanelOpen}
+              selectedWarning={selectedWarning}
+              workflowWarnings={workspaceVm.workflowWarnings}
+              translationState={statusVm.translationState}
+              translationProviderId={statusVm.translationProviderId}
+              workspaceRuntimeDetail={workspaceRuntimeDetail}
+              sourceLabel={sourceLabel}
+              targetLabel={targetLabel}
+              asrProviderId={statusVm.asrProviderId}
+              selectedMediaPath={selectedMediaPath}
+              mediaPath={workspaceVm.mediaPath}
+              hasRecognizedSubtitles={hasRecognizedSubtitles}
+              translationComplete={translationComplete}
+              runningAction={workspaceVm.runningAction}
+              jobIsRunning={jobIsRunning}
+              selectedSegment={selectedSegment}
+              onToggleWarnings={workspaceVm.toggleWarningPanel}
+              onSelectWarning={workspaceVm.setSelectedWarningId}
+              onPickMedia={() => void workspaceVm.pickMedia()}
+              onCreateAndStart={() => void workspaceVm.createAndStart()}
+              onTranslateJob={() => void workspaceVm.translateJob()}
+              onSelectSegment={workspaceVm.setSelectedSegmentId}
+              onUpdateSegment={(segment, patch) => void workspaceVm.updateSegment(segment, patch)}
+              canExportTranslated={canExportTranslated}
+              canExportSource={canExportSource}
+              canExportBilingual={canExportBilingual}
+              exportingVariant={workspaceVm.exportingVariant}
+              onExportSrt={(variant) => void workspaceVm.exportSrt(variant)}
+              batchRunning={batchRunning}
+            />
           )}
-        </div>
-      </aside>
-
-      <main className="appMain">
-        {activeView === 'workspace' && (
-          <WorkspaceView
-            t={t}
-            steps={steps}
-            statsCollapsed={statsCollapsed}
-            onToggleStatsCollapsed={() => setStatsCollapsed((current) => !current)}
-            workspaceRailMessage={workspaceRailMessage}
-            footerMessage={footerMessage}
-            runtimeState={statusVm.runtimeState}
-            currentStepIndex={currentStepIndex}
-            runningStep={runningStep}
-            failedStep={failedStep}
-            completion={completion}
-            job={workspaceVm.job}
-            jobTitle={jobTitle}
-            translatedCount={translatedCount}
-            warningCount={warningCount}
-            warningPanelOpen={workspaceVm.warningPanelOpen}
-            selectedWarning={selectedWarning}
-            workflowWarnings={workspaceVm.workflowWarnings}
-            translationState={statusVm.translationState}
-            translationProviderId={statusVm.translationProviderId}
-            workspaceRuntimeDetail={workspaceRuntimeDetail}
-            sourceLabel={sourceLabel}
-            targetLabel={targetLabel}
-            asrProviderId={statusVm.asrProviderId}
-            selectedMediaPath={selectedMediaPath}
-            mediaPath={workspaceVm.mediaPath}
-            hasRecognizedSubtitles={hasRecognizedSubtitles}
-            translationComplete={translationComplete}
-            runningAction={workspaceVm.runningAction}
-            jobIsRunning={jobIsRunning}
-            selectedSegment={selectedSegment}
-            onToggleWarnings={workspaceVm.toggleWarningPanel}
-            onSelectWarning={workspaceVm.setSelectedWarningId}
-            onPickMedia={() => void workspaceVm.pickMedia()}
-            onCreateAndStart={() => void workspaceVm.createAndStart()}
-            onTranslateJob={() => void workspaceVm.translateJob()}
-            onSelectSegment={workspaceVm.setSelectedSegmentId}
-            onUpdateSegment={(segment, patch) => void workspaceVm.updateSegment(segment, patch)}
-            canExportTranslated={canExportTranslated}
-            canExportSource={canExportSource}
-            canExportBilingual={canExportBilingual}
-            exportingVariant={workspaceVm.exportingVariant}
-            onExportSrt={(variant) => void workspaceVm.exportSrt(variant)}
-            batchRunning={batchRunning}
-          />
-        )}
-        {activeView === 'batch' && (
-          <BatchQueueView batchVm={batchVm} workspaceRunning={workspaceVm.busy || jobIsRunning} />
-        )}
-      </main>
-
+          {activeView === 'batch' && (
+            <BatchQueueView batchVm={batchVm} workspaceRunning={workspaceVm.busy || jobIsRunning} />
+          )}
+        </main>
+      </div>
       <ToastStack toasts={toasts} copyTitle={t('copyErrorToast')} onCopyError={(toast) => void copyToastMessage(toast)} />
       <BottomBubble message={copyBubble} />
-    </div>
+    </>
   );
 }

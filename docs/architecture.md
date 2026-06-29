@@ -138,7 +138,7 @@ Electron Main 是桌面能力聚合层，主要职责包括：
 
 - 创建应用窗口，加载开发 URL 或生产 renderer 文件。
 - 注册 IPC handler。
-- 管理文件选择、导出路径和覆盖确认。
+- 管理文件选择、导出路径规划、手动覆盖确认，以及批量导出的重名避让。
 - 管理批量任务队列、队列快照、队列事件和单项错误隔离。
 - 管理设置和密钥存储。
 - 广播设置变更给所有存活窗口，为后续多窗口设置同步保留 Main 侧基础设施。
@@ -310,6 +310,8 @@ ASR provider 与 runtime variant 是两层决策：
 
 - Renderer 请求 `exportConfiguredSrt` 或 `subtitles.exportSrt`。
 - Main 根据设置解析导出目录、文件名、格式和双语顺序。
+- 手动导出在目标文件已存在时会弹覆盖确认；批量自动导出不会弹窗，而是通过追加 `-2`、`-3` 等后缀避让重名文件。
+- 批量自动导出可按设置在译文文件名中追加目标语种后缀，例如 `video_zh-CN.srt`。
 - SRT 导出优先走 native `srt.serialize`。
 - ASS 导出继续使用共享 `serializeAss`。
 
@@ -341,12 +343,15 @@ sequenceDiagram
       B->>J: translate(jobId)
       J-->>B: JobEvent snapshots and progress
     end
+    B->>M: invoke batch export callback
+    M->>N: srt.serialize / TypeScript ASS serialize
+    M-->>B: export complete or error
     B-->>M: BatchQueueEvent item/snapshot/error
     M-->>R: batch:event
   end
 ```
 
-单项失败会标记为 `failed` 并继续处理后续 queued item；取消队列会取消当前 active job，并把尚未开始的 queued item 标记为 `cancelled`。
+单项失败会标记为 `failed` 并继续处理后续 queued item；取消队列会取消当前 active job，并把尚未开始的 queued item 标记为 `cancelled`。成功项在队列层会触发自动导出：`autoTranslate=true` 时导出 `translated` 变体，否则导出 `source` 变体，并复用全局导出目录、格式、双语顺序和语种后缀设置。若批量导出期间收到取消请求，item 会保持 `cancelled`，不会在导出回调返回后被覆盖成 `completed`。
 
 ## 6. 设置、密钥与资产管理
 

@@ -1,0 +1,20 @@
+title: Translate-Ter v2.2.0 Beta 1
+--
+## 更新内容
+
+- 升级到 `2.2.0-beta.1` 预发布版本。
+- 合入架构更新：拆分前端页面和桌面 API 边界，整理 provider 扩展点，并收敛本地媒体/字幕能力到 native backend 服务边界。
+- 现有转写、翻译、字幕导入导出流程保持兼容。
+- 不包含 macOS 以及 Windows Native 版本，本项目依赖 Electron。
+
+## 已上传产物
+
+- `Translate-Ter-v2.2.0-beta.1-windows-x64-electron.zip`
+
+Linux x64 Electron 产物会由 release-assets 工作流在 tag 触发后构建并上传。
+
+## 验证
+
+- `npm test`
+- `npm run package:electron`
+- `npm run verify:platform`

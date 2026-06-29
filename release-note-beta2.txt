@@ -1,0 +1,17 @@
+## 更新内容
+
+- 升级到 `2.2.0-beta.2` 预发布版本。
+- 更新项目文档，重写 `README.md` 以与当前实际架构对齐，并提供中英双语支持。
+- 不包含 macOS 以及 Windows Native 版本，本项目依赖 Electron。
+
+## 已上传产物
+
+- `Translate-Ter-v2.2.0-beta.2-windows-x64-electron.zip`
+
+Linux x64 Electron 产物会由 release-assets 工作流在 tag 触发后构建并上传。
+
+## 验证
+
+- `npm test`
+- `npm run package:electron`
+- `npm run verify:platform`
