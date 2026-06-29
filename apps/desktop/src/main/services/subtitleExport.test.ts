@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { defaultSubtitleFileName, planSubtitleExportPath, resolveSubtitleFileFormat } from './subtitleExport';
 
@@ -25,7 +26,7 @@ describe('subtitleExport', () => {
     );
 
     expect(plan.defaultName).toBe('demo_zh-CN.srt');
-    expect(plan.defaultPath).toBe('D:\\exports\\demo_zh-CN.srt');
+    expect(plan.defaultPath).toBe(join('D:/exports', 'demo_zh-CN.srt'));
     expect(plan.requiresSaveDialog).toBe(false);
   });
 
@@ -46,7 +47,7 @@ describe('subtitleExport', () => {
       }
     );
 
-    expect(plan.defaultPath).toBe('D:\\media\\demo.srt');
+    expect(plan.defaultPath).toBe(join('D:/media', 'demo.srt'));
     expect(plan.requiresSaveDialog).toBe(false);
   });
 
@@ -62,7 +63,7 @@ describe('subtitleExport', () => {
       }
     );
 
-    expect(plan.defaultPath).toBe('D:\\media\\demo.translated.ass');
+    expect(plan.defaultPath).toBe(join('D:/media', 'demo.translated.ass'));
     expect(plan.requiresSaveDialog).toBe(true);
   });
 
