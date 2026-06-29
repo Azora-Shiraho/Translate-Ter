@@ -11,6 +11,13 @@ type BatchQueueViewProps = {
 export function BatchQueueView({ batchVm, workspaceRunning }: BatchQueueViewProps): JSX.Element {
   const { t } = useTranslation();
   const queue = batchVm.queue;
+  const batchStats = [
+    { label: t('status'), value: t(`batchStatus.${queue.status}`) },
+    { label: t('batchSummaryTotal'), value: queue.totalCount },
+    { label: t('batchSummaryCompleted'), value: queue.completedCount },
+    { label: t('batchSummaryFailed'), value: queue.failedCount },
+    { label: t('batchSummaryCancelled'), value: queue.cancelledCount }
+  ].map(({ label, value }) => `${label}: ${value}`).join(' | ');
 
   return (
     <section className="viewFrame">
@@ -61,7 +68,7 @@ export function BatchQueueView({ batchVm, workspaceRunning }: BatchQueueViewProp
             </div>
 
             <div className="batchStats">
-              Status: {queue.status} | Total: {queue.totalCount} | Completed: {queue.completedCount} | Failed: {queue.failedCount} | Cancelled: {queue.cancelledCount}
+              {batchStats}
             </div>
 
             <ul className="batchList" style={{ listStyle: 'none', padding: 0, marginTop: '16px' }}>
@@ -69,7 +76,7 @@ export function BatchQueueView({ batchVm, workspaceRunning }: BatchQueueViewProp
                 <li key={item.id} style={{ padding: '12px', border: '1px solid var(--tt-color-border)', borderRadius: '8px', marginBottom: '8px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                     <strong>{item.fileName}</strong>
-                    <span className={`badge ${item.status}`}>{item.status}</span>
+                    <span className={`badge ${item.status}`}>{t(`batchStatus.${item.status}`)}</span>
                   </div>
                   {item.status === 'running' && (
                     <div style={{ width: '100%', height: '4px', backgroundColor: 'var(--tt-color-surface-hover)', borderRadius: '2px', marginTop: '8px' }}>

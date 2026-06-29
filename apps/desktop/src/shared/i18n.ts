@@ -17,6 +17,10 @@ export const i18nResources = {
       addBatchJobs: 'Add Jobs',
       startBatch: 'Start Batch',
       cancelBatch: 'Cancel Batch',
+      batchSummaryTotal: 'Total',
+      batchSummaryCompleted: 'Completed',
+      batchSummaryFailed: 'Failed',
+      batchSummaryCancelled: 'Cancelled',
       backendBusyWorkspaceRunning: 'A workspace job is currently running. Please wait for it to complete before running batch actions.',
       backendBusyBatchRunning: 'A batch job is currently running. Please wait for it to complete before running workspace actions.',
       openSettings: 'Open settings',
@@ -325,6 +329,14 @@ export const i18nResources = {
         'selected-directory': 'Selected folder',
         'ask-each-time': 'Ask each time'
       },
+      batchStatus: {
+        idle: 'Idle',
+        queued: 'Queued',
+        running: 'Running',
+        completed: 'Completed',
+        failed: 'Failed',
+        cancelled: 'Cancelled'
+      },
       stage: {
         idle: 'Idle',
         imported: 'Imported',
@@ -383,6 +395,10 @@ export const i18nResources = {
       addBatchJobs: '添加任务',
       startBatch: '开始处理',
       cancelBatch: '取消处理',
+      batchSummaryTotal: '总数',
+      batchSummaryCompleted: '已完成',
+      batchSummaryFailed: '失败',
+      batchSummaryCancelled: '已取消',
       backendBusyWorkspaceRunning: '工作区任务正在运行中，请等待其完成后再操作批量任务。',
       backendBusyBatchRunning: '批量任务正在运行中，请等待其完成后再操作工作区。',
       openSettings: '打开设置',
@@ -689,6 +705,14 @@ export const i18nResources = {
         'source-directory': '原视频目录',
         'selected-directory': '指定目录',
         'ask-each-time': '每次选择'
+      },
+      batchStatus: {
+        idle: '空闲',
+        queued: '排队中',
+        running: '处理中',
+        completed: '已完成',
+        failed: '失败',
+        cancelled: '已取消'
       },
       stage: {
         idle: '空闲',
