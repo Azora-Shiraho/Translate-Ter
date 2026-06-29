@@ -112,7 +112,8 @@ export function App(): JSX.Element {
 
   const batchVm = useBatchViewModel({
     feedback,
-    settings: settingsVm.settings
+    settings: settingsVm.settings,
+    effectivePreferredRuntimeVariant: settingsVm.effectivePreferredRuntimeVariant
   });
 
   useEffect(() => {

@@ -2,13 +2,15 @@ import { useCallback, useEffect, useState } from 'react';
 import type { AppSettingsPublic, BatchQueueSnapshot, BatchQueueEvent, CreateBatchJobsRequest } from '@shared/models';
 import { translateTerGateway } from '../api/translateTerGateway';
 import type { UiFeedback } from '../app/types';
+import type { RuntimeVariantSelection } from '../asrSettings';
 
 type UseBatchViewModelProps = {
   feedback: UiFeedback;
   settings?: AppSettingsPublic;
+  effectivePreferredRuntimeVariant?: RuntimeVariantSelection;
 };
 
-export function useBatchViewModel({ feedback, settings }: UseBatchViewModelProps) {
+export function useBatchViewModel({ feedback, settings, effectivePreferredRuntimeVariant }: UseBatchViewModelProps) {
   const [queue, setQueue] = useState<BatchQueueSnapshot>({
     id: 'empty',
     status: 'idle',
@@ -58,7 +60,8 @@ export function useBatchViewModel({ feedback, settings }: UseBatchViewModelProps
         whisperModelId: settings.whisperModelId,
         localWhisperUseCuda: settings.localWhisperUseCuda,
         localAsrAcceleration: settings.localAsrAcceleration,
-        preferredRuntimeVariant: settings.preferredRuntimeVariant,
+        preferredRuntimeVariant:
+          effectivePreferredRuntimeVariant === 'auto' ? undefined : effectivePreferredRuntimeVariant,
         localAsrCpuMode: settings.localAsrCpuMode,
         localWhisperIgnoreCudaMismatch: settings.localWhisperIgnoreCudaMismatch,
         allowWhisperAssetDownload: settings.allowWhisperAssetDownload,
@@ -75,7 +78,7 @@ export function useBatchViewModel({ feedback, settings }: UseBatchViewModelProps
     } catch (error) {
       feedback.reportUiError('batch.addJobs', error, undefined, 'renderer.batch');
     }
-  }, [feedback, settings]);
+  }, [effectivePreferredRuntimeVariant, feedback, settings]);
 
   const start = useCallback(async () => {
     try {
