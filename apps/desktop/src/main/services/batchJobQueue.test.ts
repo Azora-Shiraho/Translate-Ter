@@ -284,6 +284,37 @@ describe('BatchJobQueue', () => {
     expect(item?.error?.message).toBe('Disk is full.');
   });
 
+  it('keeps the item cancelled if cancellation happens while export is still running', async () => {
+    const manager = new FakeJobManager();
+    const exportBlock = createDeferred();
+    const onJobCompleted = vi.fn(async () => {
+      await exportBlock.promise;
+    });
+    const queue = new BatchJobQueue(manager as any, {
+      onJobCompleted
+    });
+    queue.addJobs(
+      createBatchRequest({
+        mediaPaths: ['D:/media/a.mp4']
+      })
+    );
+
+    await queue.start();
+    await vi.waitFor(() => expect(onJobCompleted).toHaveBeenCalledTimes(1));
+
+    const cancelPromise = queue.cancel();
+    await cancelPromise;
+    expect(queue.get().items[0]?.status).toBe('cancelled');
+
+    exportBlock.resolve();
+    await waitForQueue(queue);
+
+    const item = queue.get().items[0];
+    expect(queue.get().status).toBe('cancelled');
+    expect(item?.status).toBe('cancelled');
+    expect(item?.stage).toBe('cancelled');
+  });
+
   it('marks one failed item and continues with the next queued file', async () => {
     const manager = new FakeJobManager();
     manager.failMediaPaths.add('D:/media/bad.mp4');

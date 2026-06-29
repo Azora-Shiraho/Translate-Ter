@@ -225,6 +225,16 @@ export class BatchJobQueue extends EventEmitter {
           message: 'Exporting subtitle file.'
         });
         await this.options.onJobCompleted(nextJob, this.requireItem(itemId));
+        const currentItem = this.requireItem(itemId);
+        if (this.cancelRequested || currentItem.status === 'cancelled' || currentItem.stage === 'cancelled') {
+          this.updateItem(itemId, {
+            status: 'cancelled',
+            stage: 'cancelled',
+            progress: 0,
+            message: 'Batch item cancelled.'
+          });
+          return;
+        }
       }
 
       this.updateItem(itemId, {
