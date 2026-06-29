@@ -33,6 +33,7 @@ function createSettings(overrides: Partial<AppSettingsPublic> = {}): AppSettings
     exportDirectory: '',
     exportBilingualOrder: 'source-first',
     exportFileFormat: 'srt',
+    exportBatchWithLanguageSuffix: false,
     ...overrides
   };
 }
