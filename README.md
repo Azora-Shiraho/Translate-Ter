@@ -132,6 +132,14 @@ To open the app once, use Apple's documented override path:
 
 You can also Control-click the app in Finder, choose `Open`, then confirm `Open`. Only use these overrides for release artifacts you downloaded from this project's GitHub Releases page. Reference: [Apple Support: Open a Mac app from an unidentified developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac).
 
+If macOS says the app is damaged and `Privacy & Security` does not show an `Open Anyway` button, the downloaded app may still carry the quarantine attribute. After extracting the zip, run this command in Terminal, adjusting the path if you moved the app:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Translate-Ter.app"
+```
+
+Then open the app again from Finder. This removes Gatekeeper's quarantine marker from the app bundle; it does not sign, notarize, or otherwise modify the application code.
+
 ### Testing
 
 The project includes 20+ test files covering services, providers, parsers, and view models:
@@ -285,6 +293,14 @@ build\native\bin\translate-ter-backend.exe --health
 4. 在确认弹窗中选择 `打开`。
 
 也可以在 Finder 中按住 Control 点击应用，选择 `打开`，再在弹窗中确认 `打开`。请只对从本项目 GitHub Releases 页面下载的产物使用这些绕过方式。参考：[Apple 支持：打开来自身份不明开发者的 Mac App](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac)。
+
+如果 macOS 提示应用“已损坏”，并且 `隐私与安全性` 中没有出现 `仍要打开` 按钮，下载后的 app 可能仍带有 quarantine 隔离属性。解压 zip 后，在终端执行以下命令；如果你把应用放在了其他位置，请对应修改路径：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Translate-Ter.app"
+```
+
+然后再从 Finder 打开应用。这个命令只会移除 app bundle 上的 Gatekeeper 隔离标记，不会给应用签名、公证，也不会修改应用代码。
 
 ### 测试
 
