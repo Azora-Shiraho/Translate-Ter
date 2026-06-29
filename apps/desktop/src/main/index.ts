@@ -5,7 +5,10 @@ import { basename, dirname, extname, join } from 'node:path';
 import type {
   AssetEvent,
   AppSettingsPatch,
+  AppSettingsPublic,
+  BatchQueueEvent,
   BilingualOrder,
+  CreateBatchJobsRequest,
   CreateJobRequest,
   ExportVariant,
   FasterWhisperCudaRequest,
@@ -14,6 +17,7 @@ import type {
   JobEvent,
   JobSnapshot,
   ProviderSecretInput,
+  SettingsEvent,
   SubtitleDocument,
   SubtitleSegment,
   WhisperModelRequest,
@@ -21,6 +25,7 @@ import type {
 } from '@shared/models';
 import { serializeAss } from '@shared/ass';
 import { JobManager } from './services/jobManager';
+import { BatchJobQueue } from './services/batchJobQueue';
 import { FasterWhisperService } from './services/fasterWhisperService';
 import { NativeBackendClient } from './services/nativeBackendClient';
 import { NativeMediaService } from './services/nativeMediaService';
@@ -43,10 +48,12 @@ import { createMainAsrProviderRegistry } from './providers/asrProviderRegistry';
 import { createMainTranslationProviderRegistry } from './providers/translationProviderRegistry';
 
 let mainWindow: BrowserWindow | undefined;
+let settingsWindow: BrowserWindow | undefined;
 const logger = new AppLogger();
 const appLogger = logger.createScope('app');
 const ipcLogger = logger.createScope('ipc');
 const jobLogger = logger.createScope('jobs');
+const batchLogger = logger.createScope('batch');
 const assetLogger = logger.createScope('assets');
 const settingsStore = new SettingsStore();
 const whisperAssets = new WhisperAssetManager();
@@ -75,6 +82,7 @@ const jobManager = new JobManager(
   asrProviderRegistry,
   translationProviderRegistry
 );
+const batchJobQueue = new BatchJobQueue(jobManager);
 
 function createWindow(): void {
   appLogger.info('window.create', 'Creating main window.', {
@@ -118,6 +126,64 @@ function createWindow(): void {
   });
 }
 
+function installApplicationMenu(): void {
+  Menu.setApplicationMenu(null);
+}
+
+function createSettingsWindow(): void {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.focus();
+    return;
+  }
+
+  appLogger.info('window.create-settings', 'Creating settings window.');
+  settingsWindow = new BrowserWindow({
+    width: 900,
+    height: 680,
+    minWidth: 720,
+    minHeight: 480,
+    title: 'Translate-Ter — Settings',
+    backgroundColor: '#f5f5f7',
+    parent: mainWindow,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+
+  if (process.env.ELECTRON_RENDERER_URL) {
+    const settingsUrl = process.env.ELECTRON_RENDERER_URL.replace(/\/$/, '') + '/settings.html';
+    appLogger.info('window.settings-load-url', 'Loading settings development URL.', { url: settingsUrl });
+    void settingsWindow.loadURL(settingsUrl);
+  } else {
+    appLogger.info('window.settings-load-file', 'Loading packaged settings file.');
+    void settingsWindow.loadFile(join(__dirname, '../renderer/settings.html'));
+  }
+
+  settingsWindow.on('closed', () => {
+    appLogger.info('window.settings-closed', 'The settings window was closed.');
+    settingsWindow = undefined;
+  });
+}
+
+function sendToAllWindows(channel: string, payload: unknown): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send(channel, payload);
+    }
+  }
+}
+
+function broadcastSettingsChanged(settings: AppSettingsPublic): void {
+  const event: SettingsEvent = {
+    type: 'changed',
+    settings
+  };
+  sendToAllWindows('settings:event', event);
+}
+
 app.whenReady().then(() => {
   void (async () => {
     const initialSettings = await settingsStore.get();
@@ -126,7 +192,7 @@ app.whenReady().then(() => {
       logFilePath,
       packaged: app.isPackaged
     });
-    Menu.setApplicationMenu(null);
+    installApplicationMenu();
     registerIpc();
     const smokeHandled = await maybeRunFasterWhisperSmokeTest();
     if (smokeHandled) {
@@ -172,6 +238,10 @@ function registerIpc(): void {
     'jobs:translate',
     'jobs:cancel',
     'jobs:get',
+    'batch:add-jobs',
+    'batch:start',
+    'batch:cancel',
+    'batch:get',
     'subtitles:import-srt',
     'subtitles:export-srt',
     'subtitles:update-segment',
@@ -258,17 +328,40 @@ function registerIpc(): void {
     }
     mainWindow?.webContents.send('jobs:event', event);
   });
+  batchJobQueue.on('batch-event', (event: BatchQueueEvent) => {
+    if (event.type === 'error') {
+      batchLogger.error('event', event.message, event);
+    } else if (event.type === 'item') {
+      batchLogger.info('event', event.item.message ?? 'Batch item updated.', {
+        queueId: event.queueId,
+        itemId: event.item.id,
+        status: event.item.status,
+        stage: event.item.stage,
+        progress: event.item.progress
+      });
+    } else {
+      batchLogger.debug('event', 'Batch queue snapshot updated.', {
+        queueId: event.queue.id,
+        status: event.queue.status,
+        totalCount: event.queue.totalCount,
+        completedCount: event.queue.completedCount,
+        failedCount: event.queue.failedCount,
+        cancelledCount: event.queue.cancelledCount
+      });
+    }
+    sendToAllWindows('batch:event', event);
+  });
   whisperAssets.on('asset-event', (event: AssetEvent) => {
     logAssetEvent('whisper.cpp', event);
-    mainWindow?.webContents.send('assets:event', event);
+    sendToAllWindows('assets:event', event);
   });
   ffmpegAssets.on('asset-event', (event: AssetEvent) => {
     logAssetEvent('ffmpeg', event);
-    mainWindow?.webContents.send('assets:event', event);
+    sendToAllWindows('assets:event', event);
   });
   fasterWhisper.on('asset-event', (event: AssetEvent) => {
     logAssetEvent('faster-whisper', event);
-    mainWindow?.webContents.send('assets:event', event);
+    sendToAllWindows('assets:event', event);
   });
 
   async function selectMedia(): Promise<string | undefined> {
@@ -282,6 +375,18 @@ function registerIpc(): void {
       ]
     });
     return result.canceled ? undefined : result.filePaths[0];
+  }
+
+  async function selectMultipleMedia(): Promise<string[] | undefined> {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Import video or audio files',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'mp3', 'wav', 'm4a', 'aac'] },
+        { name: 'All files', extensions: ['*'] }
+      ]
+    });
+    return result.canceled ? undefined : result.filePaths;
   }
 
   async function startTranscription(request: CreateJobRequest): Promise<JobSnapshot> {
@@ -319,8 +424,9 @@ function registerIpc(): void {
     await writeFile(payload.path, serialized, 'utf8');
   }
 
-  async function selectExportDirectory(): Promise<string | undefined> {
-    const result = await dialog.showOpenDialog(mainWindow!, {
+  async function selectExportDirectory(event: Electron.IpcMainInvokeEvent): Promise<string | undefined> {
+    const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow!;
+    const result = await dialog.showOpenDialog(parentWindow, {
       title: 'Select subtitle export folder',
       properties: ['openDirectory', 'createDirectory']
     });
@@ -402,7 +508,7 @@ function registerIpc(): void {
   }
 
   registerHandle('selectVideo', async () => selectMedia());
-  registerHandle('selectDirectory', async () => selectExportDirectory());
+  registerHandle('selectDirectory', async (event) => selectExportDirectory(event));
   registerHandle('startTranscription', async (_event, request: CreateJobRequest) => startTranscription(request));
   registerHandle('startTranslation', async (_event, jobId: string) => jobManager.translate(jobId));
   registerHandle(
@@ -421,6 +527,7 @@ function registerIpc(): void {
   registerHandle('saveSettings', async (_event, patch: AppSettingsPatch) => {
     const next = await settingsStore.update(patch);
     logger.setLevel(next.logLevel);
+    broadcastSettingsChanged(next);
     return next;
   });
 
@@ -428,11 +535,24 @@ function registerIpc(): void {
     return selectMedia();
   });
 
+  registerHandle('desktop:select-multiple-media', async () => {
+    return selectMultipleMedia();
+  });
+
   registerHandle('jobs:create', async (_event, request: CreateJobRequest) => jobManager.create(request));
   registerHandle('jobs:start', async (_event, jobId: string) => jobManager.start(jobId));
   registerHandle('jobs:translate', async (_event, jobId: string) => jobManager.translate(jobId));
   registerHandle('jobs:cancel', async (_event, jobId: string) => jobManager.cancel(jobId));
   registerHandle('jobs:get', async (_event, jobId: string) => jobManager.get(jobId));
+
+  registerHandle('batch:add-jobs', async (_event, request: CreateBatchJobsRequest) => batchJobQueue.addJobs(request));
+  registerHandle('batch:start', async () => batchJobQueue.start());
+  registerHandle('batch:cancel', async () => batchJobQueue.cancel());
+  registerHandle('batch:get', async () => batchJobQueue.get());
+
+  registerHandle('window:open-settings', async () => {
+    createSettingsWindow();
+  });
 
   registerHandle('subtitles:import-srt', async (_event, path: string) => {
     const raw = await readFile(path, 'utf8');
@@ -463,6 +583,7 @@ function registerIpc(): void {
   registerHandle('settings:update', async (_event, patch: AppSettingsPatch) => {
     const next = await settingsStore.update(patch);
     logger.setLevel(next.logLevel);
+    broadcastSettingsChanged(next);
     return next;
   });
   registerHandle('settings:get-secret', async (_event, providerId: string) => settingsStore.getSecret(providerId));
@@ -522,7 +643,9 @@ function registerIpc(): void {
       ...request,
       useMultiThreadDownload: request.useMultiThreadDownload ?? settings.enableMultiThreadDownload
     });
-    await nativeBackend.cancelRunningWork();
+    if (request.allowDownload) {
+      await nativeBackend.cancelRunningWork();
+    }
     return status;
   });
   registerHandle('assets:delete-model', async (_event, modelId: string) => whisperAssets.deleteModel(modelId));

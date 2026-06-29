@@ -52,6 +52,7 @@ flowchart LR
 
   subgraph Main["Electron Main"]
     Ipc["IPC handlers"]
+    BatchQueue["BatchJobQueue"]
     Jobs["JobManager"]
     AsrRegistry["ASR registry/adapters"]
     TranslationRegistry["Translation registry/factories"]
@@ -75,7 +76,9 @@ flowchart LR
   ViewModels --> Gateway
   Gateway --> Bridge
   Bridge --> Ipc
+  Ipc --> BatchQueue
   Ipc --> Jobs
+  BatchQueue --> Jobs
   Ipc --> Settings
   Ipc --> Assets
   Jobs --> AsrRegistry
@@ -136,13 +139,23 @@ Electron Main 是桌面能力聚合层，主要职责包括：
 - 创建应用窗口，加载开发 URL 或生产 renderer 文件。
 - 注册 IPC handler。
 - 管理文件选择、导出路径和覆盖确认。
+- 管理批量任务队列、队列快照、队列事件和单项错误隔离。
 - 管理设置和密钥存储。
+- 广播设置变更给所有存活窗口，为后续多窗口设置同步保留 Main 侧基础设施。
 - 初始化日志系统。
-- 转发 `jobs:event` 和 `assets:event` 给 Renderer。
+- 转发 `jobs:event`、`assets:event`、`batch:event` 和 `settings:event` 给相关 Renderer 窗口。
 - 组合 `JobManager`、`NativeBackendClient`、`NativeMediaService`、`NativeSubtitleService`、`WhisperAssetManager`、`FfmpegAssetManager`、`FasterWhisperService` 等服务实例。
 - 通过 provider registry/adapter 组合 ASR 与 translation 扩展点。
 
-### 3.4 共享领域层
+### 3.4 批量队列边界
+
+批量处理由 Electron Main 的 `BatchJobQueue` 编排。队列层只管理多个文件的入队、启动、取消、队列快照和错误隔离；单文件媒体探测、音频抽取、ASR、翻译仍复用 `JobManager`。这样可以保持 provider adapter 和 native 能力边界不变。
+
+当前队列按串行方式执行。原因是 native cancel 边界仍是 `job.cancel` / `cancelRunningWork` 的全局本地工作取消语义；在该边界细化前，串行队列可以避免一个文件的取消误伤其他正在执行的 native 任务。
+
+批量队列不新增 C++ native protocol 命令。它复用现有 `runtime.health`、`media.probe`、`audio.extract`、`asr.transcribe`、`srt.parse`、`srt.serialize` 和 `job.cancel`。
+
+### 3.5 共享领域层
 
 主要目录：`apps/desktop/src/shared`
 
@@ -300,6 +313,41 @@ ASR provider 与 runtime variant 是两层决策：
 - SRT 导出优先走 native `srt.serialize`。
 - ASS 导出继续使用共享 `serializeAss`。
 
+### 5.4 批量处理流程
+
+核心编排文件：
+
+- `apps/desktop/src/main/services/batchJobQueue.ts`
+- `apps/desktop/src/main/services/jobManager.ts`
+
+```mermaid
+sequenceDiagram
+  participant R as Renderer or future batch UI
+  participant M as Electron Main IPC
+  participant B as BatchJobQueue
+  participant J as JobManager
+  participant N as Native services/backend
+
+  R->>M: batch:add-jobs(mediaPaths, settings snapshot)
+  M->>B: addJobs(request)
+  R->>M: batch:start
+  M->>B: start()
+  loop each queued file
+    B->>J: create(single-file request)
+    B->>J: start(jobId)
+    J->>N: media.probe / audio.extract / asr.transcribe
+    J-->>B: JobEvent snapshots and progress
+    alt autoTranslate enabled
+      B->>J: translate(jobId)
+      J-->>B: JobEvent snapshots and progress
+    end
+    B-->>M: BatchQueueEvent item/snapshot/error
+    M-->>R: batch:event
+  end
+```
+
+单项失败会标记为 `failed` 并继续处理后续 queued item；取消队列会取消当前 active job，并把尚未开始的 queued item 标记为 `cancelled`。
+
 ## 6. 设置、密钥与资产管理
 
 ### 6.1 设置
@@ -361,4 +409,5 @@ Electron 打包入口：
 - `JobManager` 负责工作流编排，不重新吸收 provider adapter 的实现细节。
 - Native backend 只执行本地工具和协议命令，不做下载、信任策略、provider secret 或云端 HTTP。
 - 长任务通过 `JobSnapshot` 和 `JobEvent` 推进，Renderer 被动订阅状态变化。
+- 批量任务通过 Main 侧 `BatchQueueSnapshot` 和 `BatchQueueEvent` 推进，单文件执行继续复用 `JobManager`。
 - Native protocol 保持稳定，新增命令需要单独演进与文档更新。

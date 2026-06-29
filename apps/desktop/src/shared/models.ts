@@ -267,6 +267,55 @@ export type JobEvent =
   | { type: 'progress'; jobId: string; stage: JobStage; progress: number; message?: string }
   | { type: 'error'; jobId: string; code: string; message: string; retryable: boolean };
 
+export type BatchJobItemStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type CreateBatchJobsRequest = Omit<CreateJobRequest, 'mediaPath'> & {
+  mediaPaths: string[];
+  autoTranslate?: boolean;
+};
+
+export type BatchJobItemSnapshot = {
+  id: string;
+  jobId?: string;
+  mediaPath: string;
+  fileName: string;
+  status: BatchJobItemStatus;
+  step: WorkflowStep;
+  stage?: JobStage;
+  progress: number;
+  autoTranslate: boolean;
+  message?: string;
+  error?: {
+    code: string;
+    message: string;
+    retryable: boolean;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BatchQueueStatus = 'idle' | 'running' | 'completed' | 'cancelled';
+
+export type BatchQueueSnapshot = {
+  id: string;
+  status: BatchQueueStatus;
+  items: BatchJobItemSnapshot[];
+  currentItemId?: string;
+  totalCount: number;
+  completedCount: number;
+  failedCount: number;
+  cancelledCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BatchQueueEvent =
+  | { type: 'snapshot'; queue: BatchQueueSnapshot }
+  | { type: 'item'; queueId: string; item: BatchJobItemSnapshot }
+  | { type: 'error'; queueId: string; itemId: string; code: string; message: string; retryable: boolean };
+
+export type SettingsEvent = { type: 'changed'; settings: AppSettingsPublic };
+
 export type AssetEvent =
   | { type: 'download-start'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string }
   | { type: 'download-progress'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string; receivedBytes?: number; totalBytes?: number }

@@ -924,6 +924,12 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
     setActiveDownload(undefined);
   }
 
+  async function refreshSettings(): Promise<void> {
+    const nextSettings = await translateTerGateway.getSettings();
+    setSettings(nextSettings);
+    await i18n.changeLanguage(nextSettings.uiLanguage);
+  }
+
   return {
     settings,
     models,
@@ -981,7 +987,8 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
     swapLanguages,
     saveProviderSecret,
     updateProviderSecret,
-    jumpToSettingsTarget
+    jumpToSettingsTarget,
+    refreshSettings
   };
 }
 

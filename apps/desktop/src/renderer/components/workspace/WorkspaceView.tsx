@@ -60,6 +60,7 @@ type WorkspaceViewProps = {
   canExportBilingual?: boolean;
   exportingVariant?: ExportVariant;
   onExportSrt?: (variant: ExportVariant) => void;
+  batchRunning?: boolean;
 };
 
 export function WorkspaceView(props: WorkspaceViewProps): JSX.Element {
@@ -77,15 +78,30 @@ export function WorkspaceView(props: WorkspaceViewProps): JSX.Element {
               labels={{ translated: props.t('translated'), source: props.t('original'), bilingual: props.t('bilingual') }}
               exportingVariant={props.exportingVariant}
               disabled={{
-                translated: !props.canExportTranslated,
-                source: !props.canExportSource,
-                bilingual: !props.canExportBilingual
+                translated: !props.canExportTranslated || Boolean(props.batchRunning),
+                source: !props.canExportSource || Boolean(props.batchRunning),
+                bilingual: !props.canExportBilingual || Boolean(props.batchRunning)
               }}
               onExport={props.onExportSrt}
             />
           )}
         </div>
       </header>
+
+      {props.batchRunning && (
+        <div style={{
+          margin: '0 24px 16px 24px',
+          padding: '12px 16px',
+          borderRadius: '6px',
+          backgroundColor: 'var(--tt-color-surface-hover)',
+          border: '1px solid var(--tt-color-border)',
+          color: 'var(--tt-color-text-primary)',
+          fontSize: '14px',
+          lineHeight: '1.5'
+        }}>
+          ⚠️ {props.t('backendBusyBatchRunning')}
+        </div>
+      )}
 
       <div className="workspaceContent" style={{ display: 'flex', flexDirection: 'column', gap: '32px', flexGrow: 1, minHeight: 0, overflowY: 'auto' }}>
         <div className="workspaceWizard">
@@ -96,7 +112,7 @@ export function WorkspaceView(props: WorkspaceViewProps): JSX.Element {
               <p>{props.selectedMediaPath || props.t('placeholderPath')}</p>
               <button 
                 className="modernBtn secondaryBtn"
-                disabled={Boolean(props.runningAction) || props.jobIsRunning}
+                disabled={Boolean(props.runningAction) || props.jobIsRunning || props.batchRunning}
                 onClick={props.onPickMedia}
                 type="button"
               >
@@ -113,7 +129,7 @@ export function WorkspaceView(props: WorkspaceViewProps): JSX.Element {
               <p>{providerLabel(props.asrProviderId, props.t)} - {props.workspaceRuntimeDetail}</p>
               <button 
                 className={`modernBtn ${props.hasRecognizedSubtitles ? 'secondaryBtn' : ''}`}
-                disabled={Boolean(props.runningAction) || !props.mediaPath.trim()}
+                disabled={Boolean(props.runningAction) || !props.mediaPath.trim() || props.batchRunning || props.jobIsRunning}
                 onClick={props.onCreateAndStart}
                 type="button"
               >
@@ -130,7 +146,7 @@ export function WorkspaceView(props: WorkspaceViewProps): JSX.Element {
               <p>{`${props.sourceLabel} -> ${props.targetLabel}`}</p>
               <button 
                 className={`modernBtn ${props.hasRecognizedSubtitles && !props.translationComplete ? '' : 'secondaryBtn'}`}
-                disabled={Boolean(props.runningAction) || !props.job?.subtitleDocument}
+                disabled={Boolean(props.runningAction) || !props.job?.subtitleDocument || props.batchRunning || props.jobIsRunning}
                 onClick={props.onTranslateJob}
                 type="button"
               >
