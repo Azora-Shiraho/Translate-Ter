@@ -98,53 +98,55 @@ export function SettingsApp(): JSX.Element {
   }
 
   return (
-    <div className="appContainer">
-      <aside className="appSidebar" style={{ width: '240px', minWidth: '240px' }}>
-        <div className="sidebarBrand">
-          <Settings size={24} className="brandIcon" />
-          <h2>{t('settings')}</h2>
-        </div>
-        
-        <nav className="sidebarNav" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '16px' }}>
-          <button 
-            className={`navItem ${activeTab === 'general' ? 'active' : ''}`} 
-            onClick={() => setActiveTab('general')} 
-            type="button"
-            style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 16px', border: 'none', background: activeTab === 'general' ? 'var(--tt-color-surface-hover)' : 'transparent', borderRadius: '6px', cursor: 'pointer', color: 'var(--tt-color-text-primary)' }}
-          >
-            <Settings size={18} />
-            {t('generalControls')}
-          </button>
-          <button 
-            className={`navItem ${activeTab === 'asr' ? 'active' : ''}`} 
-            onClick={() => setActiveTab('asr')} 
-            type="button"
-            style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 16px', border: 'none', background: activeTab === 'asr' ? 'var(--tt-color-surface-hover)' : 'transparent', borderRadius: '6px', cursor: 'pointer', color: 'var(--tt-color-text-primary)' }}
-          >
-            <MonitorCog size={18} />
-            {t('asr')}
-          </button>
-          <button 
-            className={`navItem ${activeTab === 'translation' ? 'active' : ''}`} 
-            onClick={() => setActiveTab('translation')} 
-            type="button"
-            style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 16px', border: 'none', background: activeTab === 'translation' ? 'var(--tt-color-surface-hover)' : 'transparent', borderRadius: '6px', cursor: 'pointer', color: 'var(--tt-color-text-primary)' }}
-          >
-            <Languages size={18} />
-            {t('translate')}
-          </button>
-        </nav>
-      </aside>
+    <>
+      <div className="appContainer">
+        <aside className="appSidebar" style={{ width: '240px', minWidth: '240px' }}>
+          <div className="sidebarBrand">
+            <Settings size={24} className="brandIcon" />
+            <h2>{t('settings')}</h2>
+          </div>
+          
+          <nav className="sidebarNav" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '16px' }}>
+            <button 
+              className={`navItem ${activeTab === 'general' ? 'active' : ''}`} 
+              onClick={() => setActiveTab('general')} 
+              type="button"
+              style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 16px', border: 'none', background: activeTab === 'general' ? 'var(--tt-color-surface-hover)' : 'transparent', borderRadius: '6px', cursor: 'pointer', color: 'var(--tt-color-text-primary)' }}
+            >
+              <Settings size={18} />
+              {t('generalControls')}
+            </button>
+            <button 
+              className={`navItem ${activeTab === 'asr' ? 'active' : ''}`} 
+              onClick={() => setActiveTab('asr')} 
+              type="button"
+              style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 16px', border: 'none', background: activeTab === 'asr' ? 'var(--tt-color-surface-hover)' : 'transparent', borderRadius: '6px', cursor: 'pointer', color: 'var(--tt-color-text-primary)' }}
+            >
+              <MonitorCog size={18} />
+              {t('asr')}
+            </button>
+            <button 
+              className={`navItem ${activeTab === 'translation' ? 'active' : ''}`} 
+              onClick={() => setActiveTab('translation')} 
+              type="button"
+              style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 16px', border: 'none', background: activeTab === 'translation' ? 'var(--tt-color-surface-hover)' : 'transparent', borderRadius: '6px', cursor: 'pointer', color: 'var(--tt-color-text-primary)' }}
+            >
+              <Languages size={18} />
+              {t('translate')}
+            </button>
+          </nav>
+        </aside>
 
-      <main className="appMain">
-        <SettingsView 
-          t={t} 
-          settingsVm={settingsVm} 
-          statusVm={statusVm} 
-          activeTab={activeTab} 
-        />
-        <ToastStack toasts={toasts} copyTitle={t('copyErrorToast')} onCopyError={(toast) => void navigator.clipboard.writeText(toast.message)} />
-      </main>
-    </div>
+        <main className="appMain">
+          <SettingsView 
+            t={t} 
+            settingsVm={settingsVm} 
+            statusVm={statusVm} 
+            activeTab={activeTab} 
+          />
+        </main>
+      </div>
+      <ToastStack toasts={toasts} copyTitle={t('copyErrorToast')} onCopyError={(toast) => void navigator.clipboard.writeText(toast.message)} />
+    </>
   );
 }

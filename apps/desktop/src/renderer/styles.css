@@ -27,19 +27,19 @@ body,
 
 :root,
 :root[data-theme='dark'] {
-  --tt-surface-app: #13161d;
-  --tt-surface-chrome: rgba(19, 22, 29, 0.86);
-  --tt-surface-panel: #1b1f28;
-  --tt-surface-panel-muted: #222733;
-  --tt-surface-panel-soft: #262c38;
-  --tt-surface-active: rgba(77, 163, 255, 0.14);
-  --tt-surface-elevated: #202532;
-  --tt-text-strong: #f5f7fb;
-  --tt-text-body: #d5dae4;
-  --tt-text-muted: #99a4b4;
-  --tt-border-soft: rgba(255, 255, 255, 0.08);
-  --tt-border-strong: rgba(255, 255, 255, 0.18);
-  --tt-track: rgba(255, 255, 255, 0.1);
+  --tt-surface-app: #09090b;
+  --tt-surface-chrome: rgba(9, 9, 11, 0.86);
+  --tt-surface-panel: #141418;
+  --tt-surface-panel-muted: #1c1c22;
+  --tt-surface-panel-soft: #27272f;
+  --tt-surface-active: rgba(255, 255, 255, 0.08);
+  --tt-surface-elevated: #202028;
+  --tt-text-strong: #ffffff;
+  --tt-text-body: #d4d4d8;
+  --tt-text-muted: #a1a1aa;
+  --tt-border-soft: rgba(255, 255, 255, 0.06);
+  --tt-border-strong: rgba(255, 255, 255, 0.14);
+  --tt-track: rgba(255, 255, 255, 0.08);
 }
 
 :root[data-theme='light'] {
@@ -2211,7 +2211,7 @@ input[type='checkbox'] {
   top: 24px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 40;
+  z-index: 9999;
   display: flex;
   width: min(420px, calc(100vw - 36px));
   flex-direction: column;
@@ -2775,4 +2775,218 @@ input[type='checkbox'] {
     grid-column: 1 / -1;
     width: 100%;
   }
+/* Modern Layouts for Settings and Batch Queue */
+.modern-settings-container {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+}
+
+.modern-settings-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.modern-settings-header h3 {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  color: var(--tt-text-strong);
+  margin: 0;
+}
+
+.modern-settings-header p {
+  font-size: 14px;
+  color: var(--tt-text-muted);
+  margin: 0;
+}
+
+.modern-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modern-settings-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--tt-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modern-settings-card {
+  background: var(--tt-surface-panel);
+  border: 1px solid var(--tt-border-soft);
+  border-radius: var(--tt-radius-panel);
+  overflow: hidden;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+}
+
+.modern-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--tt-border-soft);
+  gap: 24px;
+}
+
+.modern-settings-row:last-child {
+  border-bottom: none;
+}
+
+.modern-settings-row-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modern-settings-row-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--tt-text-strong);
+}
+
+.modern-settings-row-desc {
+  font-size: 13px;
+  color: var(--tt-text-muted);
+  line-height: 1.5;
+}
+
+.modern-settings-row-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+/* Batch Queue Modern Redesign */
+.modern-batch-dashboard {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.modern-batch-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--tt-border-soft);
+}
+
+.modern-batch-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.modern-batch-stat-card {
+  background: var(--tt-surface-panel-soft);
+  border-radius: var(--tt-radius-card);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid transparent;
+}
+
+.modern-batch-stat-card.active {
+  background: var(--tt-surface-active);
+  border-color: var(--tt-accent);
+}
+
+.modern-batch-stat-value {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--tt-text-strong);
+  line-height: 1;
+}
+
+.modern-batch-stat-label {
+  font-size: 13px;
+  color: var(--tt-text-muted);
+}
+
+.modern-batch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modern-batch-item {
+  background: var(--tt-surface-panel);
+  border: 1px solid var(--tt-border-soft);
+  border-radius: var(--tt-radius-card);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.modern-batch-item:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--tt-shadow-soft);
+}
+
+.modern-batch-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modern-batch-item-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--tt-text-strong);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.modern-progress-bar-container {
+  height: 6px;
+  background: var(--tt-track);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+
+.modern-progress-bar-fill {
+  height: 100%;
+  background: var(--tt-accent);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.modern-progress-bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  animation: shine 1.5s infinite;
+}
+
+@keyframes shine {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
