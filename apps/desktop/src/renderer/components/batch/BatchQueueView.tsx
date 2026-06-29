@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, Play, Plus, XCircle, AlertCircle, CheckCircle2, Clock, Gauge } from 'lucide-react';
+import { Layers, Play, Plus, XCircle, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { useBatchViewModel } from '../../viewModels/useBatchViewModel';
 
@@ -116,15 +116,6 @@ export function BatchQueueView({ batchVm, workspaceRunning }: BatchQueueViewProp
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <div className="rainbow-progress-bar-container">
                           <div className="rainbow-progress-bar-fill" style={{ width: `${Math.max(2, item.progress)}%` }} />
-                        </div>
-                        <div className="modern-batch-item-meta">
-                          <span className="modern-batch-item-speed">
-                            <Gauge size={14} />
-                            {item.progress > 0 ? `${(item.progress * 0.08).toFixed(1)}x speed` : 'Preparing...'}
-                          </span>
-                          <span style={{ marginLeft: 'auto' }}>
-                            {item.progress > 0 ? `ETA: ${Math.ceil((100 - item.progress) * 0.4)}s` : 'estimating...'}
-                          </span>
                         </div>
                       </div>
                     )}
