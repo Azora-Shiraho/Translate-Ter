@@ -45,6 +45,7 @@ import { WhisperAssetManager } from './services/whisperAssets';
 import { mergeFasterWhisperRuntimeRequestWithSettings } from './services/fasterWhisperRuntimeOptions';
 import { mergeWhisperRuntimeRequestWithSettings } from './services/whisperRuntimeRequestMerge';
 import {
+  avoidSubtitleFileOverwrite,
   exportFileFormatMeta,
   planSubtitleExportPath,
   resolveSubtitleFileFormat
@@ -233,10 +234,11 @@ async function exportCompletedBatchJob(job: JobSnapshot, item: BatchJobItemSnaps
     interactive: false,
     targetLanguage: item.autoTranslate ? job.targetLanguage : undefined
   });
+  const exportPath = avoidSubtitleFileOverwrite(plan.defaultPath, existsSync);
 
   await exportSubtitleFile({
     document: job.subtitleDocument,
-    path: plan.defaultPath,
+    path: exportPath,
     variant,
     bilingualOrder: settings.exportBilingualOrder
   });

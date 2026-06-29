@@ -88,3 +88,24 @@ export function exportFileFormatMeta(format: SubtitleFileFormat): {
     ? { extension: 'ass', filterName: 'Advanced SubStation Alpha' }
     : { extension: 'srt', filterName: 'SubRip Subtitle' };
 }
+
+export function avoidSubtitleFileOverwrite(
+  path: string,
+  fileExists: (candidatePath: string) => boolean
+): string {
+  if (!fileExists(path)) {
+    return path;
+  }
+
+  const extension = extname(path);
+  const directory = dirname(path);
+  const name = basename(path, extension);
+  let suffix = 2;
+  while (true) {
+    const candidate = join(directory, `${name}-${suffix}${extension}`);
+    if (!fileExists(candidate)) {
+      return candidate;
+    }
+    suffix += 1;
+  }
+}
