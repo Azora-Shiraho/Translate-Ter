@@ -38,7 +38,8 @@ function createSettingsValue(): AppSettingsPublic {
     exportDestinationMode: 'source-directory',
     exportDirectory: '',
     exportBilingualOrder: 'source-first',
-    exportFileFormat: 'srt'
+    exportFileFormat: 'srt',
+    exportBatchWithLanguageSuffix: false
   };
 }
 

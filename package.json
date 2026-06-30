@@ -1,7 +1,8 @@
 {
   "name": "translate-ter",
-  "version": "2.2.0-beta.1",
+  "version": "2.2.0-beta.4",
   "description": "Local-first desktop workflow for transcription, subtitle editing, and translation.",
+  "license": "MIT",
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
@@ -14,8 +15,7 @@
     "test:watch": "vitest",
     "native:deps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ensure-webview2.ps1",
     "native:configure": "node scripts/build-native.mjs --configure-only",
-    "native:build": "node scripts/build-native.mjs",
-    "native:package": "node scripts/package-native.mjs"
+    "native:build": "node scripts/build-native.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",

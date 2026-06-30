@@ -27,19 +27,19 @@ body,
 
 :root,
 :root[data-theme='dark'] {
-  --tt-surface-app: #13161d;
-  --tt-surface-chrome: rgba(19, 22, 29, 0.86);
-  --tt-surface-panel: #1b1f28;
-  --tt-surface-panel-muted: #222733;
-  --tt-surface-panel-soft: #262c38;
-  --tt-surface-active: rgba(77, 163, 255, 0.14);
-  --tt-surface-elevated: #202532;
-  --tt-text-strong: #f5f7fb;
-  --tt-text-body: #d5dae4;
-  --tt-text-muted: #99a4b4;
-  --tt-border-soft: rgba(255, 255, 255, 0.08);
-  --tt-border-strong: rgba(255, 255, 255, 0.18);
-  --tt-track: rgba(255, 255, 255, 0.1);
+  --tt-surface-app: #09090b;
+  --tt-surface-chrome: rgba(9, 9, 11, 0.86);
+  --tt-surface-panel: #141418;
+  --tt-surface-panel-muted: #1c1c22;
+  --tt-surface-panel-soft: #27272f;
+  --tt-surface-active: rgba(255, 255, 255, 0.08);
+  --tt-surface-elevated: #202028;
+  --tt-text-strong: #ffffff;
+  --tt-text-body: #d4d4d8;
+  --tt-text-muted: #a1a1aa;
+  --tt-border-soft: rgba(255, 255, 255, 0.06);
+  --tt-border-strong: rgba(255, 255, 255, 0.14);
+  --tt-track: rgba(255, 255, 255, 0.08);
 }
 
 :root[data-theme='light'] {
@@ -1265,6 +1265,10 @@ h3 {
   color: var(--tt-status-error);
 }
 
+.settingsBadge.tone-muted {
+  color: var(--tt-text-muted);
+}
+
 .settingsSummaryGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1341,7 +1345,8 @@ h3 {
   box-shadow: 0 22px 42px rgba(3, 8, 20, 0.28);
 }
 
-.settingsSummaryCard.interactive:hover .settingsOverviewIcon {
+.settingsSummaryCard.interactive:hover .settingsOverviewIcon,
+.settingsSummaryCard.interactive:hover .settingsFactIcon {
   background: rgba(77, 163, 255, 0.16);
   color: #8bc6ff;
 }
@@ -1357,6 +1362,26 @@ h3 {
 .settingsOverviewCard,
 .settingsFactCard {
   width: 100%;
+  align-content: start;
+}
+
+.settingsOverviewCard > div:last-child,
+.settingsFactCard > div:last-child {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settingsOverviewCard span,
+.settingsFactCard span {
+  overflow: hidden;
+  color: var(--tt-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .settingsOverviewTop {
@@ -1375,6 +1400,16 @@ h3 {
   background: rgba(255, 255, 255, 0.08);
   color: var(--tt-accent);
   transition: background 180ms ease, color 180ms ease;
+}
+
+.settingsFactIcon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--tt-text-muted);
 }
 
 .settingsOverviewCard strong {
@@ -1404,6 +1439,13 @@ h3 {
   white-space: normal;
   font-size: 18px;
   line-height: 1.45;
+}
+
+.settingsFactCard small {
+  overflow-wrap: anywhere;
+  color: var(--tt-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .settingsFactCard p {
@@ -1687,7 +1729,7 @@ select {
 
 .textFieldActionButton:hover {
   background: rgba(77, 163, 255, 0.08);
-  color: var(--tt-text-primary);
+  color: var(--tt-text-strong);
 }
 
 input[type='checkbox'] {
@@ -1930,6 +1972,10 @@ input[type='checkbox'] {
   background: var(--tt-status-error);
 }
 
+.signal.muted {
+  background: var(--tt-border-strong);
+}
+
 .segmented {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2024,6 +2070,7 @@ input[type='checkbox'] {
 
 .systemStrip {
   justify-content: space-between;
+  min-width: 0;
   border-top: 1px solid var(--tt-border-soft);
   border-bottom: 0;
   color: var(--tt-text-muted);
@@ -2075,6 +2122,7 @@ input[type='checkbox'] {
   grid-template-columns: auto minmax(160px, 1fr) minmax(120px, 220px);
   align-items: center;
   gap: 10px;
+  flex: 1 1 420px;
   min-width: 0;
   max-width: min(760px, 100%);
   min-height: 34px;
@@ -2108,6 +2156,13 @@ input[type='checkbox'] {
   display: grid;
   min-width: 0;
   gap: 1px;
+}
+
+.systemActions {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .systemProgressCopy strong,
@@ -2153,49 +2208,55 @@ input[type='checkbox'] {
 
 .toastStack {
   position: fixed;
-  left: 18px;
-  bottom: 50px;
-  z-index: 40;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
   display: flex;
   width: min(420px, calc(100vw - 36px));
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   pointer-events: none;
 }
 
 .toastCard {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
+  gap: 12px;
+  align-items: center;
   min-height: 48px;
-  border: 1px solid rgba(24, 32, 43, 0.12);
-  border-radius: 8px;
-  padding: 12px 14px;
-  color: #1d2430;
-  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--tt-border-soft);
+  border-radius: 16px;
+  padding: 12px 16px;
+  color: var(--tt-text-strong);
+  box-shadow: var(--tt-shadow-float);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   animation: toastIn 180ms ease-out both;
   pointer-events: auto;
   text-align: left;
 }
 
 .toastCard.neutral {
-  background: #ffffff;
+  background: var(--tt-surface-chrome);
 }
 
 .toastCard.warning {
-  background: #fff4cc;
+  background: rgba(255, 244, 204, 0.9);
   border-color: rgba(154, 91, 0, 0.2);
+  color: #1d2430;
 }
 
 .toastCard.error {
-  background: #ffe2dd;
+  background: rgba(255, 226, 221, 0.9);
   border-color: rgba(180, 74, 59, 0.22);
+  color: #1d2430;
 }
 
 .toastCard.success {
-  background: #def8e8;
+  background: rgba(222, 248, 232, 0.9);
   border-color: rgba(22, 116, 72, 0.2);
+  color: #1d2430;
 }
 
 .toastCard.exiting {
@@ -2261,12 +2322,12 @@ input[type='checkbox'] {
 @keyframes toastIn {
   from {
     opacity: 0;
-    transform: translateX(-16px);
+    transform: translateY(-16px);
   }
 
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(0);
   }
 }
 
@@ -2498,6 +2559,26 @@ input[type='checkbox'] {
     gap: 8px;
   }
 
+  .rowStart {
+    grid-area: start;
+  }
+
+  .rowEnd {
+    grid-area: end;
+  }
+
+  .rowOriginal {
+    grid-area: original;
+  }
+
+  .rowTranslated {
+    grid-area: translated;
+  }
+
+  .rowStatus {
+    grid-area: status;
+  }
+
   .previewText {
     display: -webkit-box;
     overflow: hidden;
@@ -2609,6 +2690,11 @@ input[type='checkbox'] {
   .panelHeader p {
     white-space: normal;
   }
+
+  .panelHeaderMeta {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
 @media (max-height: 920px) {
@@ -2689,4 +2775,219 @@ input[type='checkbox'] {
     grid-column: 1 / -1;
     width: 100%;
   }
+}
+/* Modern Layouts for Settings and Batch Queue */
+.modern-settings-container {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 32px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+}
+
+.modern-settings-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.modern-settings-header h3 {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  color: var(--tt-text-strong);
+  margin: 0;
+}
+
+.modern-settings-header p {
+  font-size: 14px;
+  color: var(--tt-text-muted);
+  margin: 0;
+}
+
+.modern-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modern-settings-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--tt-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modern-settings-card {
+  background: var(--tt-surface-panel);
+  border: 1px solid var(--tt-border-soft);
+  border-radius: var(--tt-radius-panel);
+  overflow: hidden;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+}
+
+.modern-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--tt-border-soft);
+  gap: 24px;
+}
+
+.modern-settings-row:last-child {
+  border-bottom: none;
+}
+
+.modern-settings-row-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modern-settings-row-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--tt-text-strong);
+}
+
+.modern-settings-row-desc {
+  font-size: 13px;
+  color: var(--tt-text-muted);
+  line-height: 1.5;
+}
+
+.modern-settings-row-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+/* Batch Queue Modern Redesign */
+.modern-batch-dashboard {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.modern-batch-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--tt-border-soft);
+}
+
+.modern-batch-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.modern-batch-stat-card {
+  background: var(--tt-surface-panel-soft);
+  border-radius: var(--tt-radius-card);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid transparent;
+}
+
+.modern-batch-stat-card.active {
+  background: var(--tt-surface-active);
+  border-color: var(--tt-accent);
+}
+
+.modern-batch-stat-value {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--tt-text-strong);
+  line-height: 1;
+}
+
+.modern-batch-stat-label {
+  font-size: 13px;
+  color: var(--tt-text-muted);
+}
+
+.modern-batch-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modern-batch-item {
+  background: var(--tt-surface-panel);
+  border: 1px solid var(--tt-border-soft);
+  border-radius: var(--tt-radius-card);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.modern-batch-item:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--tt-shadow-soft);
+}
+
+.modern-batch-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modern-batch-item-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--tt-text-strong);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.modern-progress-bar-container {
+  height: 6px;
+  background: var(--tt-track);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+
+.modern-progress-bar-fill {
+  height: 100%;
+  background: var(--tt-accent);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.modern-progress-bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  animation: shine 1.5s infinite;
+}
+
+@keyframes shine {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }

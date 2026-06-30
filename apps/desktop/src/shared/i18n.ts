@@ -9,6 +9,20 @@ export const i18nResources = {
       export: 'Export',
       preview: 'Workspace',
       workspace: 'Workspace',
+      navWorkspace: 'Workspace',
+      navSettings: 'Settings',
+      batchProcessing: 'Batch Processing',
+      batchProcessingHint: 'Process multiple files at once',
+      batchQueueEmpty: 'No batch jobs currently queued',
+      addBatchJobs: 'Add Jobs',
+      startBatch: 'Start Batch',
+      cancelBatch: 'Cancel Batch',
+      batchSummaryTotal: 'Total',
+      batchSummaryCompleted: 'Completed',
+      batchSummaryFailed: 'Failed',
+      batchSummaryCancelled: 'Cancelled',
+      backendBusyWorkspaceRunning: 'A workspace job is currently running. Please wait for it to complete before running batch actions.',
+      backendBusyBatchRunning: 'A batch job is currently running. Please wait for it to complete before running workspace actions.',
       openSettings: 'Open settings',
       currentJob: 'Current job',
       softwareSettings: 'Software settings',
@@ -55,7 +69,12 @@ export const i18nResources = {
       exportSettings: 'Export settings',
       subtitleFormatSrt: 'SRT',
       subtitleFormatAss: 'ASS',
+      exportBatchWithLanguageSuffix: 'Batch export language suffix',
+      exportBatchWithLanguageSuffixDetail: 'When enabled, batch exported files will include the target language suffix (e.g. video_zh-CN.srt) to match the original video name.',
       chooseFolder: 'Choose folder',
+      exportDestinationMode: 'Export destination',
+      subtitleFormat: 'Subtitle format',
+      exportBilingualOrder: 'Bilingual layout',
       sourceLanguage: 'Source language',
       targetLanguage: 'Target language',
       asrProvider: 'Recognition method',
@@ -315,6 +334,14 @@ export const i18nResources = {
         'selected-directory': 'Selected folder',
         'ask-each-time': 'Ask each time'
       },
+      batchStatus: {
+        idle: 'Idle',
+        queued: 'Queued',
+        running: 'Running',
+        completed: 'Completed',
+        failed: 'Failed',
+        cancelled: 'Cancelled'
+      },
       stage: {
         idle: 'Idle',
         imported: 'Imported',
@@ -350,7 +377,9 @@ export const i18nResources = {
         'manifest-not-configured': 'Automatic download is unavailable',
         'download-required': 'Download required',
         none: 'Ready'
-      }
+      },
+      chars: 'chars',
+      selectSegmentToEdit: 'Select a segment on the left to edit.'
     }
   },
   'zh-CN': {
@@ -363,6 +392,20 @@ export const i18nResources = {
       export: '导出',
       preview: '工作区',
       workspace: '工作区',
+      navWorkspace: '工作区',
+      navSettings: '设置',
+      batchProcessing: '批量处理',
+      batchProcessingHint: '一次处理多个文件',
+      batchQueueEmpty: '当前没有排队的批量任务',
+      addBatchJobs: '添加任务',
+      startBatch: '开始处理',
+      cancelBatch: '取消处理',
+      batchSummaryTotal: '总数',
+      batchSummaryCompleted: '已完成',
+      batchSummaryFailed: '失败',
+      batchSummaryCancelled: '已取消',
+      backendBusyWorkspaceRunning: '工作区任务正在运行中，请等待其完成后再操作批量任务。',
+      backendBusyBatchRunning: '批量任务正在运行中，请等待其完成后再操作工作区。',
       openSettings: '打开设置',
       currentJob: '当前任务',
       softwareSettings: '软件设置',
@@ -409,7 +452,12 @@ export const i18nResources = {
       exportSettings: '导出设置',
       subtitleFormatSrt: 'SRT',
       subtitleFormatAss: 'ASS 样式字幕',
+      exportBatchWithLanguageSuffix: '批量导出包含语种后缀',
+      exportBatchWithLanguageSuffixDetail: '启用后，批量导出的字幕文件将包含目标语言的缩写后缀，从而与原视频同名区分（例如：video_zh-CN.srt）。',
       chooseFolder: '选择文件夹',
+      exportDestinationMode: '导出目标',
+      subtitleFormat: '字幕格式',
+      exportBilingualOrder: '双语字幕顺序',
       sourceLanguage: '源语言',
       targetLanguage: '目标语言',
       asrProvider: '识别方式',
@@ -668,6 +716,14 @@ export const i18nResources = {
         'selected-directory': '指定目录',
         'ask-each-time': '每次选择'
       },
+      batchStatus: {
+        idle: '空闲',
+        queued: '排队中',
+        running: '处理中',
+        completed: '已完成',
+        failed: '失败',
+        cancelled: '已取消'
+      },
       stage: {
         idle: '空闲',
         imported: '已导入',
@@ -703,7 +759,9 @@ export const i18nResources = {
         'manifest-not-configured': '暂不支持自动下载',
         'download-required': '需要下载',
         none: '就绪'
-      }
+      },
+      chars: '字符',
+      selectSegmentToEdit: '请在左侧选择要编辑的片段。'
     }
   }
 } as const;

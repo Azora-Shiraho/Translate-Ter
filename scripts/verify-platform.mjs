@@ -77,10 +77,6 @@ section('Recommended Commands');
 item('Core checks', 'npm test && npm run build && npm run native:build');
 item('Packaging boundary', 'npm run package:electron');
 item('Current helper', 'npm run verify:platform');
-item(
-  'Windows-only packaging',
-  process.platform === 'win32' ? 'npm run native:package' : 'Expected to skip with a Windows-only message'
-);
 
 section('Current Host Checks');
 if (!existsSync(backendPath)) {

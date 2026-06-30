@@ -25,7 +25,8 @@ export const translateTerGateway: TranslateTerApi = {
   getSettings: passThrough((api) => api.getSettings),
   saveSettings: passThrough((api) => api.saveSettings),
   desktop: {
-    selectMedia: passThrough((api) => api.desktop.selectMedia)
+    selectMedia: passThrough((api) => api.desktop.selectMedia),
+    selectMultipleMedia: passThrough((api) => api.desktop.selectMultipleMedia)
   },
   jobs: {
     create: passThrough((api) => api.jobs.create),
@@ -34,6 +35,13 @@ export const translateTerGateway: TranslateTerApi = {
     cancel: passThrough((api) => api.jobs.cancel),
     get: passThrough((api) => api.jobs.get),
     onEvent: passThrough((api) => api.jobs.onEvent)
+  },
+  batch: {
+    addJobs: passThrough((api) => api.batch.addJobs),
+    start: passThrough((api) => api.batch.start),
+    cancel: passThrough((api) => api.batch.cancel),
+    get: passThrough((api) => api.batch.get),
+    onEvent: passThrough((api) => api.batch.onEvent)
   },
   subtitles: {
     importSrt: passThrough((api) => api.subtitles.importSrt),
@@ -45,7 +53,11 @@ export const translateTerGateway: TranslateTerApi = {
     update: passThrough((api) => api.settings.update),
     getSecret: passThrough((api) => api.settings.getSecret),
     setSecret: passThrough((api) => api.settings.setSecret),
-    testProvider: passThrough((api) => api.settings.testProvider)
+    testProvider: passThrough((api) => api.settings.testProvider),
+    onEvent: passThrough((api) => api.settings.onEvent)
+  },
+  window: {
+    openSettings: passThrough((api) => api.window.openSettings)
   },
   assets: {
     listWhisperModels: passThrough((api) => api.assets.listWhisperModels),

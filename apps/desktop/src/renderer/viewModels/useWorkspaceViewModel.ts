@@ -67,36 +67,63 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
 
   const translateStage = useCallback((stage: JobStage) => t(stageLabel(stage)), [t]);
 
+  const workspaceJobIdRef = useRef<string>();
+  const workspaceInitiatedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    workspaceJobIdRef.current = job?.id;
+  }, [job?.id]);
+
   const handleJobEvent = useCallback(
     (event: JobEvent) => {
       feedback.writeUiLog('debug', 'jobs.event-received', summarizeJobEventForLog(event), 'renderer.jobs');
-      if (event.type === 'snapshot') setJob(event.job);
-      if (event.type === 'progress') feedback.setMessage(event.message ?? translateStage(event.stage));
-      if (event.type === 'error') feedback.pushStatus(event.message, 'error');
+      if (event.type === 'snapshot') {
+        const matchesJobId = workspaceJobIdRef.current && event.job.id === workspaceJobIdRef.current;
+        const matchesMediaPath = !workspaceJobIdRef.current && workspaceInitiatedRef.current && mediaPath && event.job.mediaPath === mediaPath;
+        if (matchesJobId || matchesMediaPath) {
+          workspaceJobIdRef.current = event.job.id;
+          workspaceInitiatedRef.current = false;
+          setJob(event.job);
+        }
+      } else {
+        if (workspaceJobIdRef.current && event.jobId === workspaceJobIdRef.current) {
+          if (event.type === 'progress') feedback.setMessage(event.message ?? translateStage(event.stage));
+          if (event.type === 'error') feedback.pushStatus(event.message, 'error');
+        }
+      }
     },
-    [feedback, translateStage]
+    [feedback, translateStage, mediaPath]
   );
 
   useJobEvents(handleJobEvent);
 
   async function pickMedia(): Promise<void> {
+    if (job && !['idle', 'completed', 'failed', 'cancelled'].includes(job.stage)) {
+      feedback.writeUiLog('debug', 'media.pick.blocked-active-job', { jobId: job.id, stage: job.stage }, 'renderer.workspace');
+      return;
+    }
     feedback.writeUiLog('info', 'media.pick.request', undefined, 'renderer.workspace');
     const selected = await translateTerGateway.selectVideo();
     if (selected) {
       feedback.writeUiLog('info', 'media.pick.success', { mediaPath: selected }, 'renderer.workspace');
       setMediaPath(selected);
+      setJob(undefined);
+      setSelectedSegmentId(undefined);
+      setWarningPanelOpen(false);
+      setSelectedWarningId(undefined);
       return;
     }
     feedback.writeUiLog('debug', 'media.pick.cancelled', undefined, 'renderer.workspace');
   }
 
   async function createAndStart(): Promise<void> {
-    if (!settings || !mediaPath.trim()) return;
+    const selectedMediaPath = mediaPath.trim() || job?.mediaPath.trim() || '';
+    if (!settings || !selectedMediaPath) return;
     feedback.writeUiLog(
       'info',
       'job.start-transcription',
       {
-        mediaPath: mediaPath.trim(),
+        mediaPath: selectedMediaPath,
         asrProviderId: settings.asrProviderId,
         whisperModelId: settings.whisperModelId,
         useCuda: effectiveLocalWhisperUseCuda
@@ -104,9 +131,11 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
       'renderer.workspace'
     );
     const token = beginAction('transcribe');
+    workspaceJobIdRef.current = undefined;
+    workspaceInitiatedRef.current = true;
     try {
       const nextJob = await translateTerGateway.startTranscription({
-        mediaPath: mediaPath.trim(),
+        mediaPath: selectedMediaPath,
         sourceLanguage: settings.sourceLanguage,
         targetLanguage: settings.targetLanguage,
         asrProviderId: settings.asrProviderId,
@@ -126,11 +155,13 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
         translationLinesPerRequest: settings.translationLinesPerRequest,
         translationBatchStride: settings.translationBatchStride
       });
+      workspaceJobIdRef.current = nextJob.id;
       if (isCurrentAction(token)) setJob(nextJob);
     } catch (error) {
+      workspaceInitiatedRef.current = false;
       if (isCurrentAction(token)) {
         feedback.pushStatus(
-          feedback.reportUiError('job.start-transcription-failed', error, { mediaPath: mediaPath.trim() }, 'renderer.workspace'),
+          feedback.reportUiError('job.start-transcription-failed', error, { mediaPath: selectedMediaPath }, 'renderer.workspace'),
           'error'
         );
       }
@@ -145,6 +176,7 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
     const token = beginAction('translate');
     try {
       const nextJob = await translateTerGateway.startTranslation(job.id);
+      workspaceJobIdRef.current = nextJob.id;
       if (isCurrentAction(token)) setJob(nextJob);
     } catch (error) {
       if (isCurrentAction(token)) {
@@ -190,7 +222,9 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
     invalidateActiveAction();
     clearActiveDownload();
     await translateTerGateway.jobs.cancel(job.id);
-    setJob(await translateTerGateway.jobs.get(job.id));
+    const nextJob = await translateTerGateway.jobs.get(job.id);
+    workspaceJobIdRef.current = nextJob.id;
+    setJob(nextJob);
     feedback.pushStatus(t('stopped'), 'warning');
   }
 

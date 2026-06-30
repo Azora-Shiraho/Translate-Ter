@@ -13,6 +13,13 @@ build/*
 *.tsbuildinfo
 .agent/
 
+# Local PR review/comment exports
+all_pr_comments.txt
+parsed_comments.txt
+pr_comments.json
+pr_inline_comments.json
+get_comments.cjs
+
 # Native build outputs
 backend/cpp/build/
 backend/cpp/out/
@@ -27,3 +34,4 @@ resources/binaries/
 Thumbs.db
 .idea/
 .vscode/
+*.bak

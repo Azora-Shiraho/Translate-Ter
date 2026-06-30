@@ -34,6 +34,11 @@ Known command types:
 - `srt.serialize`
 - `job.cancel`
 
+Batch queue operations are not native backend commands. Multi-file queues are
+owned by Electron main and reuse the single-file native commands above through
+`JobManager`. The C++ backend does not persist queue state, schedule multiple
+files, or receive provider secrets.
+
 ## Response
 
 ```json
@@ -277,5 +282,6 @@ The backend returns `DownloadRequired` or `MissingRuntime` when verified paths
 are absent. It does not fetch URLs from the manifest and does not execute
 unverified paths.
 
-`job.cancel` acknowledges cancellation for protocol wiring; long-running native
-task cancellation will be attached when ASR/media commands become persistent.
+`job.cancel` acknowledges cancellation for protocol wiring. Electron main treats
+native cancellation as a global local-work boundary today, so batch processing
+serializes native-backed work to avoid cancelling unrelated active files.

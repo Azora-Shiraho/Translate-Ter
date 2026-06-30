@@ -1,0 +1,64 @@
+title: Translate-Ter v2.2.0 Beta 3
+--
+## 更新内容
+
+- 升级到 `2.2.0-beta.3` 预发布版本。
+- 合入从 `master` 到 `develop` 的批量处理主线：新增多文件串行队列、批量任务状态追踪、取消语义、失败隔离和多窗口状态同步基础。
+- 完成批量任务前端体验：新增批量页、任务进度展示、设置窗口联动、批量运行期间的设置保护，以及主工作台与设置页的新版布局。
+- 新增批量自动导出能力：支持按全局导出设置自动输出 SRT/ASS、译文文件名追加目标语种后缀，并在重名时自动避让。
+- 完成 UI 大幅重绘：工作台双栏布局、步骤折叠区、时间线样式、设置页、批量页、Toast 层级与深色主题均已更新。
+- 修复批量队列中的若干边界问题：运行时变体归一化、取消期间队列过早空闲、导出完成后覆盖取消状态、批量导出覆盖已有字幕文件，以及伪速度/剩余时间展示。
+- 更新项目文档：README 与架构文档同步当前结构、UI 指南和 macOS Gatekeeper 说明，并移除已完成的架构更新草稿。
+- 发布流程新增 macOS Electron 产物，同时停止发布 Windows native unzip-and-run 包；Windows、macOS、Linux 均以 Electron 包作为主线发布形态。
+
+## 相关 PR
+
+- #17 UI: Frontend Redesign, Layout Fixes & Localization
+- #18 移除已完成的架构更新文档
+- #19 Issue 16：批量处理与多窗口同步集成
+- #20 批量队列后端基础
+- #21 批量工作流前端
+- #22 feat: 完全重画 UI；加入批量任务处理功能
+- #24 Issue 23：批量任务自动导出
+
+## 已上传产物
+
+- `Translate-Ter-v2.2.0-beta.3-windows-x64-electron.zip`
+- `Translate-Ter-v2.2.0-beta.3-macos-x64-electron.zip`
+- `Translate-Ter-v2.2.0-beta.3-macos-arm64-electron.zip`
+- `Translate-Ter-v2.2.0-beta.3-linux-x64-electron.tar.gz`
+
+不再提供 Windows native unzip-and-run 包；请使用 Windows Electron zip。
+
+## macOS Gatekeeper 说明
+
+当前 beta macOS 包尚未使用 Apple Developer ID 签名，也尚未通过 Apple notarization 公证。因此首次打开时，macOS Gatekeeper 可能会提示无法验证开发者。这是未签名/未公证 beta 产物的预期保护行为，不代表应用一定损坏。
+
+绕过方式：
+
+1. 打开 `系统设置`。
+2. 进入 `隐私与安全性`。
+3. 找到被拦截的 Translate-Ter 提示并选择 `仍要打开`。
+4. 在确认弹窗中选择 `打开`。
+
+也可以在 Finder 中按住 Control 点击应用，选择 `打开`，再确认 `打开`。请只对从本项目 GitHub Releases 页面下载的产物使用这些绕过方式。
+
+如果 macOS 提示应用“已损坏”，并且 `隐私与安全性` 中没有出现 `仍要打开` 按钮，下载后的 app 可能仍带有 quarantine 隔离属性。解压 zip 后，在终端执行以下命令；如果你把应用放在了其他位置，请对应修改路径：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Translate-Ter.app"
+```
+
+然后再从 Finder 打开应用。这个命令只会移除 app bundle 上的 Gatekeeper 隔离标记，不会给应用签名、公证，也不会修改应用代码。
+
+参考：https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac
+
+## 验证
+
+- `npm test`
+- `npm run build`
+- `npm run native:build`
+- `npm run smoke:native`
+- `npm run verify:platform`
+- `npm run package:electron`
+- release-assets 工作流会在 tag 触发后构建并上传 Linux x64、macOS x64 和 macOS arm64 Electron 产物。

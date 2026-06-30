@@ -39,7 +39,8 @@ const STATIC_DEFAULT_SETTINGS: Omit<AppSettingsPublic, 'localWhisperUseCuda' | '
   exportDestinationMode: 'source-directory',
   exportDirectory: '',
   exportBilingualOrder: 'source-first',
-  exportFileFormat: 'srt'
+  exportFileFormat: 'srt',
+  exportBatchWithLanguageSuffix: false
 };
 
 export class SettingsStore {

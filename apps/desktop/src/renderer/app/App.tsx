@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { FileVideo, Gauge, Settings, AlertCircle, RotateCcw } from 'lucide-react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
+import { FileVideo, Gauge, Settings, AlertCircle, RotateCcw, Layers } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { languageLabel } from '@shared/languages';
 import { translateTerGateway } from '../api/translateTerGateway';
@@ -10,8 +10,8 @@ import { useSettingsViewModel } from '../viewModels/useSettingsViewModel';
 import { useWorkspaceViewModel } from '../viewModels/useWorkspaceViewModel';
 import { useProviderStatusViewModel } from '../viewModels/useProviderStatusViewModel';
 import { WorkspaceView } from '../components/workspace/WorkspaceView';
-import { SettingsView } from '../components/settings/SettingsView';
-import { ExportActionGroup } from '../components/export/ExportActionGroup';
+import { BatchQueueView } from '../components/batch/BatchQueueView';
+import { useBatchViewModel } from '../viewModels/useBatchViewModel';
 import { ToastStack } from '../components/status/ToastStack';
 import { BottomBubble } from '../components/status/BottomBubble';
 
@@ -106,9 +106,24 @@ export function App(): JSX.Element {
     configuredAcceleration: settingsVm.configuredAcceleration,
     effectiveRuntimeVariantSelection: settingsVm.effectiveRuntimeVariantSelection,
     runtimeVariantSelections: settingsVm.runtimeVariantSelections,
-    cudaFlowRelevant: settingsVm.cudaFlowRelevant,
-    ignoreCudaMismatch: settingsVm.ignoreCudaMismatch
+    ignoreCudaMismatch: settingsVm.ignoreCudaMismatch,
+    cudaFlowRelevant: settingsVm.cudaFlowRelevant
   });
+
+  const batchVm = useBatchViewModel({
+    feedback,
+    settings: settingsVm.settings,
+    effectivePreferredRuntimeVariant: settingsVm.effectivePreferredRuntimeVariant
+  });
+
+  useEffect(() => {
+    const unsubscribe = translateTerGateway.settings.onEvent((event) => {
+      if (event.type === 'changed') {
+        settingsVm.refreshSettings();
+      }
+    });
+    return () => unsubscribe();
+  }, [settingsVm]);
 
   if (!settingsVm.settings) {
     return <div className="boot">Translate-Ter</div>;
@@ -122,14 +137,14 @@ export function App(): JSX.Element {
   const selectedWarning =
     workspaceVm.workflowWarnings.find((warning) => warning.id === workspaceVm.selectedWarningId) ??
     workspaceVm.workflowWarnings[0];
-  const currentStepIndex = steps.indexOf(workspaceVm.job?.step ?? 'import');
+  const currentStepIndex = Math.max(0, steps.indexOf(workspaceVm.job?.step ?? 'import'));
   const sourceLabel = languageLabel(settings.sourceLanguage, settings.uiLanguage);
   const targetLabel = languageLabel(settings.targetLanguage, settings.uiLanguage);
   const selectedMediaPath = workspaceVm.job?.mediaPath ?? workspaceVm.mediaPath.trim();
   const selectedMediaFileName =
     workspaceVm.job?.fileName ?? selectedMediaPath.split(/[\\/]/).filter(Boolean).at(-1) ?? t('chooseMedia');
   const jobTitle = selectedMediaFileName;
-  const completion = workspaceVm.job?.progress ?? 0;
+  const completion = Math.max(0, Math.min(100, workspaceVm.job?.progress ?? 0));
   const jobIsRunning = Boolean(
     workspaceVm.job && !['idle', 'completed', 'failed', 'cancelled'].includes(workspaceVm.job.stage)
   );
@@ -141,8 +156,9 @@ export function App(): JSX.Element {
     workspaceVm.runningAction === 'translate' || workspaceVm.job?.stage === 'translating';
   const runningStep = isTranscribing ? 'asr' : isTranslating ? 'translate' : undefined;
   const failedStep = workspaceVm.job?.stage === 'failed' ? workspaceVm.job.step : undefined;
+  const batchRunning = batchVm.queue.status === 'running';
   const appWorking =
-    workspaceVm.busy || Boolean(settingsVm.runtimeOperation) || Boolean(settingsVm.checkingProvider) || jobIsRunning;
+    workspaceVm.busy || Boolean(settingsVm.runtimeOperation) || Boolean(settingsVm.checkingProvider) || jobIsRunning || batchRunning;
   const hasRecognizedSubtitles = Boolean(workspaceVm.job?.subtitleDocument?.segments.length);
   const translationComplete = hasRecognizedSubtitles && translatedCount === segments.length && segments.length > 0;
   const canExportTranslated = translationComplete && !workspaceVm.busy;
@@ -174,7 +190,9 @@ export function App(): JSX.Element {
     ffmpegStatus: settingsVm.ffmpegStatus,
     nativeHealth: settingsVm.nativeHealth
   });
-  const canForceStop = Boolean(workspaceVm.job && !['completed', 'failed', 'cancelled'].includes(workspaceVm.job.stage));
+  const canForceStop = Boolean(
+    workspaceVm.job && !['idle', 'completed', 'failed', 'cancelled'].includes(workspaceVm.job.stage)
+  );
 
   async function copyToastMessage(toast: ToastMessage): Promise<void> {
     if (toast.tone !== 'error') return;
@@ -188,110 +206,129 @@ export function App(): JSX.Element {
   }
 
   return (
-    <div className={`appShell${appWorking ? ' isWorking' : ''}`}>
-      <header className="topChrome">
-        <div className="brand">
-          <FileVideo size={18} />
-          <div>
-            <strong>{t('appName')}</strong>
+    <>
+      <div className={`appContainer${appWorking ? ' isWorking' : ''}`}>
+        <aside className="appSidebar">
+          <div className="sidebarBrand">
+            <FileVideo size={24} className="brandIcon" />
+            <h2>{t('appName')}</h2>
           </div>
-        </div>
-        <div className="topChromeTabs">
-          <button className={activeView === 'workspace' ? 'chromeTab active' : 'chromeTab'} onClick={() => setActiveView('workspace')} type="button">
-            <Gauge size={15} />
-            {t('workspace')}
-          </button>
-          <button className={activeView === 'settings' ? 'chromeTab active' : 'chromeTab'} onClick={() => setActiveView('settings')} type="button">
-            <Settings size={15} />
-            {t('settings')}
-          </button>
-        </div>
-      </header>
-
-      {activeView === 'workspace' ? (
-        <WorkspaceView
-          t={t}
-          steps={steps}
-          statsCollapsed={statsCollapsed}
-          onToggleStatsCollapsed={() => setStatsCollapsed((current) => !current)}
-          workspaceRailMessage={workspaceRailMessage}
-          footerMessage={footerMessage}
-          runtimeState={statusVm.runtimeState}
-          currentStepIndex={currentStepIndex}
-          runningStep={runningStep}
-          failedStep={failedStep}
-          completion={completion}
-          job={workspaceVm.job}
-          jobTitle={jobTitle}
-          translatedCount={translatedCount}
-          warningCount={warningCount}
-          warningPanelOpen={workspaceVm.warningPanelOpen}
-          selectedWarning={selectedWarning}
-          workflowWarnings={workspaceVm.workflowWarnings}
-          translationState={statusVm.translationState}
-          translationProviderId={statusVm.translationProviderId}
-          workspaceRuntimeDetail={workspaceRuntimeDetail}
-          sourceLabel={sourceLabel}
-          targetLabel={targetLabel}
-          asrProviderId={statusVm.asrProviderId}
-          selectedMediaPath={selectedMediaPath}
-          mediaPath={workspaceVm.mediaPath}
-          hasRecognizedSubtitles={hasRecognizedSubtitles}
-          translationComplete={translationComplete}
-          runningAction={workspaceVm.runningAction}
-          jobIsRunning={jobIsRunning}
-          selectedSegment={selectedSegment}
-          onToggleWarnings={workspaceVm.toggleWarningPanel}
-          onSelectWarning={workspaceVm.setSelectedWarningId}
-          onPickMedia={() => void workspaceVm.pickMedia()}
-          onCreateAndStart={() => void workspaceVm.createAndStart()}
-          onTranslateJob={() => void workspaceVm.translateJob()}
-          onSelectSegment={workspaceVm.setSelectedSegmentId}
-          onUpdateSegment={(segment, patch) => void workspaceVm.updateSegment(segment, patch)}
-        />
-      ) : (
-        <SettingsView t={t} settingsVm={settingsVm} statusVm={statusVm} />
-      )}
-
-      <footer className="systemStrip">
-        <div className="systemProgress">
-          <span className={appWorking ? 'systemPulse active' : 'systemPulse'} />
-          <div className="systemProgressCopy">
-            <strong>{footerTitle}</strong>
-            <span title={footerMessage}>{footerMessage}</span>
-          </div>
-          <div className={`systemMiniTrack${settingsVm.activeDownload && downloadPercent === undefined ? ' indeterminate' : ''}`} aria-hidden="true">
-            <span style={{ width: `${footerProgress}%` }} />
-          </div>
-        </div>
-        <ExportActionGroup
-          title={t('export')}
-          labels={{ translated: t('translated'), source: t('original'), bilingual: t('bilingual') }}
-          exportingVariant={workspaceVm.exportingVariant}
-          disabled={{
-            translated: !canExportTranslated,
-            source: !canExportSource,
-            bilingual: !canExportBilingual
-          }}
-          onExport={(variant) => void workspaceVm.exportSrt(variant)}
-        />
-        <div className="systemActions">
-          {canForceStop && (
-            <button className="textButton" onClick={() => void workspaceVm.forceStop()} type="button">
-              <AlertCircle size={14} />
-              {t('forceStop')}
+          
+          <nav className="sidebarNav">
+            <button
+              className={`navItem${activeView === 'workspace' ? ' active' : ''}`}
+              onClick={() => setActiveView('workspace')}
+              title={t('navWorkspace')}
+              type="button"
+            >
+              <FileVideo size={18} />
+              <span>{t('navWorkspace')}</span>
             </button>
-          )}
-          {workspaceVm.job?.error && (
-            <button className="textButton" onClick={() => void workspaceVm.createAndStart()} type="button">
-              <RotateCcw size={14} />
-              {t('retry')}
+            <button
+              className={`navItem${activeView === 'batch' ? ' active' : ''}`}
+              onClick={() => setActiveView('batch')}
+              title={t('batchProcessing')}
+              type="button"
+            >
+              <Layers size={18} />
+              <span>{t('batchProcessing')}</span>
             </button>
+            <button
+              className="navItem"
+              onClick={() => translateTerGateway.window.openSettings()}
+              title={batchRunning ? t('backendBusyBatchRunning') : t('navSettings')}
+              type="button"
+              style={{ marginTop: 'auto' }}
+              disabled={batchRunning}
+            >
+              <Settings size={18} />
+              <span>{t('navSettings')}</span>
+            </button>
+          </nav>
+
+          <div className="sidebarFooter">
+            <div className="systemStatusBlock">
+              <span className={appWorking ? 'statusPulse active' : 'statusPulse'} />
+              <div className="statusText">
+                <strong>{footerTitle}</strong>
+                <span title={footerMessage}>{footerMessage}</span>
+              </div>
+            </div>
+            {(canForceStop || workspaceVm.job?.error) && (
+              <div className="sidebarActions">
+                {canForceStop && (
+                  <button onClick={() => void workspaceVm.forceStop()} type="button" disabled={batchRunning}>
+                    <AlertCircle size={14} />
+                    {t('forceStop')}
+                  </button>
+                )}
+                {workspaceVm.job?.error && (
+                  <button onClick={() => void workspaceVm.createAndStart()} type="button" disabled={batchRunning}>
+                    <RotateCcw size={14} />
+                    {t('retry')}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </aside>
+
+        <main className="appMain">
+          {activeView === 'workspace' && (
+            <WorkspaceView
+              t={t}
+              steps={steps}
+              statsCollapsed={statsCollapsed}
+              onToggleStatsCollapsed={() => setStatsCollapsed((current) => !current)}
+              workspaceRailMessage={workspaceRailMessage}
+              footerMessage={footerMessage}
+              runtimeState={statusVm.runtimeState}
+              currentStepIndex={currentStepIndex}
+              runningStep={runningStep}
+              failedStep={failedStep}
+              completion={completion}
+              job={workspaceVm.job}
+              jobTitle={jobTitle}
+              translatedCount={translatedCount}
+              warningCount={warningCount}
+              warningPanelOpen={workspaceVm.warningPanelOpen}
+              selectedWarning={selectedWarning}
+              workflowWarnings={workspaceVm.workflowWarnings}
+              translationState={statusVm.translationState}
+              translationProviderId={statusVm.translationProviderId}
+              workspaceRuntimeDetail={workspaceRuntimeDetail}
+              sourceLabel={sourceLabel}
+              targetLabel={targetLabel}
+              asrProviderId={statusVm.asrProviderId}
+              selectedMediaPath={selectedMediaPath}
+              mediaPath={workspaceVm.mediaPath}
+              hasRecognizedSubtitles={hasRecognizedSubtitles}
+              translationComplete={translationComplete}
+              runningAction={workspaceVm.runningAction}
+              jobIsRunning={jobIsRunning}
+              selectedSegment={selectedSegment}
+              onToggleWarnings={workspaceVm.toggleWarningPanel}
+              onSelectWarning={workspaceVm.setSelectedWarningId}
+              onPickMedia={() => void workspaceVm.pickMedia()}
+              onCreateAndStart={() => void workspaceVm.createAndStart()}
+              onTranslateJob={() => void workspaceVm.translateJob()}
+              onSelectSegment={workspaceVm.setSelectedSegmentId}
+              onUpdateSegment={(segment, patch) => void workspaceVm.updateSegment(segment, patch)}
+              canExportTranslated={canExportTranslated}
+              canExportSource={canExportSource}
+              canExportBilingual={canExportBilingual}
+              exportingVariant={workspaceVm.exportingVariant}
+              onExportSrt={(variant) => void workspaceVm.exportSrt(variant)}
+              batchRunning={batchRunning}
+            />
           )}
-        </div>
-      </footer>
+          {activeView === 'batch' && (
+            <BatchQueueView batchVm={batchVm} workspaceRunning={workspaceVm.busy || jobIsRunning} />
+          )}
+        </main>
+      </div>
       <ToastStack toasts={toasts} copyTitle={t('copyErrorToast')} onCopyError={(toast) => void copyToastMessage(toast)} />
       <BottomBubble message={copyBubble} />
-    </div>
+    </>
   );
 }

@@ -1,4 +1,4 @@
-export type AppView = 'workspace' | 'settings';
+export type AppView = 'workspace' | 'batch';
 
 export type RunningAction = 'transcribe' | 'translate' | 'export';
 

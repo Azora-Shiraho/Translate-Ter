@@ -1,0 +1,24 @@
+title: Translate-Ter v2.2.0 Beta 4
+--
+## 更新内容
+
+- 升级到 `2.2.0-beta.4` 预发布版本。
+- 修复桌面构建产物中的样式回退问题：`styles.css` 中缺失的媒体查询结束括号已补回，工作区与批量处理页的桌面布局会重新正确加载。
+- 本次为最小修复版本，不引入新的工作流或功能改动。
+
+## 已知状态
+
+- `v2.2.0-beta.3` 因桌面样式异常已标记为不可用，请不要继续下载或分发。
+- 请改用本次 `v2.2.0-beta.4` 预发布产物。
+
+## 已上传产物
+
+- `Translate-Ter-v2.2.0-beta.4-windows-x64-electron.zip`
+- `Translate-Ter-v2.2.0-beta.4-macos-x64-electron.zip`
+- `Translate-Ter-v2.2.0-beta.4-macos-arm64-electron.zip`
+- `Translate-Ter-v2.2.0-beta.4-linux-x64-electron.tar.gz`
+
+## 验证
+
+- `npm run build`
+- `npm run package:electron`
