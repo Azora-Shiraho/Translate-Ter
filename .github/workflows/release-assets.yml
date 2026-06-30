@@ -30,7 +30,7 @@ jobs:
             arch: x64
             asset: linux-x64-electron.tar.gz
           - name: macOS x64 release asset
-            os: macos-13
+            os: macos-15-intel
             platform: macos
             target: mac
             format: zip
