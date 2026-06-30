@@ -546,7 +546,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(5, 5, 6, 0.4);
+  background: var(--tt-surface-sidebar);
   backdrop-filter: blur(16px);
   z-index: 10;
 }
