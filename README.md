@@ -121,7 +121,7 @@ build\native\bin\translate-ter-backend.exe --health
 
 ### macOS Gatekeeper
 
-Beta macOS packages are currently unsigned and not notarized, so Gatekeeper may block the app with an "unidentified developer" warning. This is expected for community beta artifacts that are built by CI without an Apple Developer ID certificate and Apple notarization ticket.
+Current macOS packages are unsigned and not notarized, so Gatekeeper may block the app with an "unidentified developer" warning. This is expected for community release artifacts that are built by CI without an Apple Developer ID certificate and Apple notarization ticket.
 
 To open the app once, use Apple's documented override path:
 
@@ -283,7 +283,7 @@ build\native\bin\translate-ter-backend.exe --health
 
 ### macOS Gatekeeper
 
-当前 beta macOS 包尚未签名和公证，因此 Gatekeeper 可能会提示“无法验证开发者”并阻止直接打开。这是 CI 构建的社区 beta 产物缺少 Apple Developer ID 证书和 Apple notarization 票据时的预期现象。
+当前 macOS 发布包尚未签名和公证，因此 Gatekeeper 可能会提示“无法验证开发者”并阻止直接打开。这是 CI 构建的社区发布产物缺少 Apple Developer ID 证书和 Apple notarization 票据时的预期现象。
 
 单次允许打开可使用 Apple 官方说明的绕过路径：
 
