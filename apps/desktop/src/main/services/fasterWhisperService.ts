@@ -1646,7 +1646,7 @@ export function cudaRuntimeUserMessage(
     messageKey:
       hardwareDetected && !runtimeDetected
         ? 'runtimeMessage.fasterWhisperCudaRuntimeDownloadRequired'
-        : runtimeDetected
+        : hardwareDetected && runtimeDetected
           ? 'cudaDetected'
           : 'fasterWhisperWorkspaceCudaFallback',
     technicalMessage

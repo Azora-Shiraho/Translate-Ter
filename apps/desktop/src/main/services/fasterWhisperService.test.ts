@@ -47,6 +47,13 @@ describe('FasterWhisperService runtime status', () => {
     });
   });
 
+  it('does not report CUDA support when only runtime files are present', () => {
+    expect(cudaRuntimeUserMessage(false, true, 'CUDA files found without GPU hardware')).toEqual({
+      messageKey: 'fasterWhisperWorkspaceCudaFallback',
+      technicalMessage: 'CUDA files found without GPU hardware'
+    });
+  });
+
   it('upgrades to GPU only after a CUDA probe confirms a visible device', async () => {
     const service = new FasterWhisperService();
     const internal = service as any;
