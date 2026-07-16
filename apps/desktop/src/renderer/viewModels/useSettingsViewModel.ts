@@ -1006,18 +1006,23 @@ function modelActionLabel(action: WhisperModelStatus['actionRequired'] = 'none')
   return `runtimeAction.${action}`;
 }
 
-function assetEventLabel(event: AssetEvent, t: (key: string, options?: Record<string, unknown>) => string): string {
+export function assetEventLabel(event: AssetEvent, t: (key: string, options?: Record<string, unknown>) => string): string {
   switch (event.type) {
     case 'download-start':
-      return event.scope === 'ffmpeg' ? t('ffmpegDownloading') : t('runtimeDownloading');
+      return event.userMessage
+        ? resolveUserMessage(event, t)
+        : event.scope === 'ffmpeg' ? t('ffmpegDownloading') : t('runtimeDownloading');
     case 'download-progress':
+      if (event.userMessage) return resolveUserMessage(event, t);
       return event.receivedBytes
         ? t(event.scope === 'ffmpeg' ? 'ffmpegDownloadingBytes' : 'runtimeDownloadingBytes', {
             bytes: formatBytes(event.receivedBytes)
           })
         : t(event.scope === 'ffmpeg' ? 'ffmpegDownloading' : 'runtimeDownloading');
     case 'ready':
-      return event.scope === 'ffmpeg' ? t('ffmpegReady') : event.scope === 'model' ? t('modelReady') : t('runtimeReady');
+      return event.userMessage
+        ? resolveUserMessage(event, t)
+        : event.scope === 'ffmpeg' ? t('ffmpegReady') : event.scope === 'model' ? t('modelReady') : t('runtimeReady');
     case 'error':
       return resolveUserMessage(event, t, event.scope === 'ffmpeg' ? 'ffmpegError' : 'runtimeError');
     default:

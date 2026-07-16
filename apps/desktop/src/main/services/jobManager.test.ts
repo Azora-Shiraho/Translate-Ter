@@ -177,7 +177,10 @@ describe('JobManager', () => {
     const fasterWhisper = {
       cancel: vi.fn()
     };
-    const transcribe = vi.fn().mockResolvedValue(createDocument());
+    const transcribe = vi.fn().mockImplementation(async (request) => {
+      await request.reportProgress(78, 'GPU recognition stopped. Retrying with CPU.');
+      return createDocument();
+    });
     const asrRegistry = createAsrRegistry({ transcribe });
     const manager = new JobManager(
       settings as any,
@@ -188,6 +191,8 @@ describe('JobManager', () => {
       createTranslationRegistry([])
     );
     const job = manager.create(createRequest());
+    const events: Array<{ type: string; message?: string; userMessage?: unknown }> = [];
+    manager.on('job-event', (event) => events.push(event));
 
     await manager.start(job.id);
 
@@ -204,6 +209,9 @@ describe('JobManager', () => {
     });
     expect(manager.get(job.id).stage).toBe('completed');
     expect(manager.get(job.id).subtitleDocument?.segments[0]?.sourceText).toBe('hello');
+    expect(events.find((event) => event.message === 'GPU recognition stopped. Retrying with CPU.')).toMatchObject({
+      userMessage: undefined
+    });
   });
 
   it('preserves unclassified transcription failures without an error descriptor', async () => {

@@ -493,7 +493,7 @@ function completionMessageForAsr(job: JobSnapshot): string {
   return 'Recognition is complete.';
 }
 
-function progressUserMessage(stage: JobStage, message: string): UserMessageDescriptor {
+function progressUserMessage(stage: JobStage, message: string): UserMessageDescriptor | undefined {
   const translationProgress = /^Translating (\d+)\/(\d+) batches\.$/.exec(message);
   if (translationProgress) {
     return {
@@ -506,5 +506,14 @@ function progressUserMessage(stage: JobStage, message: string): UserMessageDescr
     };
   }
 
-  return { messageKey: `stage.${stage}`, technicalMessage: message };
+  const genericMessages: Partial<Record<JobStage, readonly string[]>> = {
+    'checking-runtime': ['Checking local recognition tools.'],
+    probing: ['Checking the media file.'],
+    'extracting-audio': ['Extracting audio.'],
+    transcribing: ['Starting speech recognition.'],
+    translating: ['Translating subtitle batches.']
+  };
+  return genericMessages[stage]?.includes(message)
+    ? { messageKey: `stage.${stage}`, technicalMessage: message }
+    : undefined;
 }
