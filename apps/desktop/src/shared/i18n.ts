@@ -313,6 +313,8 @@ export const i18nResources = {
         fasterWhisperVerifying: 'Checking the downloaded local environment.',
         fasterWhisperExtracting: 'Preparing the local recognition environment.',
         fasterWhisperInstallFailed: 'The local faster-whisper environment could not be installed.',
+        fasterWhisperCudaRuntimeDownloadRequired:
+          'An NVIDIA GPU was detected, but faster-whisper needs CUDA runtime files before GPU transcription can be enabled. Download the CUDA components and try again.',
         fasterWhisperModelDownloadFailed: 'The faster-whisper model download failed.',
         fasterWhisperCacheNotWritable: 'The faster-whisper model cache is not writable. Check permissions and try again.',
         assetIntegrityFailed: 'The downloaded files did not pass the integrity check.',
@@ -325,6 +327,7 @@ export const i18nResources = {
         jobRuntimeUnavailable: 'The local helper is running, but speech recognition is not ready yet.',
         jobProbeFailed: 'The media file could not be checked.',
         jobAudioExtractionFailed: 'Audio could not be extracted from this file.',
+        jobTranslationProgress: 'Translating batch {{completed}} of {{total}}.',
         warningMalformedSrt: 'Skipped malformed subtitle block {{block}}.',
         warningInvalidTimestamp: 'Skipped subtitle block {{block}} because its timestamp is invalid.',
         warningInvalidTiming: 'The subtitle end time must be after its start time.',
@@ -742,6 +745,8 @@ export const i18nResources = {
         fasterWhisperVerifying: '正在校验下载的本地环境。',
         fasterWhisperExtracting: '正在准备本地识别环境。',
         fasterWhisperInstallFailed: '本地 faster-whisper 环境安装失败。',
+        fasterWhisperCudaRuntimeDownloadRequired:
+          '已检测到 NVIDIA GPU，但 faster-whisper 缺少启用 GPU 识别所需的 CUDA 运行时文件。请下载 CUDA 组件后重试。',
         fasterWhisperModelDownloadFailed: 'faster-whisper 模型下载失败。',
         fasterWhisperCacheNotWritable: 'faster-whisper 模型缓存目录不可写，请检查权限后重试。',
         assetIntegrityFailed: '下载的文件未通过完整性校验。',
@@ -754,6 +759,7 @@ export const i18nResources = {
         jobRuntimeUnavailable: '本地辅助程序正在运行，但语音识别尚未就绪。',
         jobProbeFailed: '无法检查该媒体文件。',
         jobAudioExtractionFailed: '无法从该文件提取音频。',
+        jobTranslationProgress: '正在翻译第 {{completed}}/{{total}} 批。',
         warningMalformedSrt: '已跳过格式错误的字幕块 {{block}}。',
         warningInvalidTimestamp: '字幕块 {{block}} 的时间戳无效，已跳过。',
         warningInvalidTiming: '字幕结束时间必须晚于开始时间。',

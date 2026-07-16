@@ -283,7 +283,7 @@ export class JobManager extends EventEmitter {
       stage,
       progress,
       message,
-      userMessage: { messageKey: `stage.${stage}`, technicalMessage: message }
+      userMessage: progressUserMessage(stage, message)
     } satisfies JobEvent);
     await delay(100);
   }
@@ -491,4 +491,20 @@ function completionMessageForAsr(job: JobSnapshot): string {
     return 'Recognition is complete after retrying with CPU.';
   }
   return 'Recognition is complete.';
+}
+
+function progressUserMessage(stage: JobStage, message: string): UserMessageDescriptor {
+  const translationProgress = /^Translating (\d+)\/(\d+) batches\.$/.exec(message);
+  if (translationProgress) {
+    return {
+      messageKey: 'runtimeMessage.jobTranslationProgress',
+      messageParams: {
+        completed: translationProgress[1],
+        total: translationProgress[2]
+      },
+      technicalMessage: message
+    };
+  }
+
+  return { messageKey: `stage.${stage}`, technicalMessage: message };
 }

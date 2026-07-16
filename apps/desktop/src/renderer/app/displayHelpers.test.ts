@@ -30,6 +30,21 @@ describe('runtime message localization', () => {
     ).toBe('连接成功，但服务中没有模型“demo-model”。');
   });
 
+  it('keeps dynamic translation progress when a localized descriptor provides its counts', () => {
+    expect(
+      resolveUserMessage(
+        {
+          message: 'Translating 2/5 batches.',
+          userMessage: {
+            messageKey: 'runtimeMessage.jobTranslationProgress',
+            messageParams: { completed: '2', total: '5' }
+          }
+        },
+        createTranslator('zh-CN')
+      )
+    ).toBe('正在翻译第 2/5 批。');
+  });
+
   it('does not expose unknown translation keys', () => {
     expect(
       resolveUserMessage(

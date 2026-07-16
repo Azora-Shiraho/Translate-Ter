@@ -7,7 +7,7 @@ vi.mock('electron', () => ({
   }
 }));
 
-import { FasterWhisperService } from './fasterWhisperService';
+import { cudaRuntimeUserMessage, FasterWhisperService } from './fasterWhisperService';
 
 describe('FasterWhisperService error normalization', () => {
   it('classifies model download failures while preserving the raw diagnostic', () => {
@@ -40,6 +40,13 @@ describe('FasterWhisperService error normalization', () => {
 });
 
 describe('FasterWhisperService runtime status', () => {
+  it('asks users to download CUDA runtime files when hardware is present but DLLs are missing', () => {
+    expect(cudaRuntimeUserMessage(true, false, 'CUDA DLLs missing')).toEqual({
+      messageKey: 'runtimeMessage.fasterWhisperCudaRuntimeDownloadRequired',
+      technicalMessage: 'CUDA DLLs missing'
+    });
+  });
+
   it('upgrades to GPU only after a CUDA probe confirms a visible device', async () => {
     const service = new FasterWhisperService();
     const internal = service as any;

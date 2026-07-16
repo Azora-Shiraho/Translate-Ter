@@ -1095,6 +1095,13 @@ export class FasterWhisperService extends EventEmitter {
     const hardwareDetected = detectNvidiaHardwareSupport();
     const source = this.resolveCudaRuntimeSource();
     const managedRuntimeDir = this.managedCudaRuntimeDir();
+    const message = !hardwareDetected
+      ? 'No NVIDIA GPU was found for faster-whisper GPU mode.'
+      : source.source === 'managed'
+        ? 'Required CUDA files are ready in the app folder.'
+        : source.source === 'system'
+          ? 'Required CUDA files were found in another local installation.'
+          : this.missingCudaRuntimeMessage();
     return {
       provider: FASTER_WHISPER_PROVIDER_ID,
       cacheDir: this.runtimeRoot(),
@@ -1105,16 +1112,8 @@ export class FasterWhisperService extends EventEmitter {
       cudaSupported: hardwareDetected && source.runtimeDetected,
       requiredCudaVersion: FASTER_WHISPER_CUDA_VERSION,
       actionRequired: hardwareDetected && !source.runtimeDetected ? 'download-cuda-runtime' : 'none',
-      message: !hardwareDetected
-        ? 'No NVIDIA GPU was found for faster-whisper GPU mode.'
-        : source.source === 'managed'
-          ? 'Required CUDA files are ready in the app folder.'
-          : source.source === 'system'
-            ? 'Required CUDA files were found in another local installation.'
-            : this.missingCudaRuntimeMessage(),
-      userMessage: {
-        messageKey: hardwareDetected && source.runtimeDetected ? 'cudaDetected' : 'fasterWhisperWorkspaceCudaFallback'
-      }
+      message,
+      userMessage: cudaRuntimeUserMessage(hardwareDetected, source.runtimeDetected, message)
     };
   }
 
@@ -1636,6 +1635,22 @@ async function findFilesByName(root: string, fileNames: readonly string[]): Prom
   }
 
   return matches;
+}
+
+export function cudaRuntimeUserMessage(
+  hardwareDetected: boolean,
+  runtimeDetected: boolean,
+  technicalMessage: string
+): { messageKey: string; technicalMessage: string } {
+  return {
+    messageKey:
+      hardwareDetected && !runtimeDetected
+        ? 'runtimeMessage.fasterWhisperCudaRuntimeDownloadRequired'
+        : runtimeDetected
+          ? 'cudaDetected'
+          : 'fasterWhisperWorkspaceCudaFallback',
+    technicalMessage
+  };
 }
 
 function detectNvidiaHardwareSupport(): boolean {
