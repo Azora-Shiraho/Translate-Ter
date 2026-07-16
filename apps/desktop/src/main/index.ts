@@ -93,6 +93,30 @@ const batchJobQueue = new BatchJobQueue(jobManager, {
   onJobCompleted: exportCompletedBatchJob
 });
 
+function dialogText(language: AppSettingsPublic['uiLanguage']) {
+  return language === 'zh-CN'
+    ? {
+        importMedia: '导入视频或音频',
+        importMediaMultiple: '导入视频或音频文件',
+        selectExportFolder: '选择字幕导出目录',
+        overwriteTitle: '覆盖字幕文件？',
+        overwriteMessage: '目标字幕文件已存在。',
+        overwrite: '覆盖',
+        cancel: '取消',
+        exportSubtitle: '导出字幕'
+      }
+    : {
+        importMedia: 'Import video or audio',
+        importMediaMultiple: 'Import video or audio files',
+        selectExportFolder: 'Select subtitle export folder',
+        overwriteTitle: 'Overwrite subtitle file?',
+        overwriteMessage: 'The target subtitle file already exists.',
+        overwrite: 'Overwrite',
+        cancel: 'Cancel',
+        exportSubtitle: 'Export subtitle'
+      };
+}
+
 function createWindow(): void {
   appLogger.info('window.create', 'Creating main window.', {
     width: 1280,
@@ -425,8 +449,9 @@ function registerIpc(): void {
   });
 
   async function selectMedia(): Promise<string | undefined> {
+    const text = dialogText((await settingsStore.get()).uiLanguage);
     const result = await dialog.showOpenDialog(mainWindow!, {
-      title: 'Import video or audio',
+      title: text.importMedia,
       properties: ['openFile'],
       filters: [
         { name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'mp3', 'wav', 'm4a', 'aac'] },
@@ -438,8 +463,9 @@ function registerIpc(): void {
   }
 
   async function selectMultipleMedia(): Promise<string[] | undefined> {
+    const text = dialogText((await settingsStore.get()).uiLanguage);
     const result = await dialog.showOpenDialog(mainWindow!, {
-      title: 'Import video or audio files',
+      title: text.importMediaMultiple,
       properties: ['openFile', 'multiSelections'],
       filters: [
         { name: 'Media', extensions: ['mp4', 'mov', 'mkv', 'mp3', 'wav', 'm4a', 'aac'] },
@@ -466,8 +492,9 @@ function registerIpc(): void {
 
   async function selectExportDirectory(event: Electron.IpcMainInvokeEvent): Promise<string | undefined> {
     const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow!;
+    const text = dialogText((await settingsStore.get()).uiLanguage);
     const result = await dialog.showOpenDialog(parentWindow, {
-      title: 'Select subtitle export folder',
+      title: text.selectExportFolder,
       properties: ['openDirectory', 'createDirectory']
     });
     return result.canceled ? undefined : result.filePaths[0];
@@ -483,13 +510,14 @@ function registerIpc(): void {
     if (!path) return { cancelled: true };
 
     if (existsSync(path)) {
+      const text = dialogText(settings.uiLanguage);
       const result = await dialog.showMessageBox(mainWindow!, {
         type: 'warning',
-        buttons: ['Overwrite', 'Cancel'],
+        buttons: [text.overwrite, text.cancel],
         defaultId: 1,
         cancelId: 1,
-        title: 'Overwrite subtitle file?',
-        message: 'The target subtitle file already exists.',
+        title: text.overwriteTitle,
+        message: text.overwriteMessage,
         detail: path
       });
       if (result.response !== 0) return { cancelled: true };
@@ -517,8 +545,9 @@ function registerIpc(): void {
     const plan = planSubtitleExportPath(mediaPath, variant, settings, options);
     if (plan.requiresSaveDialog) {
       const { extension, filterName } = exportFileFormatMeta(settings.exportFileFormat);
+      const text = dialogText(settings.uiLanguage);
       const result = await dialog.showSaveDialog(mainWindow!, {
-        title: 'Export subtitle',
+        title: text.exportSubtitle,
         defaultPath: plan.defaultPath,
         filters: [{ name: filterName, extensions: [extension] }]
       });

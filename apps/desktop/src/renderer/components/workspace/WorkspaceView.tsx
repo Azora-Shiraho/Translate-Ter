@@ -284,7 +284,7 @@ export function WorkspaceView(props: WorkspaceViewProps): JSX.Element {
             <div className={`wizardStep-collapsed${isStep4Disabled ? ' disabled' : ''}`} onClick={() => !isStep4Disabled && toggleStep(4)}>
               <Download size={14} style={{ color: isStep4Completed ? '#10b981' : 'var(--tt-text-muted)' }} />
               <span className="collapsed-title">4. {props.t('export')}</span>
-              {isStep4Completed && <span className="collapsed-value">Ready</span>}
+              {isStep4Completed && <span className="collapsed-value">{props.t('ready')}</span>}
             </div>
           ) : (
             <div className={`wizardStep${isStep4Active ? ' active' : ''}${isStep4Completed ? ' completed' : ''}${isStep4Disabled ? ' disabled' : ''}`}>

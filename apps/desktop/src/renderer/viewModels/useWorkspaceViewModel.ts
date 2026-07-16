@@ -5,6 +5,7 @@ import { translateTerGateway } from '../api/translateTerGateway';
 import { useJobEvents } from './useJobEvents';
 import type { RunningAction, UiFeedback } from '../app/types';
 import type { RuntimeVariantSelection } from '../asrSettings';
+import { resolveUserMessage } from '../app/displayHelpers';
 
 type UseWorkspaceViewModelInput = {
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -65,8 +66,6 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
     );
   }, [workflowWarnings]);
 
-  const translateStage = useCallback((stage: JobStage) => t(stageLabel(stage)), [t]);
-
   const workspaceJobIdRef = useRef<string>();
   const workspaceInitiatedRef = useRef<boolean>(false);
 
@@ -87,12 +86,14 @@ export function useWorkspaceViewModel(input: UseWorkspaceViewModelInput) {
         }
       } else {
         if (workspaceJobIdRef.current && event.jobId === workspaceJobIdRef.current) {
-          if (event.type === 'progress') feedback.setMessage(event.message ?? translateStage(event.stage));
-          if (event.type === 'error') feedback.pushStatus(event.message, 'error');
+          if (event.type === 'progress') {
+            feedback.setMessage(resolveUserMessage(event, t, stageLabel(event.stage)));
+          }
+          if (event.type === 'error') feedback.pushStatus(resolveUserMessage(event, t, 'error'), 'error');
         }
       }
     },
-    [feedback, translateStage, mediaPath]
+    [feedback, t, mediaPath]
   );
 
   useJobEvents(handleJobEvent);

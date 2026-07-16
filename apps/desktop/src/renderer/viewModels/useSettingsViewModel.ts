@@ -37,6 +37,7 @@ import {
 } from '../asrSettings';
 import { useAssetEvents } from './useAssetEvents';
 import type { ActiveDownload, SettingsJumpTarget, UiFeedback } from '../app/types';
+import { resolveUserMessage } from '../app/displayHelpers';
 
 type UseSettingsViewModelInput = {
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -609,7 +610,7 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
         forceManaged: true
       });
       setProviderHealth((current) => ({ ...current, 'local.faster-whisper': health }));
-      feedback.pushStatus(health.message ?? t('providerReady'), health.ok ? 'success' : 'warning');
+      feedback.pushStatus(resolveUserMessage(health, t, 'providerReady'), health.ok ? 'success' : 'warning');
     } catch (error) {
       feedback.pushStatus(
         feedback.reportUiError('faster-whisper.runtime.download-failed', error, undefined, 'renderer.runtime'),
@@ -634,7 +635,7 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
         useMultiThreadDownload: settings.enableMultiThreadDownload
       });
       setFasterWhisperCudaStatus(status);
-      feedback.pushStatus(status.message ?? t('runtimeNotChecked'), status.cudaSupported ? 'success' : 'warning');
+      feedback.pushStatus(resolveUserMessage(status, t, 'runtimeNotChecked'), status.cudaSupported ? 'success' : 'warning');
     } catch (error) {
       feedback.pushStatus(
         feedback.reportUiError('faster-whisper.cuda.check-failed', error, undefined, 'renderer.runtime'),
@@ -659,7 +660,7 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
         useMultiThreadDownload: settings.enableMultiThreadDownload
       });
       setFasterWhisperCudaStatus(status);
-      feedback.pushStatus(status.message ?? t('runtimeReady'), status.cudaSupported ? 'success' : 'warning');
+      feedback.pushStatus(resolveUserMessage(status, t, 'runtimeReady'), status.cudaSupported ? 'success' : 'warning');
     } catch (error) {
       feedback.pushStatus(
         feedback.reportUiError('faster-whisper.cuda.download-failed', error, undefined, 'renderer.runtime'),
@@ -823,7 +824,7 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
           preferredRuntimeVariant: effectivePreferredRuntimeVariant
         });
         setProviderHealth((current) => ({ ...current, [providerId]: health }));
-        feedback.pushStatus(health.message ?? t(providerStatusLabel(health.status)), health.ok ? 'success' : 'warning');
+        feedback.pushStatus(resolveUserMessage(health, t, providerStatusLabel(health.status)), health.ok ? 'success' : 'warning');
         return;
       }
 
@@ -836,7 +837,7 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
       const healthMessage =
         providerId === 'local.whisper.cpp' && !health.ok
           ? t('downloadWhisperPrompt')
-          : health.message ?? t(providerStatusLabel(health.status));
+          : resolveUserMessage(health, t, providerStatusLabel(health.status));
       feedback.pushStatus(healthMessage, health.ok ? 'success' : 'warning');
     } catch (error) {
       feedback.pushStatus(
@@ -915,7 +916,8 @@ export function useSettingsViewModel(input: UseSettingsViewModelInput) {
         providerId: 'local.whisper.cpp',
         ok,
         status: ok ? 'healthy' : 'degraded',
-        message: status.message
+        message: status.message,
+        userMessage: status.userMessage
       }
     }));
   }
@@ -1017,9 +1019,9 @@ function assetEventLabel(event: AssetEvent, t: (key: string, options?: Record<st
     case 'ready':
       return event.scope === 'ffmpeg' ? t('ffmpegReady') : event.scope === 'model' ? t('modelReady') : t('runtimeReady');
     case 'error':
-      return event.message;
+      return resolveUserMessage(event, t, event.scope === 'ffmpeg' ? 'ffmpegError' : 'runtimeError');
     default:
-      return event.message ?? event.type;
+      return resolveUserMessage(event, t, event.type);
   }
 }
 
@@ -1071,7 +1073,7 @@ function describeLocalWhisperTestResult(
   if (!status.model.verified) {
     return t(runtimeActionLabel(status.actionRequired ?? 'download-model'));
   }
-  return status.message ?? t('runtimeNotChecked');
+  return resolveUserMessage(status, t, 'runtimeNotChecked');
 }
 
 function describeSelectedModelResult(
@@ -1081,7 +1083,7 @@ function describeSelectedModelResult(
   if (status.verified) {
     return t('modelReady');
   }
-  return status.message ?? t(modelActionLabel(status.actionRequired));
+  return resolveUserMessage(status, t, modelActionLabel(status.actionRequired));
 }
 
 function describeCudaStatusDetail(
@@ -1105,7 +1107,7 @@ function describeCudaStatusDetail(
   if (!status.acceleration.hardwareDetected) {
     return t('cudaNoHardware');
   }
-  return status.message ?? fallbackReasonLabel(status.acceleration.fallbackReason, t, 'cuda');
+  return resolveUserMessage(status, t) || fallbackReasonLabel(status.acceleration.fallbackReason, t, 'cuda');
 }
 
 function describeWhisperAccelerationDetail(
