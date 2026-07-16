@@ -71,11 +71,13 @@ export function resolveUserMessage(
     }
   }
 
+  if (rawMessage) return rawMessage;
+
   if (fallbackKey) {
     const fallback = t(fallbackKey);
     if (fallback && fallback !== fallbackKey) return fallback;
   }
-  return rawMessage ?? '';
+  return '';
 }
 
 export function resolveTechnicalMessage(input: UserMessageInput): string {

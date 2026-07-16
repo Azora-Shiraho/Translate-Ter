@@ -3,6 +3,7 @@ import { ArrowUpRight, CheckCircle2, Eye, EyeOff, Save } from 'lucide-react';
 import { languageRegistry } from '@shared/languages';
 import type { ProviderHealth } from '@shared/types';
 import type { DerivedHealthState } from '../../app/types';
+import { resolveUserMessage } from '../../app/displayHelpers';
 
 export function SettingsOverviewCard(props: {
   icon: React.ReactNode;
@@ -71,6 +72,7 @@ export function SectionTitle(props: { icon: React.ReactNode; title: string }): J
 }
 
 export function ProviderCard(props: {
+  t: (key: string, options?: Record<string, unknown>) => string;
   activeId: string;
   title: string;
   detail: string;
@@ -118,7 +120,7 @@ export function ProviderCard(props: {
           </button>
         ) : null}
       </div>
-      {props.health?.message ? <p>{props.health.message}</p> : null}
+      {props.health?.message ? <p>{resolveUserMessage(props.health, props.t)}</p> : null}
     </div>
   );
 }

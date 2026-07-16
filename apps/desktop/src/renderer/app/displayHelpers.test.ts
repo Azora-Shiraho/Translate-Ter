@@ -58,6 +58,7 @@ describe('runtime message localization', () => {
     const t = createTranslator('zh-CN');
     expect(resolveUserMessage('Batch item started.', t)).toBe('批量任务项已开始。');
     expect(resolveUserMessage('Third-party failure', t)).toBe('Third-party failure');
+    expect(resolveUserMessage('Clipboard write failed.', t, 'error')).toBe('Clipboard write failed.');
   });
 
   it('keeps technical diagnostics separate from user-facing text', () => {
