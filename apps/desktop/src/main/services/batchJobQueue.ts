@@ -433,13 +433,13 @@ function normalizeBatchError(error: unknown): NonNullable<BatchJobItemSnapshot['
       userMessage:
         record.userMessage && typeof record.userMessage === 'object'
           ? record.userMessage as NonNullable<BatchJobItemSnapshot['error']>['userMessage']
-          : { messageKey: 'error', technicalMessage: typeof record.message === 'string' ? record.message : String(error) }
+          : undefined
     };
   }
   return {
     code: 'BatchItemFailed',
     message: String(error),
     retryable: true,
-    userMessage: { messageKey: 'error', technicalMessage: String(error) }
+    userMessage: undefined
   };
 }

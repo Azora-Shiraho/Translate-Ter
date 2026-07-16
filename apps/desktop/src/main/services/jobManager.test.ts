@@ -206,6 +206,42 @@ describe('JobManager', () => {
     expect(manager.get(job.id).subtitleDocument?.segments[0]?.sourceText).toBe('hello');
   });
 
+  it('preserves unclassified transcription failures without an error descriptor', async () => {
+    const settings = createSettings();
+    const nativeBackend = {
+      health: vi.fn().mockResolvedValue({ capabilities: ['asr.transcribe'] }),
+      cancelRunningWork: vi.fn()
+    };
+    const nativeMedia = {
+      probeMedia: vi.fn().mockResolvedValue({ ok: true, payload: {} }),
+      extractAudio: vi.fn().mockResolvedValue({ ok: true, payload: { audioPath: 'D:/media/demo.wav' } })
+    };
+    const manager = new JobManager(
+      settings as any,
+      nativeBackend as any,
+      nativeMedia as any,
+      { cancel: vi.fn() } as any,
+      createAsrRegistry({
+        transcribe: vi.fn().mockRejectedValue(
+          new ProviderError('Recognition runtime files must be downloaded.', {
+            code: 'DownloadRequired',
+            retryable: true
+          })
+        )
+      }),
+      createTranslationRegistry([])
+    );
+    const job = manager.create(createRequest());
+
+    await manager.start(job.id);
+
+    expect(manager.get(job.id).error).toMatchObject({
+      code: 'DownloadRequired',
+      message: 'Recognition runtime files must be downloaded.',
+      userMessage: undefined
+    });
+  });
+
   it('creates translation scheduler providers through the translation registry', async () => {
     const settings = createSettings();
     const nativeBackend = {

@@ -374,7 +374,7 @@ function buildTranslationWarnings(
     });
 }
 
-function jobErrorMessage(code: string, message: string): UserMessageDescriptor {
+function jobErrorMessage(code: string, message: string): UserMessageDescriptor | undefined {
   const normalized = code.toLowerCase();
   if (normalized.includes('probe')) {
     return { messageKey: 'runtimeMessage.jobProbeFailed', technicalMessage: message };
@@ -388,7 +388,7 @@ function jobErrorMessage(code: string, message: string): UserMessageDescriptor {
   if (normalized.includes('cache') || normalized.includes('writable')) {
     return { messageKey: 'runtimeMessage.fasterWhisperCacheNotWritable', technicalMessage: message };
   }
-  return { messageKey: 'error', technicalMessage: message };
+  return undefined;
 }
 
 function messageFromError(error: unknown): UserMessageDescriptor | undefined {
