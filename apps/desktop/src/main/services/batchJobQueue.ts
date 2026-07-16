@@ -123,6 +123,7 @@ export class BatchJobQueue extends EventEmitter {
               stage: 'cancelled',
               progress: 0,
               message: 'Batch item cancelled before it started.',
+              userMessage: { messageKey: 'runtimeMessage.batchCancelledBeforeStart' },
               updatedAt: new Date().toISOString()
             }
           : item
@@ -169,7 +170,8 @@ export class BatchJobQueue extends EventEmitter {
       status: 'running',
       stage: 'imported',
       progress: 0,
-      message: 'Batch item started.'
+      message: 'Batch item started.',
+      userMessage: { messageKey: 'runtimeMessage.batchStarted' }
     });
     this.queue = withCounts({
       ...this.queue,
@@ -198,7 +200,8 @@ export class BatchJobQueue extends EventEmitter {
           status: 'cancelled',
           stage: 'cancelled',
           progress: 0,
-          message: 'Batch item cancelled.'
+          message: 'Batch item cancelled.',
+          userMessage: { messageKey: 'runtimeMessage.batchCancelled' }
         });
         return;
       }
@@ -212,7 +215,8 @@ export class BatchJobQueue extends EventEmitter {
           status: 'cancelled',
           stage: 'cancelled',
           progress: 0,
-          message: 'Batch item cancelled.'
+          message: 'Batch item cancelled.',
+          userMessage: { messageKey: 'runtimeMessage.batchCancelled' }
         });
         return;
       }
@@ -222,7 +226,8 @@ export class BatchJobQueue extends EventEmitter {
           step: 'export',
           stage: 'exporting',
           progress: 98,
-          message: 'Exporting subtitle file.'
+          message: 'Exporting subtitle file.',
+          userMessage: { messageKey: 'runtimeMessage.batchExporting' }
         });
         await this.options.onJobCompleted(nextJob, this.requireItem(itemId));
         const currentItem = this.requireItem(itemId);
@@ -231,7 +236,8 @@ export class BatchJobQueue extends EventEmitter {
             status: 'cancelled',
             stage: 'cancelled',
             progress: 0,
-            message: 'Batch item cancelled.'
+            message: 'Batch item cancelled.',
+            userMessage: { messageKey: 'runtimeMessage.batchCancelled' }
           });
           return;
         }
@@ -248,7 +254,8 @@ export class BatchJobQueue extends EventEmitter {
             : 'Transcription and export complete.'
           : item.autoTranslate
             ? 'Transcription and translation complete.'
-            : 'Transcription complete.'
+            : 'Transcription complete.',
+        userMessage: { messageKey: 'runtimeMessage.batchCompleted' }
       });
     } catch (error) {
       if (this.cancelRequested) {
@@ -256,7 +263,8 @@ export class BatchJobQueue extends EventEmitter {
           status: 'cancelled',
           stage: 'cancelled',
           progress: 0,
-          message: 'Batch item cancelled.'
+          message: 'Batch item cancelled.',
+          userMessage: { messageKey: 'runtimeMessage.batchCancelled' }
         });
         return;
       }
@@ -265,7 +273,8 @@ export class BatchJobQueue extends EventEmitter {
         status: 'failed',
         stage: 'failed',
         error: normalized,
-        message: normalized.message
+        message: normalized.message,
+        userMessage: normalized.userMessage
       });
       this.emit('batch-event', {
         type: 'error',
@@ -294,7 +303,8 @@ export class BatchJobQueue extends EventEmitter {
       this.updateItem(itemId, {
         stage: event.stage,
         progress: event.progress,
-        message: event.message
+        message: event.message,
+        userMessage: event.userMessage
       });
       return;
     }
@@ -305,9 +315,11 @@ export class BatchJobQueue extends EventEmitter {
       error: {
         code: event.code,
         message: event.message,
-        retryable: event.retryable
+        retryable: event.retryable,
+        userMessage: event.userMessage
       },
-      message: event.message
+      message: event.message,
+      userMessage: event.userMessage
     });
   }
 
@@ -328,7 +340,8 @@ export class BatchJobQueue extends EventEmitter {
       stage: job.stage,
       progress: job.progress,
       error: job.error,
-      message: job.error?.message ?? current.message
+      message: job.error?.message ?? current.message,
+      userMessage: job.error?.userMessage ?? current.userMessage
     });
   }
 
@@ -410,18 +423,23 @@ function withCounts(queue: BatchQueueSnapshot): BatchQueueSnapshot {
   };
 }
 
-function normalizeBatchError(error: unknown): { code: string; message: string; retryable: boolean } {
+function normalizeBatchError(error: unknown): NonNullable<BatchJobItemSnapshot['error']> {
   if (typeof error === 'object' && error) {
-    const record = error as { code?: unknown; message?: unknown; retryable?: unknown };
+    const record = error as { code?: unknown; message?: unknown; retryable?: unknown; userMessage?: unknown };
     return {
       code: typeof record.code === 'string' ? record.code : 'BatchItemFailed',
       message: typeof record.message === 'string' ? record.message : String(error),
-      retryable: typeof record.retryable === 'boolean' ? record.retryable : true
+      retryable: typeof record.retryable === 'boolean' ? record.retryable : true,
+      userMessage:
+        record.userMessage && typeof record.userMessage === 'object'
+          ? record.userMessage as NonNullable<BatchJobItemSnapshot['error']>['userMessage']
+          : { messageKey: 'error', technicalMessage: typeof record.message === 'string' ? record.message : String(error) }
     };
   }
   return {
     code: 'BatchItemFailed',
     message: String(error),
-    retryable: true
+    retryable: true,
+    userMessage: { messageKey: 'error', technicalMessage: String(error) }
   };
 }

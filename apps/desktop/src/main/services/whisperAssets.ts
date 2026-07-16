@@ -17,6 +17,7 @@ import type {
   WhisperRuntimeStatus
 } from '@shared/models';
 import { legacyWhisperCudaRuntimeDirs, sharedCudaRuntimeDir } from './cudaRuntimePaths';
+import { withAssetUserMessage } from './runtimeUserMessages';
 import {
   type RuntimeResolution
 } from './runtimeResolver';
@@ -770,7 +771,11 @@ export class WhisperAssetManager extends EventEmitter {
         runtimeVariant: runtimeAcceleration,
         fallbackReason: resolution.fallbackReason
       },
-      ...extra
+      ...extra,
+      userMessage: {
+        messageKey: extra.actionRequired === 'none' ? 'runtimeReady' : `runtimeAction.${extra.actionRequired}`,
+        technicalMessage: extra.message
+      }
     };
   }
 
@@ -1124,7 +1129,7 @@ export class WhisperAssetManager extends EventEmitter {
   }
 
   private emitAsset(event: AssetEvent): void {
-    this.emit('asset-event', event);
+    this.emit('asset-event', withAssetUserMessage(event));
   }
 
   private async migrateLegacyCacheIfNeeded(): Promise<void> {
@@ -1247,7 +1252,11 @@ export class WhisperAssetManager extends EventEmitter {
       expectedPath: isAbsolute(modelPath) ? modelPath : join(this.cacheDir(), modelPath),
       installed,
       verified,
-      ...extra
+      ...extra,
+      userMessage: {
+        messageKey: verified ? 'modelReady' : `runtimeAction.${extra.actionRequired}`,
+        technicalMessage: extra.message
+      }
     };
   }
 }

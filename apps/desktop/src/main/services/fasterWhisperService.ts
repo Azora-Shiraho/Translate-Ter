@@ -24,6 +24,7 @@ import type {
 import { legacyWhisperCudaRuntimeDirs, sharedCudaRuntimeDir } from './cudaRuntimePaths';
 import { resolveFasterWhisperAccelerationStatus } from './fasterWhisperRuntimeOptions';
 import type { ScopedLogger } from './logger';
+import { withAssetUserMessage } from './runtimeUserMessages';
 
 type CudaRedistribManifest = {
   libcublas?: Record<
@@ -607,6 +608,15 @@ export class FasterWhisperService extends EventEmitter {
       ok: status === 'healthy',
       status,
       message: [prefix, this.baseReadyMessage(runtime, acceleration)].filter(Boolean).join(' '),
+      userMessage: {
+        messageKey:
+          status === 'healthy'
+            ? acceleration.selected === 'gpu'
+              ? 'fasterWhisperWorkspaceReadyCuda'
+              : 'fasterWhisperWorkspaceReadyCpu'
+            : 'fasterWhisperWorkspaceCudaFallback',
+        technicalMessage: [prefix, this.baseReadyMessage(runtime, acceleration)].filter(Boolean).join(' ')
+      },
       acceleration
     };
   }
@@ -616,11 +626,16 @@ export class FasterWhisperService extends EventEmitter {
     acceleration: ProviderAccelerationStatus,
     preferredRuntimeVariant?: RuntimeVariant
   ): FasterWhisperRuntimeStatus {
+    const technicalMessage = this.fallbackMessage(acceleration, preferredRuntimeVariant, message) ?? message;
     return {
       providerId: FASTER_WHISPER_PROVIDER_ID,
       ok: false,
       status: 'unavailable',
-      message: this.fallbackMessage(acceleration, preferredRuntimeVariant, message) ?? message,
+      message: technicalMessage,
+      userMessage: {
+        messageKey: 'runtimeMessage.fasterWhisperInstallFailed',
+        technicalMessage
+      },
       acceleration
     };
   }
@@ -1096,7 +1111,10 @@ export class FasterWhisperService extends EventEmitter {
           ? 'Required CUDA files are ready in the app folder.'
           : source.source === 'system'
             ? 'Required CUDA files were found in another local installation.'
-            : this.missingCudaRuntimeMessage()
+            : this.missingCudaRuntimeMessage(),
+      userMessage: {
+        messageKey: hardwareDetected && source.runtimeDetected ? 'cudaDetected' : 'fasterWhisperWorkspaceCudaFallback'
+      }
     };
   }
 
@@ -1277,15 +1295,12 @@ export class FasterWhisperService extends EventEmitter {
       normalized.includes('huggingface') ||
       normalized.includes('ssl:')
     ) {
-      runnerError.code = 'DownloadRequired';
-      runnerError.message =
-        'faster-whisper 模型下载失败。请检查网络、代理或证书后重试；如果模型已缓存，请确认缓存目录可访问。';
+      runnerError.code = 'faster_whisper.model_download_failed';
       return runnerError;
     }
 
     if (normalized.includes('permission denied') || normalized.includes('access is denied')) {
-      runnerError.code = 'DownloadRequired';
-      runnerError.message = 'faster-whisper 模型缓存目录不可写或被占用。请检查权限后重试。';
+      runnerError.code = 'faster_whisper.cache_not_writable';
       return runnerError;
     }
 
@@ -1529,14 +1544,15 @@ export class FasterWhisperService extends EventEmitter {
   }
 
   private emitAsset(event: AssetEvent): void {
-    if (event.type === 'error') {
-      this.logger?.error('asset.event', event.message, event);
-    } else if (event.type === 'verify' || event.type === 'extract' || event.type === 'ready' || event.type === 'download-start') {
-      this.logger?.info('asset.event', event.message, event);
+    const localizedEvent = withAssetUserMessage(event);
+    if (localizedEvent.type === 'error') {
+      this.logger?.error('asset.event', localizedEvent.message, localizedEvent);
+    } else if (localizedEvent.type === 'verify' || localizedEvent.type === 'extract' || localizedEvent.type === 'ready' || localizedEvent.type === 'download-start') {
+      this.logger?.info('asset.event', localizedEvent.message, localizedEvent);
     } else {
-      this.logger?.debug('asset.event', event.message, event);
+      this.logger?.debug('asset.event', localizedEvent.message, localizedEvent);
     }
-    this.emit('asset-event', event);
+    this.emit('asset-event', localizedEvent);
   }
 }
 

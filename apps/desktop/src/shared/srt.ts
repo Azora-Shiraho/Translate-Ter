@@ -19,7 +19,11 @@ export function parseSrt(input: string, options: ParseSrtOptions = {}): Subtitle
     if (lines.length < 2) {
       warnings.push({
         code: 'ParseError',
-        message: `Skipped malformed SRT block ${blockIndex + 1}.`
+        message: `Skipped malformed SRT block ${blockIndex + 1}.`,
+        userMessage: {
+          messageKey: 'runtimeMessage.warningMalformedSrt',
+          messageParams: { block: blockIndex + 1 }
+        }
       });
       continue;
     }
@@ -32,7 +36,11 @@ export function parseSrt(input: string, options: ParseSrtOptions = {}): Subtitle
     if (!timing) {
       warnings.push({
         code: 'ParseError',
-        message: `Skipped block ${indexLine || blockIndex + 1}: invalid timestamp.`
+        message: `Skipped block ${indexLine || blockIndex + 1}: invalid timestamp.`,
+        userMessage: {
+          messageKey: 'runtimeMessage.warningInvalidTimestamp',
+          messageParams: { block: indexLine || blockIndex + 1 }
+        }
       });
       continue;
     }
@@ -45,18 +53,33 @@ export function parseSrt(input: string, options: ParseSrtOptions = {}): Subtitle
 
     if (endMs <= startMs) {
       segmentWarnings.push('End time must be after start time.');
-      warnings.push({ code: 'InvalidTiming', message: 'End time must be after start time.', segmentId: id });
+      warnings.push({
+        code: 'InvalidTiming',
+        message: 'End time must be after start time.',
+        userMessage: { messageKey: 'runtimeMessage.warningInvalidTiming' },
+        segmentId: id
+      });
     }
 
     if (!sourceText) {
       segmentWarnings.push('Subtitle text is empty.');
-      warnings.push({ code: 'EmptyText', message: 'Subtitle text is empty.', segmentId: id });
+      warnings.push({
+        code: 'EmptyText',
+        message: 'Subtitle text is empty.',
+        userMessage: { messageKey: 'runtimeMessage.warningEmptyText' },
+        segmentId: id
+      });
     }
 
     const previous = segments.at(-1);
     if (previous && startMs < previous.endMs) {
       segmentWarnings.push('Timing overlaps with previous segment.');
-      warnings.push({ code: 'TimingOverlap', message: 'Timing overlaps with previous segment.', segmentId: id });
+      warnings.push({
+        code: 'TimingOverlap',
+        message: 'Timing overlaps with previous segment.',
+        userMessage: { messageKey: 'runtimeMessage.warningTimingOverlap' },
+        segmentId: id
+      });
     }
 
     segments.push({
