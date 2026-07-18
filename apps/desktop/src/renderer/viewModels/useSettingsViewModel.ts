@@ -1013,7 +1013,20 @@ export function assetEventLabel(event: AssetEvent, t: (key: string, options?: Re
         ? resolveUserMessage(event, t)
         : event.scope === 'ffmpeg' ? t('ffmpegDownloading') : t('runtimeDownloading');
     case 'download-progress':
-      if (event.userMessage) return resolveUserMessage(event, t);
+      if (event.userMessage) {
+        return resolveUserMessage(
+          event.receivedBytes
+            ? {
+                ...event,
+                userMessage: {
+                  ...event.userMessage,
+                  messageParams: { ...event.userMessage.messageParams, bytes: formatBytes(event.receivedBytes) }
+                }
+              }
+            : event,
+          t
+        );
+      }
       return event.receivedBytes
         ? t(event.scope === 'ffmpeg' ? 'ffmpegDownloadingBytes' : 'runtimeDownloadingBytes', {
             bytes: formatBytes(event.receivedBytes)

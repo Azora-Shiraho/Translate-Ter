@@ -44,7 +44,7 @@ function assetDescriptor(event: AssetEvent): UserMessageDescriptor {
     return {
       messageKey: {
         'download-start': 'runtimeMessage.modelDownloading',
-        'download-progress': 'runtimeMessage.modelDownloading',
+        'download-progress': 'runtimeMessage.modelDownloadingBytes',
         verify: 'runtimeMessage.modelVerifying',
         ready: 'runtimeMessage.modelReady'
       }[event.type],
@@ -52,19 +52,28 @@ function assetDescriptor(event: AssetEvent): UserMessageDescriptor {
     };
   }
 
+  const cuda = /CUDA components/i.test(event.message);
   const fasterWhisper = /faster-whisper|local recognition environment|Python package manager/i.test(event.message);
   return {
-    messageKey: fasterWhisper
+    messageKey: cuda
+      ? {
+          'download-start': 'runtimeMessage.cudaDownloading',
+          'download-progress': 'runtimeMessage.cudaDownloadingBytes',
+          verify: 'runtimeMessage.cudaVerifying',
+          extract: 'runtimeMessage.cudaExtracting',
+          ready: 'runtimeMessage.cudaReady'
+        }[event.type]
+      : fasterWhisper
       ? {
           'download-start': 'runtimeMessage.fasterWhisperDownloading',
-          'download-progress': 'runtimeMessage.fasterWhisperDownloading',
+          'download-progress': 'runtimeMessage.fasterWhisperDownloadingBytes',
           verify: 'runtimeMessage.fasterWhisperVerifying',
           extract: 'runtimeMessage.fasterWhisperExtracting',
           ready: 'runtimeMessage.fasterWhisperReady'
         }[event.type]
       : {
           'download-start': 'runtimeDownloading',
-          'download-progress': 'runtimeDownloading',
+          'download-progress': 'runtimeDownloadingBytes',
           verify: 'runtimeVerifying',
           extract: 'runtimeExtracting',
           ready: 'runtimeReady'

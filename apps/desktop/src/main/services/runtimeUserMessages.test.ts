@@ -24,4 +24,20 @@ describe('runtime asset message descriptors', () => {
       }
     });
   });
+
+  it('uses CUDA-specific keys for CUDA runtime lifecycle events', () => {
+    expect(
+      withAssetUserMessage({ type: 'download-progress', scope: 'runtime', message: 'Downloading CUDA components...', receivedBytes: 42 })
+    ).toMatchObject({
+      userMessage: {
+        messageKey: 'runtimeMessage.cudaDownloadingBytes',
+        technicalMessage: 'Downloading CUDA components...'
+      }
+    });
+    expect(
+      withAssetUserMessage({ type: 'ready', scope: 'runtime', message: 'CUDA components are ready.' })
+    ).toMatchObject({
+      userMessage: { messageKey: 'runtimeMessage.cudaReady' }
+    });
+  });
 });
