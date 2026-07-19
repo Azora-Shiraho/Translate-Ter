@@ -212,6 +212,9 @@ describe('JobManager', () => {
     expect(events.find((event) => event.message === 'GPU recognition stopped. Retrying with CPU.')).toMatchObject({
       userMessage: undefined
     });
+    expect(events.find((event) => event.message === 'Recognition is complete.')).toMatchObject({
+      userMessage: { messageKey: 'runtimeMessage.jobRecognitionComplete' }
+    });
   });
 
   it('preserves unclassified transcription failures without an error descriptor', async () => {

@@ -1151,7 +1151,12 @@ export class FasterWhisperService extends EventEmitter {
     await this.removePathWithRetry(extractDir, { recursive: true });
 
     this.emitAsset({ type: 'download-start', scope: 'runtime', message: 'Downloading GPU components for faster-whisper.' });
-    await this.downloadRuntimeFile(`${NVIDIA_CUDA_REDIST_BASE_URL}${packageInfo.relative_path}`, archivePath, useMultiThreadDownload);
+    await this.downloadRuntimeFile(
+      `${NVIDIA_CUDA_REDIST_BASE_URL}${packageInfo.relative_path}`,
+      archivePath,
+      useMultiThreadDownload,
+      'Downloading GPU components for faster-whisper...'
+    );
 
     this.emitAsset({ type: 'verify', scope: 'runtime', message: 'Checking downloaded GPU components.' });
     const verified = await verifySha256(archivePath, packageInfo.sha256);
@@ -1324,7 +1329,12 @@ export class FasterWhisperService extends EventEmitter {
     }
   }
 
-  private async downloadRuntimeFile(url: string, destination: string, useMultiThreadDownload = false): Promise<void> {
+  private async downloadRuntimeFile(
+    url: string,
+    destination: string,
+    useMultiThreadDownload = false,
+    progressMessage = 'Downloading faster-whisper runtime...'
+  ): Promise<void> {
     if (url.startsWith('file://')) {
       await copyFile(url.slice('file://'.length), destination);
       return;
@@ -1333,14 +1343,14 @@ export class FasterWhisperService extends EventEmitter {
     try {
       if (useMultiThreadDownload) {
         try {
-          const downloaded = await this.downloadHttpSegmented(url, destination);
+          const downloaded = await this.downloadHttpSegmented(url, destination, progressMessage);
           if (downloaded) return;
         } catch {
           await this.removePathWithRetry(destination);
         }
       }
 
-      await this.downloadHttpSingle(url, destination);
+      await this.downloadHttpSingle(url, destination, progressMessage);
       return;
     } catch (error) {
       await this.removePathWithRetry(destination);
@@ -1352,7 +1362,7 @@ export class FasterWhisperService extends EventEmitter {
     }
   }
 
-  private async downloadHttpSingle(url: string, destination: string): Promise<void> {
+  private async downloadHttpSingle(url: string, destination: string, progressMessage: string): Promise<void> {
     const response = await fetch(url);
     if (!response.ok || !response.body) {
       this.emitAsset({ type: 'error', scope: 'runtime', message: `Runtime download failed with HTTP ${response.status}.` });
@@ -1394,7 +1404,7 @@ export class FasterWhisperService extends EventEmitter {
             this.emitAsset({
               type: 'download-progress',
               scope: 'runtime',
-              message: 'Downloading faster-whisper runtime...',
+              message: progressMessage,
               receivedBytes,
               totalBytes: Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : undefined
             });
@@ -1415,7 +1425,7 @@ export class FasterWhisperService extends EventEmitter {
     });
   }
 
-  private async downloadHttpSegmented(url: string, destination: string): Promise<boolean> {
+  private async downloadHttpSegmented(url: string, destination: string, progressMessage: string): Promise<boolean> {
     const plan = await this.segmentedDownloadPlan(url);
     if (!plan) return false;
 
@@ -1428,7 +1438,7 @@ export class FasterWhisperService extends EventEmitter {
         this.emitAsset({
           type: 'download-progress',
           scope: 'runtime',
-          message: 'Downloading faster-whisper runtime...',
+          message: progressMessage,
           receivedBytes,
           totalBytes: plan.totalBytes
         });

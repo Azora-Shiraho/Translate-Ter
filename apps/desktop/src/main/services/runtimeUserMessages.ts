@@ -32,7 +32,7 @@ function assetDescriptor(event: AssetEvent): UserMessageDescriptor {
     return {
       messageKey: {
         'download-start': 'ffmpegDownloading',
-        'download-progress': 'ffmpegDownloading',
+        'download-progress': 'ffmpegDownloadingBytes',
         verify: 'ffmpegVerifying',
         extract: 'ffmpegExtracting',
         ready: 'ffmpegReady'
@@ -52,7 +52,7 @@ function assetDescriptor(event: AssetEvent): UserMessageDescriptor {
     };
   }
 
-  const cuda = /CUDA components/i.test(event.message);
+  const cuda = /(?:CUDA|GPU) components/i.test(event.message);
   const fasterWhisper = /faster-whisper|local recognition environment|Python package manager/i.test(event.message);
   return {
     messageKey: cuda

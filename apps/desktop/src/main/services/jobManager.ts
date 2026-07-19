@@ -506,6 +506,18 @@ function progressUserMessage(stage: JobStage, message: string): UserMessageDescr
     };
   }
 
+  const completionMessages: Record<string, string> = {
+    'Translation complete.': 'runtimeMessage.jobTranslationComplete',
+    'Recognition is complete.': 'runtimeMessage.jobRecognitionComplete',
+    'Cloud recognition is complete.': 'runtimeMessage.jobCloudRecognitionComplete',
+    'Local recognition is complete.': 'runtimeMessage.jobLocalRecognitionComplete',
+    'Recognition is complete after retrying with CPU.': 'runtimeMessage.jobRecognitionCpuFallbackComplete'
+  };
+  const completionKey = completionMessages[message];
+  if (completionKey) {
+    return { messageKey: completionKey, technicalMessage: message };
+  }
+
   const genericMessages: Partial<Record<JobStage, readonly string[]>> = {
     'checking-runtime': ['Checking local recognition tools.'],
     probing: ['Checking the media file.'],
