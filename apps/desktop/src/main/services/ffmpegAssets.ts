@@ -7,6 +7,7 @@ import { availableParallelism, cpus } from 'node:os';
 import { basename, delimiter, join } from 'node:path';
 import type { AssetEvent, FfmpegRequest, FfmpegStatus } from '@shared/models';
 import { ffmpegBinDir, ffmpegCacheDir } from './mediaToolPaths';
+import { withAssetUserMessage } from './runtimeUserMessages';
 
 const FFMPEG_WINDOWS_VERSION = '8.1.1';
 const FFMPEG_WINDOWS_ARCHIVE_URL =
@@ -32,25 +33,25 @@ export class FfmpegAssetManager extends EventEmitter {
   async status(): Promise<FfmpegStatus> {
     const managed = await this.managedStatus();
     if (managed.available) {
-      return {
+      return withFfmpegStatusMessage({
         ...managed,
         source: 'managed',
         actionRequired: 'none'
-      };
+      });
     }
 
     const system = await this.systemStatus();
     if (system.available) {
-      return {
+      return withFfmpegStatusMessage({
         ...system,
         source: 'system',
         actionRequired: 'none'
-      };
+      });
     }
 
     const hasManagedFiles = managed.ffmpegAvailable || managed.ffprobeAvailable;
     const hasSystemFiles = system.ffmpegAvailable || system.ffprobeAvailable;
-    return {
+    return withFfmpegStatusMessage({
       cacheDir: ffmpegCacheDir(),
       binDir: ffmpegBinDir(),
       ffmpegPath: managed.ffmpegPath ?? system.ffmpegPath,
@@ -60,7 +61,7 @@ export class FfmpegAssetManager extends EventEmitter {
       available: false,
       source: hasManagedFiles ? 'managed' : hasSystemFiles ? 'system' : 'missing',
       actionRequired: 'download-required'
-    };
+    });
   }
 
   private async managedStatus(): Promise<FfmpegStatus> {
@@ -337,8 +338,30 @@ export class FfmpegAssetManager extends EventEmitter {
   }
 
   private emitAsset(event: AssetEvent): void {
-    this.emit('asset-event', event);
+    this.emit('asset-event', withAssetUserMessage(event));
   }
+}
+
+function withFfmpegStatusMessage(status: FfmpegStatus): FfmpegStatus {
+  const message = status.available
+    ? status.source === 'managed'
+      ? 'Using managed FFmpeg tools.'
+      : 'Using system FFmpeg tools.'
+    : 'FFmpeg tools are incomplete or unavailable.';
+  return {
+    ...status,
+    message,
+    userMessage: {
+      messageKey: status.available
+        ? status.source === 'managed'
+          ? 'ffmpegManagedReadyDetail'
+          : 'ffmpegSystemReadyDetail'
+        : status.ffmpegAvailable || status.ffprobeAvailable
+          ? 'ffmpegPartialDetail'
+          : 'ffmpegMissingDetail',
+      technicalMessage: message
+    }
+  };
 }
 
 function findToolOnPath(fileName: string): string | undefined {

@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { languageLabel } from '@shared/languages';
 import { translateTerGateway } from '../api/translateTerGateway';
 import { steps } from './constants';
-import { deriveWorkspaceRailMessage, deriveWorkspaceRuntimeDetail } from './displayHelpers';
+import { deriveWorkspaceRailMessage, deriveWorkspaceRuntimeDetail, resolveUserMessage } from './displayHelpers';
 import type { AppView, ReportUiError, ToastMessage, ToastTone, WriteUiLog } from './types';
 import { useSettingsViewModel } from '../viewModels/useSettingsViewModel';
 import { useWorkspaceViewModel } from '../viewModels/useWorkspaceViewModel';
@@ -44,11 +44,11 @@ export function App(): JSX.Element {
 
   const reportUiError = useCallback<ReportUiError>(
     (event, error, details, scope = 'renderer.ui') => {
-      const nextMessage = error instanceof Error ? error.message : String(error);
-      writeUiLog('error', event, { ...details, error }, scope, nextMessage);
-      return nextMessage;
+      const technicalMessage = error instanceof Error ? error.message : String(error);
+      writeUiLog('error', event, { ...details, error }, scope, technicalMessage);
+      return resolveUserMessage(technicalMessage, t, 'error');
     },
-    [writeUiLog]
+    [t, writeUiLog]
   );
 
   const pushToast = useCallback((nextMessage: string, tone: ToastTone = 'neutral') => {

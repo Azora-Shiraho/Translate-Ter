@@ -8,6 +8,7 @@ import type {
   SubtitleDocument,
   SubtitleSegment,
   SubtitleWarning,
+  UserMessageDescriptor,
   WorkflowStep
 } from '@shared/models';
 import { canonicalSourceLanguageCode, canonicalTargetLanguageCode } from '@shared/languages';
@@ -101,7 +102,8 @@ export class JobManager extends EventEmitter {
       if (!nativeHealth.capabilities.includes('asr.transcribe')) {
         job.warnings.push({
           code: 'NativeCapabilityUnavailable',
-          message: 'The local helper is running, but speech recognition is not ready yet.'
+          message: 'The local helper is running, but speech recognition is not ready yet.',
+          userMessage: { messageKey: 'runtimeMessage.jobRuntimeUnavailable' }
         });
       }
 
@@ -113,7 +115,8 @@ export class JobManager extends EventEmitter {
           job,
           probe.error?.code ?? 'ProbeFailed',
           probe.error?.message ?? 'The media file could not be checked.',
-          true
+          true,
+          messageFromDetails(probe.error?.details, 'runtimeMessage.jobProbeFailed', probe.error?.message)
         );
         return;
       }
@@ -128,7 +131,8 @@ export class JobManager extends EventEmitter {
           job,
           extraction.error?.code ?? 'AudioExtractFailed',
           extraction.error?.message ?? 'Audio could not be extracted from this file.',
-          true
+          true,
+          messageFromDetails(extraction.error?.details, 'runtimeMessage.jobAudioExtractionFailed', extraction.error?.message)
         );
         return;
       }
@@ -158,7 +162,7 @@ export class JobManager extends EventEmitter {
           ? Boolean((error as { retryable?: unknown }).retryable)
           : true;
       const message = error instanceof Error ? error.message : String(error);
-      this.fail(job, code, message, retryable);
+      this.fail(job, code, message, retryable, messageFromError(error));
     }
   }
 
@@ -228,7 +232,7 @@ export class JobManager extends EventEmitter {
           ? Boolean((error as { retryable?: unknown }).retryable)
           : true;
       const message = error instanceof Error ? error.message : String(error);
-      this.fail(job, code, message, retryable);
+      this.fail(job, code, message, retryable, messageFromError(error));
       return this.get(job.id);
     } finally {
       if (this.translationControllers.get(job.id) === controller) {
@@ -273,11 +277,24 @@ export class JobManager extends EventEmitter {
     job.progress = progress;
     job.updatedAt = new Date().toISOString();
     this.save(job);
-    this.emit('job-event', { type: 'progress', jobId: job.id, stage, progress, message } satisfies JobEvent);
+    this.emit('job-event', {
+      type: 'progress',
+      jobId: job.id,
+      stage,
+      progress,
+      message,
+      userMessage: progressUserMessage(stage, message)
+    } satisfies JobEvent);
     await delay(100);
   }
 
-  private fail(job: JobSnapshot, code: string, message: string, retryable: boolean): void {
+  private fail(
+    job: JobSnapshot,
+    code: string,
+    message: string,
+    retryable: boolean,
+    descriptor?: UserMessageDescriptor
+  ): void {
     if (this.isCancelled(job.id)) {
       return;
     }
@@ -285,10 +302,11 @@ export class JobManager extends EventEmitter {
     this.cancelledJobs.delete(job.id);
     job.stage = 'failed';
     job.step = failedStep;
-    job.error = { code, message, retryable };
+    const userMessage = descriptor ?? jobErrorMessage(code, message);
+    job.error = { code, message, retryable, userMessage };
     job.updatedAt = new Date().toISOString();
     this.save(job);
-    this.emit('job-event', { type: 'error', jobId: job.id, code, message, retryable } satisfies JobEvent);
+    this.emit('job-event', { type: 'error', jobId: job.id, code, message, retryable, userMessage } satisfies JobEvent);
   }
 
   private save(job: JobSnapshot): void {
@@ -339,6 +357,10 @@ function buildTranslationWarnings(
         id: `warning-${checkpoint.batchId}`,
         code: attempt?.errorCode ?? 'TranslationBatchFailed',
         message: attempt?.message ?? `Batch ${checkpoint.batchId} failed. Original text was kept.`,
+        userMessage: {
+          messageKey: 'runtimeMessage.warningTranslationFallback',
+          technicalMessage: attempt?.message
+        },
         stage: 'translate',
         createdAt: attempt?.completedAt ?? attempt?.startedAt ?? new Date().toISOString(),
         providerId: attempt?.providerId ?? providerId,
@@ -350,6 +372,57 @@ function buildTranslationWarnings(
         endMs: last?.endMs ?? first?.endMs
       } satisfies SubtitleWarning;
     });
+}
+
+function jobErrorMessage(code: string, message: string): UserMessageDescriptor | undefined {
+  const normalized = code.toLowerCase();
+  if (normalized.includes('probe')) {
+    return { messageKey: 'runtimeMessage.jobProbeFailed', technicalMessage: message };
+  }
+  if (normalized.includes('audio') || normalized.includes('extract')) {
+    return { messageKey: 'runtimeMessage.jobAudioExtractionFailed', technicalMessage: message };
+  }
+  if (normalized.includes('model') && normalized.includes('download')) {
+    return { messageKey: 'runtimeMessage.fasterWhisperModelDownloadFailed', technicalMessage: message };
+  }
+  if (normalized.includes('cache') || normalized.includes('writable')) {
+    return { messageKey: 'runtimeMessage.fasterWhisperCacheNotWritable', technicalMessage: message };
+  }
+  return undefined;
+}
+
+function messageFromError(error: unknown): UserMessageDescriptor | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const record = error as { message?: unknown; details?: unknown };
+  return messageFromDetails(
+    record.details,
+    undefined,
+    typeof record.message === 'string' ? record.message : undefined
+  );
+}
+
+function messageFromDetails(
+  details: unknown,
+  fallbackKey?: string,
+  technicalMessage?: string
+): UserMessageDescriptor | undefined {
+  if (details && typeof details === 'object') {
+    const record = details as Record<string, unknown>;
+    const messageKey = typeof record.messageKey === 'string' ? record.messageKey : fallbackKey;
+    if (messageKey) {
+      return {
+        messageKey,
+        messageParams:
+          record.params && typeof record.params === 'object'
+            ? record.params as UserMessageDescriptor['messageParams']
+            : undefined,
+        technicalMessage:
+          typeof record.technicalMessage === 'string' ? record.technicalMessage : technicalMessage,
+        details: record
+      };
+    }
+  }
+  return fallbackKey ? { messageKey: fallbackKey, technicalMessage } : undefined;
 }
 
 function dedupeWarnings(warnings: SubtitleWarning[]): SubtitleWarning[] {
@@ -418,4 +491,41 @@ function completionMessageForAsr(job: JobSnapshot): string {
     return 'Recognition is complete after retrying with CPU.';
   }
   return 'Recognition is complete.';
+}
+
+function progressUserMessage(stage: JobStage, message: string): UserMessageDescriptor | undefined {
+  const translationProgress = /^Translating (\d+)\/(\d+) batches\.$/.exec(message);
+  if (translationProgress) {
+    return {
+      messageKey: 'runtimeMessage.jobTranslationProgress',
+      messageParams: {
+        completed: translationProgress[1],
+        total: translationProgress[2]
+      },
+      technicalMessage: message
+    };
+  }
+
+  const completionMessages: Record<string, string> = {
+    'Translation complete.': 'runtimeMessage.jobTranslationComplete',
+    'Recognition is complete.': 'runtimeMessage.jobRecognitionComplete',
+    'Cloud recognition is complete.': 'runtimeMessage.jobCloudRecognitionComplete',
+    'Local recognition is complete.': 'runtimeMessage.jobLocalRecognitionComplete',
+    'Recognition is complete after retrying with CPU.': 'runtimeMessage.jobRecognitionCpuFallbackComplete'
+  };
+  const completionKey = completionMessages[message];
+  if (completionKey) {
+    return { messageKey: completionKey, technicalMessage: message };
+  }
+
+  const genericMessages: Partial<Record<JobStage, readonly string[]>> = {
+    'checking-runtime': ['Checking local recognition tools.'],
+    probing: ['Checking the media file.'],
+    'extracting-audio': ['Extracting audio.'],
+    transcribing: ['Starting speech recognition.'],
+    translating: ['Translating subtitle batches.']
+  };
+  return genericMessages[stage]?.includes(message)
+    ? { messageKey: `stage.${stage}`, technicalMessage: message }
+    : undefined;
 }

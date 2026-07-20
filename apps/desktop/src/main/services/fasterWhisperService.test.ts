@@ -7,10 +7,10 @@ vi.mock('electron', () => ({
   }
 }));
 
-import { FasterWhisperService } from './fasterWhisperService';
+import { cudaRuntimeUserMessage, FasterWhisperService } from './fasterWhisperService';
 
 describe('FasterWhisperService error normalization', () => {
-  it('maps huggingface download and tls failures to a readable download error', () => {
+  it('classifies model download failures while preserving the raw diagnostic', () => {
     const service = new FasterWhisperService();
     const normalized = (
       service as unknown as {
@@ -20,12 +20,12 @@ describe('FasterWhisperService error normalization', () => {
       'huggingface_hub.errors.LocalEntryNotFoundError: Got: ConnectError: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol'
     );
 
-    expect(normalized.code).toBe('DownloadRequired');
+    expect(normalized.code).toBe('faster_whisper.model_download_failed');
     expect(normalized.retryable).toBe(true);
-    expect(normalized.message).toContain('faster-whisper 模型下载失败');
+    expect(normalized.message).toContain('LocalEntryNotFoundError');
   });
 
-  it('maps cache permission failures to a readable cache error', () => {
+  it('classifies cache permission failures while preserving the raw diagnostic', () => {
     const service = new FasterWhisperService();
     const normalized = (
       service as unknown as {
@@ -33,13 +33,27 @@ describe('FasterWhisperService error normalization', () => {
       }
     ).normalizeRunnerError('Permission denied: cannot write model cache');
 
-    expect(normalized.code).toBe('DownloadRequired');
+    expect(normalized.code).toBe('faster_whisper.cache_not_writable');
     expect(normalized.retryable).toBe(true);
-    expect(normalized.message).toContain('模型缓存目录不可写');
+    expect(normalized.message).toContain('Permission denied');
   });
 });
 
 describe('FasterWhisperService runtime status', () => {
+  it('asks users to download CUDA runtime files when hardware is present but DLLs are missing', () => {
+    expect(cudaRuntimeUserMessage(true, false, 'CUDA DLLs missing')).toEqual({
+      messageKey: 'runtimeMessage.fasterWhisperCudaRuntimeDownloadRequired',
+      technicalMessage: 'CUDA DLLs missing'
+    });
+  });
+
+  it('does not report CUDA support when only runtime files are present', () => {
+    expect(cudaRuntimeUserMessage(false, true, 'CUDA files found without GPU hardware')).toEqual({
+      messageKey: 'fasterWhisperWorkspaceCudaFallback',
+      technicalMessage: 'CUDA files found without GPU hardware'
+    });
+  });
+
   it('upgrades to GPU only after a CUDA probe confirms a visible device', async () => {
     const service = new FasterWhisperService();
     const internal = service as any;

@@ -177,7 +177,10 @@ describe('JobManager', () => {
     const fasterWhisper = {
       cancel: vi.fn()
     };
-    const transcribe = vi.fn().mockResolvedValue(createDocument());
+    const transcribe = vi.fn().mockImplementation(async (request) => {
+      await request.reportProgress(78, 'GPU recognition stopped. Retrying with CPU.');
+      return createDocument();
+    });
     const asrRegistry = createAsrRegistry({ transcribe });
     const manager = new JobManager(
       settings as any,
@@ -188,6 +191,8 @@ describe('JobManager', () => {
       createTranslationRegistry([])
     );
     const job = manager.create(createRequest());
+    const events: Array<{ type: string; message?: string; userMessage?: unknown }> = [];
+    manager.on('job-event', (event) => events.push(event));
 
     await manager.start(job.id);
 
@@ -204,6 +209,48 @@ describe('JobManager', () => {
     });
     expect(manager.get(job.id).stage).toBe('completed');
     expect(manager.get(job.id).subtitleDocument?.segments[0]?.sourceText).toBe('hello');
+    expect(events.find((event) => event.message === 'GPU recognition stopped. Retrying with CPU.')).toMatchObject({
+      userMessage: undefined
+    });
+    expect(events.find((event) => event.message === 'Recognition is complete.')).toMatchObject({
+      userMessage: { messageKey: 'runtimeMessage.jobRecognitionComplete' }
+    });
+  });
+
+  it('preserves unclassified transcription failures without an error descriptor', async () => {
+    const settings = createSettings();
+    const nativeBackend = {
+      health: vi.fn().mockResolvedValue({ capabilities: ['asr.transcribe'] }),
+      cancelRunningWork: vi.fn()
+    };
+    const nativeMedia = {
+      probeMedia: vi.fn().mockResolvedValue({ ok: true, payload: {} }),
+      extractAudio: vi.fn().mockResolvedValue({ ok: true, payload: { audioPath: 'D:/media/demo.wav' } })
+    };
+    const manager = new JobManager(
+      settings as any,
+      nativeBackend as any,
+      nativeMedia as any,
+      { cancel: vi.fn() } as any,
+      createAsrRegistry({
+        transcribe: vi.fn().mockRejectedValue(
+          new ProviderError('Recognition runtime files must be downloaded.', {
+            code: 'DownloadRequired',
+            retryable: true
+          })
+        )
+      }),
+      createTranslationRegistry([])
+    );
+    const job = manager.create(createRequest());
+
+    await manager.start(job.id);
+
+    expect(manager.get(job.id).error).toMatchObject({
+      code: 'DownloadRequired',
+      message: 'Recognition runtime files must be downloaded.',
+      userMessage: undefined
+    });
   });
 
   it('creates translation scheduler providers through the translation registry', async () => {

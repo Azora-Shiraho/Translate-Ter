@@ -7,6 +7,7 @@ import { useSettingsViewModel } from '../viewModels/useSettingsViewModel';
 import { useProviderStatusViewModel } from '../viewModels/useProviderStatusViewModel';
 import { SettingsView } from '../components/settings/SettingsView';
 import { ToastStack } from '../components/status/ToastStack';
+import { resolveUserMessage } from './displayHelpers';
 
 export type SettingsTab = 'general' | 'asr' | 'translation';
 
@@ -27,11 +28,11 @@ export function SettingsApp(): JSX.Element {
 
   const reportUiError = useCallback<ReportUiError>(
     (event, error, details, scope = 'renderer.settings') => {
-      const nextMessage = error instanceof Error ? error.message : String(error);
-      writeUiLog('error', event, { ...details, error }, scope, nextMessage);
-      return nextMessage;
+      const technicalMessage = error instanceof Error ? error.message : String(error);
+      writeUiLog('error', event, { ...details, error }, scope, technicalMessage);
+      return resolveUserMessage(technicalMessage, t, 'error');
     },
-    [writeUiLog]
+    [t, writeUiLog]
   );
 
   const pushToast = useCallback((nextMessage: string, tone: ToastTone = 'neutral') => {
@@ -94,7 +95,7 @@ export function SettingsApp(): JSX.Element {
   }, [settingsVm]);
 
   if (!settingsVm.settings) {
-    return <div className="boot">Loading Settings...</div>;
+    return <div className="boot">{t('loadingSettings')}</div>;
   }
 
   return (

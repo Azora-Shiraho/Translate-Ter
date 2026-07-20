@@ -282,6 +282,7 @@ describe('BatchJobQueue', () => {
     const item = queue.get().items[0];
     expect(item?.status).toBe('failed');
     expect(item?.error?.message).toBe('Disk is full.');
+    expect(item?.error?.userMessage).toBeUndefined();
   });
 
   it('keeps the item cancelled if cancellation happens while export is still running', async () => {

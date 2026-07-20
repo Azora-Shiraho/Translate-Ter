@@ -14,6 +14,7 @@ import { getProviderCatalogEntry } from '@shared/providers/catalog';
 import type { RuntimeVariantSelection } from '../asrSettings';
 import { isExperimentalWhisperRuntimeVariant, isVerifiedWhisperGpuRuntimeVariant } from '../asrSettings';
 import type { DerivedHealthState, RuntimeStatusRow, SettingsJumpTarget } from '../app/types';
+import { resolveUserMessage } from '../app/displayHelpers';
 
 type UseProviderStatusViewModelInput = {
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -188,7 +189,7 @@ export function useProviderStatusViewModel(input: UseProviderStatusViewModelInpu
         : configuredAcceleration === 'cpu'
           ? t('disabledShort')
           : t('notRequired');
-    const fasterWhisperCudaDetail = fasterWhisperCudaStatus?.message ?? t('runtimeNotChecked');
+    const fasterWhisperCudaDetail = resolveUserMessage(fasterWhisperCudaStatus, t, 'runtimeNotChecked');
     const fasterWhisperCudaShort = fasterWhisperCudaStatus
       ? fasterWhisperCudaStatus.cudaSupported
         ? t('ok')
@@ -364,7 +365,7 @@ function deriveTranslationState(input: {
 }): DerivedHealthState {
   const { t, description, health, job } = input;
   if (job?.stage === 'failed' && job.error && job.step === 'translate') {
-    return { tone: 'error', label: t('error'), detail: job.error.message };
+    return { tone: 'error', label: t('error'), detail: resolveUserMessage(job.error, t, 'error') };
   }
   if (!health) {
     return {
@@ -377,13 +378,13 @@ function deriveTranslationState(input: {
     return {
       tone: 'good',
       label: t(providerStatusLabel(health.status)),
-      detail: health.message ?? t('providerReady')
+      detail: resolveUserMessage(health, t, 'providerReady')
     };
   }
   return {
     tone: health.status === 'degraded' ? 'warn' : 'error',
     label: t(providerStatusLabel(health.status)),
-    detail: health.message ?? t(providerStatusLabel(health.status))
+    detail: resolveUserMessage(health, t, providerStatusLabel(health.status))
   };
 }
 
@@ -400,7 +401,7 @@ function deriveAsrProviderState(input: {
     return runtimeState;
   }
   if (job?.stage === 'failed' && job.error && (job.step === 'asr' || job.step === 'subtitles')) {
-    return { tone: 'error', label: t('error'), detail: job.error.message };
+    return { tone: 'error', label: t('error'), detail: resolveUserMessage(job.error, t, 'error') };
   }
   if (!health) {
     return {
@@ -413,13 +414,13 @@ function deriveAsrProviderState(input: {
     return {
       tone: 'good',
       label: t(providerStatusLabel(health.status)),
-      detail: health.message ?? description
+      detail: resolveUserMessage(health, t) || description
     };
   }
   return {
     tone: health.status === 'degraded' ? 'warn' : 'error',
     label: t(providerStatusLabel(health.status)),
-    detail: health.message ?? description
+    detail: resolveUserMessage(health, t) || description
   };
 }
 
@@ -524,7 +525,7 @@ function deriveRuntimeState(input: {
 }): DerivedHealthState {
   const { t, runtimeStatus, ffmpegStatus, nativeHealth, asrProviderId, asrHealth, job } = input;
   if (job?.stage === 'failed' && job.error && (job.step === 'asr' || job.step === 'subtitles')) {
-    return { tone: 'error', label: t('error'), detail: job.error.message };
+    return { tone: 'error', label: t('error'), detail: resolveUserMessage(job.error, t, 'error') };
   }
   const ffmpegAvailable = ffmpegStatus?.available ?? Boolean(nativeHealth?.ffmpegAvailable && nativeHealth?.ffprobeAvailable);
   if (!ffmpegAvailable) {
@@ -546,13 +547,13 @@ function deriveRuntimeState(input: {
       return {
         tone: 'good',
         label: t(providerStatusLabel(asrHealth.status)),
-        detail: asrHealth.message ?? t('providerReady')
+        detail: resolveUserMessage(asrHealth, t, 'providerReady')
       };
     }
     return {
       tone: asrHealth.status === 'degraded' ? 'warn' : 'error',
       label: t(providerStatusLabel(asrHealth.status)),
-      detail: asrHealth.message ?? t('fasterWhisperPythonDetail')
+      detail: resolveUserMessage(asrHealth, t, 'fasterWhisperPythonDetail')
     };
   }
   if (asrProviderId !== 'local.whisper.cpp') {
@@ -567,13 +568,13 @@ function deriveRuntimeState(input: {
       return {
         tone: 'good',
         label: t(providerStatusLabel(asrHealth.status)),
-        detail: asrHealth.message ?? t('cloudProviderDetail')
+        detail: resolveUserMessage(asrHealth, t, 'cloudProviderDetail')
       };
     }
     return {
       tone: asrHealth.status === 'degraded' ? 'warn' : 'error',
       label: t(providerStatusLabel(asrHealth.status)),
-      detail: asrHealth.message ?? t('cloudProviderDetail')
+      detail: resolveUserMessage(asrHealth, t, 'cloudProviderDetail')
     };
   }
   if (!runtimeStatus) {
@@ -816,7 +817,7 @@ function describeCudaStatusDetail(
   if (!status.acceleration.hardwareDetected) {
     return t('cudaNoHardware');
   }
-  return status.message ?? fallbackReasonLabel(status.acceleration.fallbackReason, t, 'cuda');
+  return resolveUserMessage(status, t) || fallbackReasonLabel(status.acceleration.fallbackReason, t, 'cuda');
 }
 
 function describeWhisperAccelerationDetail(

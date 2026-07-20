@@ -8,11 +8,13 @@ import {
   formatWarningTimeline,
   warningCategoryLabel,
   warningSourceLabel,
-  warningSummaryLabel
+  warningSummaryLabel,
+  resolveTechnicalMessage,
+  resolveUserMessage
 } from '../../app/displayHelpers';
 
 type WarningPanelProps = {
-  t: (key: string) => string;
+  t: (key: string, options?: Record<string, unknown>) => string;
   warnings: SubtitleWarning[];
   selectedWarning?: SubtitleWarning;
   asrProviderId: string;
@@ -64,7 +66,7 @@ export function WarningPanel(props: WarningPanelProps): JSX.Element {
                   <strong>{warningSummaryLabel(warning, props.t)}</strong>
                   <span className="warningPill">{warningCategoryLabel(warning, props.t)}</span>
                 </div>
-                <small>{warning.message}</small>
+                <small>{resolveUserMessage(warning, props.t)}</small>
                 <div className="warningItemMeta">
                   <span>{warningSourceLabel(warning, props.asrProviderId, props.translationProviderId, props.t)}</span>
                   {formatWarningSegmentRange(warning) !== '--' && <span>{formatWarningSegmentRange(warning)}</span>}
@@ -79,7 +81,7 @@ export function WarningPanel(props: WarningPanelProps): JSX.Element {
           <span className="signal warn" />
           <div>
             <strong>{warningSummaryLabel(props.selectedWarning, props.t)}</strong>
-            <small>{props.selectedWarning.message}</small>
+            <small>{resolveUserMessage(props.selectedWarning, props.t)}</small>
           </div>
         </div>
         <div className="warningDetailBadges">
@@ -88,6 +90,12 @@ export function WarningPanel(props: WarningPanelProps): JSX.Element {
             {warningSourceLabel(props.selectedWarning, props.asrProviderId, props.translationProviderId, props.t)}
           </span>
         </div>
+        {props.selectedWarning.userMessage?.technicalMessage && (
+          <details>
+            <summary>{props.t('technicalDetails')}</summary>
+            <small>{resolveTechnicalMessage(props.selectedWarning)}</small>
+          </details>
+        )}
         <div className="warningMetaGrid">
           <div className="warningMetaCard">
             <span>{props.t('warningType')}</span>

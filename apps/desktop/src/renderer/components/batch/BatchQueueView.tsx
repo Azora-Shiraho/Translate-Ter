@@ -2,6 +2,7 @@ import React from 'react';
 import { Layers, Play, Plus, XCircle, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { useBatchViewModel } from '../../viewModels/useBatchViewModel';
+import { resolveUserMessage } from '../../app/displayHelpers';
 
 type BatchQueueViewProps = {
   batchVm: ReturnType<typeof useBatchViewModel>;
@@ -120,9 +121,9 @@ export function BatchQueueView({ batchVm, workspaceRunning }: BatchQueueViewProp
                       </div>
                     )}
 
-                    {item.message && (
+                    {(item.message || item.userMessage) && (
                       <div style={{ fontSize: '13px', color: 'var(--tt-text-muted)', marginTop: item.status === 'running' ? '4px' : '0' }}>
-                        {item.message}
+                        {resolveUserMessage(item, t, item.error ? 'error' : undefined)}
                       </div>
                     )}
                   </div>

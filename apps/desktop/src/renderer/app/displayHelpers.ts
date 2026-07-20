@@ -11,10 +11,79 @@ import type {
   WhisperModelStatus,
   WhisperRuntimeStatus
 } from '@shared/types';
+import type { UserMessageDescriptor } from '@shared/models';
 import { getProviderCatalogEntry } from '@shared/providers/catalog';
 import type { JobStage } from '@shared/models';
 import { formatTimestamp } from '@shared/srt';
 import type { ActiveDownload } from './types';
+
+type TranslateMessage = (key: string, options?: Record<string, unknown>) => string;
+
+export type UserMessageInput = {
+  message?: string;
+  userMessage?: UserMessageDescriptor;
+} | string | undefined;
+
+const LEGACY_MESSAGE_KEYS: Record<string, string> = {
+  '请先填写 API Key。': 'runtimeMessage.providerApiKeyMissing',
+  'API key is not configured.': 'runtimeMessage.providerApiKeyMissing',
+  'Batch item started.': 'runtimeMessage.batchStarted',
+  'Batch item cancelled.': 'runtimeMessage.batchCancelled',
+  'Batch item cancelled before it started.': 'runtimeMessage.batchCancelledBeforeStart',
+  'Exporting subtitle file.': 'runtimeMessage.batchExporting',
+  'Provider circuit is open.': 'runtimeMessage.providerCircuitOpen',
+  'Selected whisper model is ready.': 'modelReady',
+  'Downloading FFmpeg tools.': 'ffmpegDownloading',
+  'Checking downloaded FFmpeg files.': 'ffmpegVerifying',
+  'Extracting FFmpeg tools.': 'ffmpegExtracting',
+  'FFmpeg tools are ready.': 'ffmpegReady',
+  'Downloading local Whisper files.': 'runtimeDownloading',
+  'Checking downloaded Whisper files.': 'runtimeVerifying',
+  'Preparing local Whisper files.': 'runtimeExtracting',
+  'Local Whisper files are ready.': 'runtimeReady',
+  'Downloading Whisper model.': 'runtimeMessage.modelDownloading',
+  'Checking downloaded model file.': 'runtimeMessage.modelVerifying',
+  'Model download complete.': 'runtimeMessage.modelReady',
+  'The local faster-whisper environment is ready.': 'runtimeMessage.fasterWhisperReady',
+  'Downloading the local recognition environment.': 'runtimeMessage.fasterWhisperDownloading',
+  'Checking the downloaded local environment.': 'runtimeMessage.fasterWhisperVerifying',
+  'Preparing the local recognition environment.': 'runtimeMessage.fasterWhisperExtracting'
+};
+
+export function resolveUserMessage(
+  input: UserMessageInput,
+  t: TranslateMessage,
+  fallbackKey?: string
+): string {
+  const value = typeof input === 'string' ? { message: input } : input;
+  const descriptor = value?.userMessage;
+  if (descriptor?.messageKey) {
+    const translated = t(descriptor.messageKey, descriptor.messageParams);
+    if (translated && translated !== descriptor.messageKey) return translated;
+  }
+
+  const rawMessage = value?.message?.trim();
+  if (rawMessage) {
+    const legacyKey = LEGACY_MESSAGE_KEYS[rawMessage];
+    if (legacyKey) {
+      const translated = t(legacyKey);
+      if (translated && translated !== legacyKey) return translated;
+    }
+  }
+
+  if (rawMessage) return rawMessage;
+
+  if (fallbackKey) {
+    const fallback = t(fallbackKey);
+    if (fallback && fallback !== fallbackKey) return fallback;
+  }
+  return '';
+}
+
+export function resolveTechnicalMessage(input: UserMessageInput): string {
+  const value = typeof input === 'string' ? { message: input } : input;
+  return value?.userMessage?.technicalMessage?.trim() || value?.message?.trim() || '';
+}
 
 export function stageLabel(stage: JobStage): string {
   return `stage.${stage}`;
@@ -269,9 +338,9 @@ export function deriveWorkspaceRuntimeDetail(input: {
     return input.t('ffmpegMissingDetail');
   }
   if (input.asrProviderId === 'local.faster-whisper') {
-    return input.asrHealth?.message ?? input.t('fasterWhisperPythonDetail');
+    return resolveUserMessage(input.asrHealth, input.t, 'fasterWhisperPythonDetail');
   }
-  return input.asrHealth?.message ?? input.t('cloudProviderDetail');
+  return resolveUserMessage(input.asrHealth, input.t, 'cloudProviderDetail');
 }
 
 function isSubtitleWarningCode(code: string): boolean {

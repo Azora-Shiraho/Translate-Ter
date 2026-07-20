@@ -360,6 +360,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
             
             <div style={{ borderTop: '1px solid var(--tt-border-soft)', paddingTop: '20px' }}>
               <ProviderCard
+                t={t}
                 activeId={settings.asrProviderId}
                 title={providerLabel(settings.asrProviderId, t)}
                 detail={statusVm.asrProviderState.detail}
@@ -700,6 +701,7 @@ export function SettingsView(props: SettingsViewProps): JSX.Element | null {
             </CustomSelect>
             <div style={{ borderTop: '1px solid var(--tt-border-soft)', paddingTop: '20px' }}>
               <ProviderCard
+                t={t}
                 activeId={statusVm.translationProviderId}
                 title={providerLabel(statusVm.translationProviderId, t)}
                 detail={t('translationProviderDetail')}

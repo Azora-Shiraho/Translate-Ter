@@ -18,7 +18,8 @@ describe('providerHealth', () => {
     ).resolves.toMatchObject({
       providerId: 'openai.compatible',
       ok: false,
-      status: 'unconfigured'
+      status: 'unconfigured',
+      userMessage: { messageKey: 'runtimeMessage.providerApiKeyMissing' }
     });
   });
 
@@ -46,7 +47,11 @@ describe('providerHealth', () => {
       providerId: 'openai.compatible',
       ok: false,
       status: 'degraded',
-      message: expect.stringContaining('限流')
+      message: 'HTTP 429: slow down',
+      userMessage: {
+        messageKey: 'runtimeMessage.providerRateLimited',
+        technicalMessage: 'HTTP 429: slow down'
+      }
     });
   });
 

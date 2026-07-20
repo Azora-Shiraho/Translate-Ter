@@ -6,10 +6,18 @@ export type SubtitleStatus =
   | 'warning'
   | 'failed';
 
+export type UserMessageDescriptor = {
+  messageKey: string;
+  messageParams?: Record<string, string | number | boolean | null | undefined>;
+  technicalMessage?: string;
+  details?: Record<string, unknown>;
+};
+
 export type SubtitleWarning = {
   id?: string;
   code: string;
   message: string;
+  userMessage?: UserMessageDescriptor;
   segmentId?: string;
   stage?: 'asr' | 'translate' | 'export' | 'subtitle';
   createdAt?: string;
@@ -99,6 +107,7 @@ export type ProviderHealth = {
   ok: boolean;
   status: 'healthy' | 'degraded' | 'unconfigured' | 'unavailable';
   message?: string;
+  userMessage?: UserMessageDescriptor;
   acceleration?: ProviderAccelerationStatus;
 };
 
@@ -154,6 +163,7 @@ export type WhisperModelStatus = {
   verified: boolean;
   actionRequired?: 'download-model' | 'manifest-not-configured' | 'none';
   message?: string;
+  userMessage?: UserMessageDescriptor;
 };
 
 export type WhisperRuntimeStatus = {
@@ -192,6 +202,7 @@ export type WhisperRuntimeStatus = {
     | 'download-required'
     | 'none';
   message?: string;
+  userMessage?: UserMessageDescriptor;
 };
 
 export type CreateJobRequest = {
@@ -257,6 +268,7 @@ export type JobSnapshot = {
     code: string;
     message: string;
     retryable: boolean;
+    userMessage?: UserMessageDescriptor;
   };
   warnings: SubtitleWarning[];
   createdAt: string;
@@ -265,8 +277,8 @@ export type JobSnapshot = {
 
 export type JobEvent =
   | { type: 'snapshot'; job: JobSnapshot }
-  | { type: 'progress'; jobId: string; stage: JobStage; progress: number; message?: string }
-  | { type: 'error'; jobId: string; code: string; message: string; retryable: boolean };
+  | { type: 'progress'; jobId: string; stage: JobStage; progress: number; message?: string; userMessage?: UserMessageDescriptor }
+  | { type: 'error'; jobId: string; code: string; message: string; retryable: boolean; userMessage?: UserMessageDescriptor };
 
 export type BatchJobItemStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -286,10 +298,12 @@ export type BatchJobItemSnapshot = {
   progress: number;
   autoTranslate: boolean;
   message?: string;
+  userMessage?: UserMessageDescriptor;
   error?: {
     code: string;
     message: string;
     retryable: boolean;
+    userMessage?: UserMessageDescriptor;
   };
   createdAt: string;
   updatedAt: string;
@@ -313,17 +327,17 @@ export type BatchQueueSnapshot = {
 export type BatchQueueEvent =
   | { type: 'snapshot'; queue: BatchQueueSnapshot }
   | { type: 'item'; queueId: string; item: BatchJobItemSnapshot }
-  | { type: 'error'; queueId: string; itemId: string; code: string; message: string; retryable: boolean };
+  | { type: 'error'; queueId: string; itemId: string; code: string; message: string; retryable: boolean; userMessage?: UserMessageDescriptor };
 
 export type SettingsEvent = { type: 'changed'; settings: AppSettingsPublic };
 
 export type AssetEvent =
-  | { type: 'download-start'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string }
-  | { type: 'download-progress'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string; receivedBytes?: number; totalBytes?: number }
-  | { type: 'verify'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string }
-  | { type: 'extract'; scope: 'runtime' | 'ffmpeg'; message: string }
-  | { type: 'ready'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string }
-  | { type: 'error'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string };
+  | { type: 'download-start'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string; userMessage?: UserMessageDescriptor }
+  | { type: 'download-progress'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string; receivedBytes?: number; totalBytes?: number; userMessage?: UserMessageDescriptor }
+  | { type: 'verify'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string; userMessage?: UserMessageDescriptor }
+  | { type: 'extract'; scope: 'runtime' | 'ffmpeg'; message: string; userMessage?: UserMessageDescriptor }
+  | { type: 'ready'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string; userMessage?: UserMessageDescriptor }
+  | { type: 'error'; scope: 'runtime' | 'model' | 'ffmpeg'; message: string; userMessage?: UserMessageDescriptor };
 
 export type FfmpegRequest = {
   allowDownload: boolean;
@@ -361,6 +375,7 @@ export type FasterWhisperCudaStatus = {
   requiredCudaVersion: '12.8';
   actionRequired?: 'download-cuda-runtime' | 'none';
   message?: string;
+  userMessage?: UserMessageDescriptor;
 };
 
 export type FfmpegStatus = {
@@ -373,6 +388,8 @@ export type FfmpegStatus = {
   available: boolean;
   source: 'managed' | 'system' | 'missing';
   actionRequired?: 'download-required' | 'none';
+  message?: string;
+  userMessage?: UserMessageDescriptor;
 };
 
 export type NativeAcceleratorHealth = {

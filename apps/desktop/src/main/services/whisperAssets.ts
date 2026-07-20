@@ -17,6 +17,7 @@ import type {
   WhisperRuntimeStatus
 } from '@shared/models';
 import { legacyWhisperCudaRuntimeDirs, sharedCudaRuntimeDir } from './cudaRuntimePaths';
+import { withAssetUserMessage } from './runtimeUserMessages';
 import {
   type RuntimeResolution
 } from './runtimeResolver';
@@ -575,21 +576,27 @@ export class WhisperAssetManager extends EventEmitter {
     scope: 'runtime' | 'model',
     url: string,
     destination: string,
-    useMultiThreadDownload = false
+    useMultiThreadDownload = false,
+    progressMessage = scope === 'runtime' ? 'Downloading local Whisper files...' : 'Downloading Whisper model...'
   ): Promise<void> {
     if (useMultiThreadDownload) {
       try {
-        const downloaded = await this.downloadHttpSegmented(scope, url, destination);
+        const downloaded = await this.downloadHttpSegmented(scope, url, destination, progressMessage);
         if (downloaded) return;
       } catch {
         await this.removePathWithRetry(destination);
       }
     }
 
-    await this.downloadHttpSingle(scope, url, destination);
+    await this.downloadHttpSingle(scope, url, destination, progressMessage);
   }
 
-  private async downloadHttpSingle(scope: 'runtime' | 'model', url: string, destination: string): Promise<void> {
+  private async downloadHttpSingle(
+    scope: 'runtime' | 'model',
+    url: string,
+    destination: string,
+    progressMessage: string
+  ): Promise<void> {
     const response = await fetch(url);
     if (!response.ok || !response.body) {
       this.emitAsset({ type: 'error', scope, message: `Download failed (HTTP ${response.status}).` });
@@ -630,7 +637,7 @@ export class WhisperAssetManager extends EventEmitter {
             this.emitAsset({
               type: 'download-progress',
               scope,
-              message: scope === 'runtime' ? 'Downloading local Whisper files...' : 'Downloading Whisper model...',
+              message: progressMessage,
               receivedBytes,
               totalBytes: Number.isFinite(totalBytes) && totalBytes > 0 ? totalBytes : undefined
             });
@@ -651,7 +658,12 @@ export class WhisperAssetManager extends EventEmitter {
     });
   }
 
-  private async downloadHttpSegmented(scope: 'runtime' | 'model', url: string, destination: string): Promise<boolean> {
+  private async downloadHttpSegmented(
+    scope: 'runtime' | 'model',
+    url: string,
+    destination: string,
+    progressMessage: string
+  ): Promise<boolean> {
     const plan = await this.segmentedDownloadPlan(url);
     if (!plan) return false;
 
@@ -664,7 +676,7 @@ export class WhisperAssetManager extends EventEmitter {
         this.emitAsset({
           type: 'download-progress',
           scope,
-          message: scope === 'runtime' ? 'Downloading local Whisper files...' : 'Downloading Whisper model...',
+          message: progressMessage,
           receivedBytes,
           totalBytes: plan.totalBytes
         });
@@ -770,7 +782,11 @@ export class WhisperAssetManager extends EventEmitter {
         runtimeVariant: runtimeAcceleration,
         fallbackReason: resolution.fallbackReason
       },
-      ...extra
+      ...extra,
+      userMessage: {
+        messageKey: extra.actionRequired === 'none' ? 'runtimeReady' : `runtimeAction.${extra.actionRequired}`,
+        technicalMessage: extra.message
+      }
     };
   }
 
@@ -1124,7 +1140,7 @@ export class WhisperAssetManager extends EventEmitter {
   }
 
   private emitAsset(event: AssetEvent): void {
-    this.emit('asset-event', event);
+    this.emit('asset-event', withAssetUserMessage(event));
   }
 
   private async migrateLegacyCacheIfNeeded(): Promise<void> {
@@ -1176,7 +1192,8 @@ export class WhisperAssetManager extends EventEmitter {
       'runtime',
       `${NVIDIA_CUDA_REDIST_BASE_URL}${packageInfo.relative_path}`,
       archivePath,
-      useMultiThreadDownload
+      useMultiThreadDownload,
+      'Downloading CUDA components...'
     );
 
     this.emitAsset({ type: 'verify', scope: 'runtime', message: 'Checking downloaded CUDA components.' });
@@ -1247,7 +1264,11 @@ export class WhisperAssetManager extends EventEmitter {
       expectedPath: isAbsolute(modelPath) ? modelPath : join(this.cacheDir(), modelPath),
       installed,
       verified,
-      ...extra
+      ...extra,
+      userMessage: {
+        messageKey: verified ? 'modelReady' : `runtimeAction.${extra.actionRequired}`,
+        technicalMessage: extra.message
+      }
     };
   }
 }

@@ -1,4 +1,4 @@
-import type { ProviderHealth, ProviderSecretInput } from '@shared/models';
+import type { ProviderHealth, ProviderSecretInput, UserMessageDescriptor } from '@shared/models';
 import type { ScopedLogger } from './logger';
 
 type OpenAICompatibleProviderCheckInput = {
@@ -20,7 +20,8 @@ export async function testOpenAICompatibleProvider(
       providerId: input.providerId,
       ok: false,
       status: 'unconfigured',
-      message: '请先填写 API Key。'
+      message: 'API key is not configured.',
+      userMessage: { messageKey: 'runtimeMessage.providerApiKeyMissing' }
     };
   }
 
@@ -48,7 +49,7 @@ export async function testOpenAICompatibleProvider(
 
     if (!response.ok) {
       const responseText = await response.text().catch(() => '');
-      const message = providerHttpErrorMessage(response.status, responseText);
+      const { message, userMessage } = providerHttpErrorMessage(response.status, responseText);
       input.logger?.warn('provider-health.check.failed', message, {
         providerId: input.providerId,
         status: response.status,
@@ -58,7 +59,8 @@ export async function testOpenAICompatibleProvider(
         providerId: input.providerId,
         ok: false,
         status: providerHealthStatusForHttp(response.status),
-        message
+        message,
+        userMessage
       };
     }
 
@@ -70,7 +72,7 @@ export async function testOpenAICompatibleProvider(
       : [];
 
     if (model && availableModelIds.length > 0 && !availableModelIds.includes(model)) {
-      const message = `连接成功，但当前服务里没有模型“${model}”。`;
+      const message = `Connected, but model "${model}" is not available.`;
       input.logger?.warn('provider-health.check.model-missing', message, {
         providerId: input.providerId,
         model,
@@ -80,13 +82,18 @@ export async function testOpenAICompatibleProvider(
         providerId: input.providerId,
         ok: false,
         status: 'degraded',
-        message
+        message,
+        userMessage: {
+          messageKey: 'runtimeMessage.providerModelMissing',
+          messageParams: { model },
+          technicalMessage: message
+        }
       };
     }
 
     const message = model
-      ? `连接成功，当前可以访问模型“${model}”。`
-      : '连接成功，服务可用。';
+      ? `Connected successfully. Model "${model}" is available.`
+      : 'Connected successfully. The service is available.';
     input.logger?.info('provider-health.check.ready', message, {
       providerId: input.providerId,
       model,
@@ -96,10 +103,13 @@ export async function testOpenAICompatibleProvider(
       providerId: input.providerId,
       ok: true,
       status: 'healthy',
-      message
+      message,
+      userMessage: model
+        ? { messageKey: 'runtimeMessage.providerModelReady', messageParams: { model } }
+        : { messageKey: 'runtimeMessage.providerReady' }
     };
   } catch (error) {
-    const message = providerNetworkErrorMessage(error);
+    const { message, userMessage } = providerNetworkErrorMessage(error);
     input.logger?.warn('provider-health.check.error', message, {
       providerId: input.providerId,
       baseUrl,
@@ -109,7 +119,8 @@ export async function testOpenAICompatibleProvider(
       providerId: input.providerId,
       ok: false,
       status: 'unavailable',
-      message
+      message,
+      userMessage
     };
   } finally {
     clearTimeout(timeout);
@@ -146,25 +157,44 @@ function providerHealthStatusForHttp(status: number): ProviderHealth['status'] {
   return 'degraded';
 }
 
-function providerHttpErrorMessage(status: number, responseText: string): string {
+function providerHttpErrorMessage(
+  status: number,
+  responseText: string
+): { message: string; userMessage: UserMessageDescriptor } {
   const detail = parseProviderErrorDetail(responseText);
+  const technicalMessage = detail ? `HTTP ${status}: ${detail}` : `HTTP ${status}`;
   if (status === 401 || status === 403) {
-    return detail
-      ? `服务拒绝了这组凭据：${detail}`
-      : '服务拒绝了这组凭据。请检查 API Key。';
+    return {
+      message: technicalMessage,
+      userMessage: { messageKey: 'runtimeMessage.providerCredentialsRejected', technicalMessage }
+    };
   }
   if (status === 404) {
-    return detail
-      ? `服务地址可访问，但没有找到对应接口：${detail}`
-      : '服务地址可访问，但没有找到模型列表接口。请检查 Base URL。';
+    return {
+      message: technicalMessage,
+      userMessage: { messageKey: 'runtimeMessage.providerEndpointMissing', technicalMessage }
+    };
   }
   if (status === 429) {
-    return detail ? `服务暂时限流：${detail}` : '服务暂时限流，当前无法完成测试。';
+    return {
+      message: technicalMessage,
+      userMessage: { messageKey: 'runtimeMessage.providerRateLimited', technicalMessage }
+    };
   }
   if (status >= 500) {
-    return detail ? `服务暂时不可用：${detail}` : '服务暂时不可用，请稍后再试。';
+    return {
+      message: technicalMessage,
+      userMessage: { messageKey: 'runtimeMessage.providerUnavailable', technicalMessage }
+    };
   }
-  return detail ? `服务返回异常：${detail}` : `服务返回异常（HTTP ${status}）。`;
+  return {
+    message: technicalMessage,
+    userMessage: {
+      messageKey: 'runtimeMessage.providerHttpError',
+      messageParams: { status },
+      technicalMessage
+    }
+  };
 }
 
 function parseProviderErrorDetail(responseText: string): string | undefined {
@@ -185,20 +215,22 @@ function parseProviderErrorDetail(responseText: string): string | undefined {
   return compact.length > 180 ? `${compact.slice(0, 180)}...` : compact;
 }
 
-function providerNetworkErrorMessage(error: unknown): string {
+function providerNetworkErrorMessage(error: unknown): { message: string; userMessage: UserMessageDescriptor } {
   if (error instanceof Error) {
+    const technicalMessage = `${error.name}: ${error.message}`;
     if (error.name === 'AbortError') {
-      return '连接服务超时。请检查 Base URL 是否正确，或稍后再试。';
+      return { message: technicalMessage, userMessage: { messageKey: 'runtimeMessage.providerTimeout', technicalMessage } };
     }
     if (error.message.includes('Failed to parse URL')) {
-      return 'Base URL 格式不正确。';
+      return { message: technicalMessage, userMessage: { messageKey: 'runtimeMessage.providerInvalidBaseUrl', technicalMessage } };
     }
     if (error.message.includes('fetch failed')) {
-      return '无法连接到这个服务地址。请检查 Base URL、网络，或确认服务已经启动。';
+      return { message: technicalMessage, userMessage: { messageKey: 'runtimeMessage.providerConnectionFailed', technicalMessage } };
     }
-    return `测试连接失败：${error.message}`;
+    return { message: technicalMessage, userMessage: { messageKey: 'runtimeMessage.providerCheckFailed', technicalMessage } };
   }
-  return '测试连接失败。';
+  const technicalMessage = String(error);
+  return { message: technicalMessage, userMessage: { messageKey: 'runtimeMessage.providerCheckFailed', technicalMessage } };
 }
 
 function isNonEmptyString(value: string | undefined): value is string {
