@@ -162,6 +162,7 @@ npm run smoke:native
 - [Batch Workflow](docs/issue-16-batch-workflow.md)
 - [Logging](docs/logging.md)
 - [Platform Validation Checklist](docs/platform-validation.md)
+- [Version Management](docs/version-management.md)
 - [Native Protocol Contract](contracts/native-protocol.md)
 
 ---
@@ -324,4 +325,5 @@ npm run smoke:native
 - [批量工作流](docs/issue-16-batch-workflow.md)
 - [日志系统](docs/logging.md)
 - [平台验证清单](docs/platform-validation.md)
+- [版本号管理规范](docs/version-management.md)
 - [原生协议契约](contracts/native-protocol.md)

@@ -33,6 +33,9 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Validate version policy
+        run: npm run test:version && npm run version:check
+
       - name: Build desktop app
         run: npm run build
 

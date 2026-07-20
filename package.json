@@ -1,6 +1,6 @@
 {
   "name": "translate-ter",
-  "version": "2.2.0",
+  "version": "2.3.0-beta.1",
   "description": "Local-first desktop workflow for transcription, subtitle editing, and translation.",
   "license": "MIT",
   "main": "out/main/index.js",
@@ -13,6 +13,10 @@
     "smoke:native": "node scripts/smoke-native-backend.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:version": "node --test scripts/version-policy.test.mjs",
+    "version:recommend": "node scripts/version.mjs recommend",
+    "version:check": "node scripts/version.mjs check",
+    "version:set": "node scripts/version.mjs set",
     "native:deps": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ensure-webview2.ps1",
     "native:configure": "node scripts/build-native.mjs --configure-only",
     "native:build": "node scripts/build-native.mjs"
